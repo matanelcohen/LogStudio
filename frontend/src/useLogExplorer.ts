@@ -35,7 +35,14 @@ export function useLiveStatus(paused: boolean) {
         const next = readStatus(value);
         if (latest.current && next.revision < latest.current.revision) return;
         const cleared = next.clearedThroughId > (latest.current?.clearedThroughId ?? 0);
-        if (paused && !cleared) return;
+        if (paused && !cleared) {
+          if (latest.current) {
+            latest.current = { ...latest.current, applicationName: next.applicationName, revision: next.revision };
+          }
+          setStatus(status => status === null ? next : status.applicationName === next.applicationName ? status :
+            { ...status, applicationName: next.applicationName, revision: next.revision });
+          return;
+        }
         if (!cleared && resumeThrough.current !== null && next.firstId > resumeThrough.current + 1)
           setGap("Some entries expired under the explicit retention limit while this tab was disconnected.");
         resumeThrough.current = null;
@@ -64,11 +71,7 @@ export function useLiveStatus(paused: boolean) {
     latest.current = next;
     setStatus(next);
   }, []);
-  const rename = useCallback((applicationName: string) => {
-    if (latest.current) latest.current = { ...latest.current, applicationName };
-    setStatus(status => status ? { ...status, applicationName } : status);
-  }, []);
-  return { status, connection, error, gap, reconnect, applyStatus, rename };
+  return { status, connection, error, gap, reconnect, applyStatus };
 }
 
 export function useLogPage(query: QueryState, cursor: PageCursor, maximumId: number | null, revision: number, paused: boolean, clearedThroughId = 0) {

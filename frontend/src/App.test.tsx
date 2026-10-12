@@ -1,17 +1,18 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { useLogPage } from "./useLogExplorer";
+import { Status } from "./test-fixtures";
+import { useLiveStatus, useLogPage } from "./useLogExplorer";
 
-const liveRename = vi.hoisted(() => vi.fn());
+const reconnect = vi.hoisted(() => vi.fn());
 
 vi.mock("./useLogExplorer", async () => {
   const { Status, fixturePage } = await import("./test-fixtures");
   return {
-    useLiveStatus: () => ({
+    useLiveStatus: vi.fn(() => ({
       status: Status, connection: "live", error: null, gap: null,
-      reconnect: vi.fn(), applyStatus: vi.fn(), rename: liveRename
-    }),
+      reconnect, applyStatus: vi.fn()
+    })),
     useLogPage: vi.fn(() => ({ page: fixturePage(), loading: false, error: null, refresh: vi.fn() }))
   };
 });
@@ -65,7 +66,7 @@ describe("log-first workspace", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify([current])))
       .mockResolvedValueOnce(new Response(JSON.stringify(renamed)))
       .mockResolvedValueOnce(new Response(JSON.stringify([renamed]))));
-    const { container } = render(<App />);
+    const { container, rerender } = render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Pause" }));
     const maximumId = vi.mocked(useLogPage).mock.calls.at(-1)?.[2];
     fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
@@ -73,8 +74,13 @@ describe("log-first workspace", () => {
     fireEvent.click(screen.getByLabelText("Rename Current run"));
     fireEvent.change(screen.getByLabelText("New session name"), { target: { value: renamed.name } });
     fireEvent.click(screen.getByRole("button", { name: "Save name" }));
-    await waitFor(() => expect(container.querySelector("#applicationName")?.textContent).toBe(renamed.name));
-    expect(liveRename).toHaveBeenCalledWith(renamed.name);
+    await waitFor(() => expect(reconnect).toHaveBeenCalled());
+    vi.mocked(useLiveStatus).mockReturnValueOnce({
+      status: { ...Status, applicationName: "Newest live name", lastId: Status.lastId + 1, revision: Status.revision + 2 },
+      connection: "live", error: null, gap: null, reconnect, applyStatus: vi.fn()
+    });
+    rerender(<App />);
+    expect(container.querySelector("#applicationName")?.textContent).toBe("Newest live name");
     expect(vi.mocked(useLogPage).mock.calls.at(-1)?.[2]).toBe(maximumId);
     fireEvent.click(screen.getByRole("button", { name: "Close sessions" }));
     expect(screen.getByRole("button", { name: "Resume" })).toBeDefined();

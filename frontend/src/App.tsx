@@ -50,7 +50,8 @@ export default function App() {
   const archived = !!query.sessionId;
   const clearedThroughId = archived ? 0 : live.status?.clearedThroughId ?? 0;
   const history = useLogPage(query, cursor, archived ? null : pause?.maximumId ?? null, archived ? 0 : live.status?.revision ?? 0, archived || pause !== null, clearedThroughId);
-  const status = archived ? history.page?.status ?? null : pause?.status && pause.status.clearedThroughId >= clearedThroughId ? pause.status :
+  const status = archived ? history.page?.status ?? null : pause?.status && pause.status.clearedThroughId >= clearedThroughId ?
+    { ...pause.status, applicationName: live.status?.applicationName ?? pause.status.applicationName } :
     live.status ?? history.page?.status ?? null;
   const visibleSelection = selected && selected.id > (status?.clearedThroughId ?? 0) ? selected : null;
 
@@ -251,8 +252,7 @@ export default function App() {
         <SessionsDialog open={sessionsOpen} selected={query.sessionId} onClose={() => setSessionsOpen(false)}
           onRenamed={session => {
             if (session.isCurrent) {
-              live.rename(session.name);
-              setPause(pause => pause?.status ? { ...pause, status: { ...pause.status, applicationName: session.name } } : pause);
+              live.reconnect();
             }
             if (session.isCurrent ? !query.sessionId : query.sessionId === session.id) history.refresh();
           }}
