@@ -24,22 +24,29 @@ internal static class SessionNameGenerator
         lock (Gate)
         {
             HashSet<string> existingNames = new(GeneratedNames, StringComparer.OrdinalIgnoreCase);
-            if (Directory.Exists(sessionsDirectory))
+            try
             {
-                foreach (string directory in Directory.EnumerateDirectories(sessionsDirectory))
+                if (Directory.Exists(sessionsDirectory))
                 {
-                    if (!Guid.TryParseExact(Path.GetFileName(directory), "N", out _)) continue;
-                    try
+                    foreach (string directory in Directory.EnumerateDirectories(sessionsDirectory))
                     {
-                        using FileStream file = File.OpenRead(Path.Combine(directory, "session.json"));
-                        SavedSession? saved = JsonSerializer.Deserialize<SavedSession>(file, ViewerConstants.JsonOptions);
-                        if (saved?.Session?.Name is string savedName) existingNames.Add(savedName);
-                    }
-                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
-                    {
-                        // Unreadable saved metadata must not prevent a new capture from starting.
+                        if (!Guid.TryParseExact(Path.GetFileName(directory), "N", out _)) continue;
+                        try
+                        {
+                            using FileStream file = new(Path.Combine(directory, "session.json"), FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+                            SavedSession? saved = JsonSerializer.Deserialize<SavedSession>(file, ViewerConstants.JsonOptions);
+                            if (saved?.Session?.Name is string savedName) existingNames.Add(savedName);
+                        }
+                        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+                        {
+                            // Unreadable saved metadata must not prevent a new capture from starting.
+                        }
                     }
                 }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // An unavailable catalog still permits ephemeral captures.
             }
 
             name = AvailableName(name, existingNames);

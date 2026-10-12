@@ -76,6 +76,28 @@ public sealed class SessionNameGeneratorTests
         }
     }
 
+    [Fact]
+    public void UnreadableCatalogDoesNotPreventEphemeralCapture()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        string root = Directory.CreateTempSubdirectory("logstudio-name-test-").FullName;
+        try
+        {
+            File.SetUnixFileMode(root, UnixFileMode.UserExecute);
+            using ConsoleLogViewer viewer = ConsoleLogViewer.Start(new ConsoleLogViewerOptions
+            {
+                CaptureConsole = false, SessionsDirectory = root,
+            });
+            viewer.Record("captured without catalog access");
+            Assert.Equal("captured without catalog access", Assert.Single(viewer.GetLogs()).Message);
+        }
+        finally
+        {
+            File.SetUnixFileMode(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            Directory.Delete(root, true);
+        }
+    }
+
     internal static void AssertFriendlyName(string name)
     {
         Assert.Equal(name.ToLowerInvariant(), name);
