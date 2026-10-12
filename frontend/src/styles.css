@@ -562,7 +562,15 @@ mark { background: var(--cp-highlight); color: var(--cp-text); border-radius: 2p
   .logs-scroll { height: 50dvh; min-height: 240px; }
   .details-panel { max-height: 480px; }
 }
+@media (max-width: 1360px) {
+  .workspace-region:has(.copilot-panel):has(.workspace[data-fields="true"][data-inspector="true"]) { flex-direction: column; overflow: auto; }
+  .workspace-region:has(.workspace[data-fields="true"][data-inspector="true"]) .copilot-panel { flex: none; max-height: 40dvh; }
+  .workspace-region:has(.copilot-panel) .workspace[data-fields="true"][data-inspector="true"] { flex: none; min-height: 420px; }
+}
 @media (max-width: 1080px) {
+  .workspace-region:has(.copilot-panel) { flex-direction: column; overflow: auto; }
+  .workspace-region:has(.copilot-panel) .copilot-panel { flex: none; max-height: 40dvh; }
+  .workspace-region:has(.copilot-panel) .workspace { flex: none; min-height: 420px; }
   .copilot-panel { flex-basis: 300px; }
   .workspace[data-inspector="true"] { grid-template-columns: minmax(0, 1fr) 300px; }
   .workspace[data-fields="true"] { grid-template-columns: 160px minmax(0, 1fr); }
