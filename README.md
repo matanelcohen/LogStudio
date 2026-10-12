@@ -20,7 +20,21 @@ Same command. No app changes. One local browser tab.
 The optional timeline shows the **visible page only**, not the full session.
 
 <details>
-<summary>More views: light mode, filters, and mobile</summary>
+<summary>More views: metrics, traces, light mode, filters, and mobile</summary>
+
+### Metrics
+
+![Log Studio's Metrics page with tagged raw measurement charts in dark mode](docs/design/metrics-dark.png)
+
+**See the measurements.** Inspect separate tagged series and recent raw values.
+Shown with synthetic demo telemetry, not production data.
+
+### Traces
+
+![Log Studio's Traces page with selected span details, parent relationships, status, tags, and links in dark mode](docs/design/traces-dark.png)
+
+**Follow the request.** Inspect completed spans, parent relationships, and error details.
+Shown with synthetic demo telemetry, not production data.
 
 ### Light mode
 
