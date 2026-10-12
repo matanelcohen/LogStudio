@@ -20,6 +20,7 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
     private readonly ViewerSettings settings;
     private readonly LogBuffer logs;
     private readonly HttpLogServer server;
+    private readonly TelemetryRecorder telemetry;
     private readonly SessionCatalog sessions;
     private readonly TextWriter originalOut;
     private readonly TextWriter originalError;
@@ -35,11 +36,13 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
         this.originalOut = Console.Out;
         this.originalError = Console.Error;
         this.logs = new LogBuffer(settings);
-        this.sessions = new SessionCatalog(settings);
         bool started = false;
         try
         {
-            this.server = new HttpLogServer(settings, this.logs, this.originalError, this.ClearCore, this.sessions, this.RenameCore);
+            this.sessions = new SessionCatalog(settings);
+            this.telemetry = new TelemetryRecorder(settings);
+            this.server = new HttpLogServer(settings, this.logs, this.originalError, this.ClearCore, this.sessions, this.RenameCore,
+                telemetry: this.telemetry);
             this.flushTask = this.FlushIdleAsync();
             started = true;
         }
@@ -47,6 +50,7 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
         {
             if (!started)
             {
+                this.telemetry?.Dispose();
                 this.logs.Dispose();
                 this.shutdown.Dispose();
             }
@@ -73,22 +77,30 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
             }
 
             ConsoleLogViewer viewer = new(settings);
-            if (settings.CaptureConsole)
+            try
             {
-                Console.SetOut(viewer.CreateCaptureWriter(viewer.originalOut, LogStream.Stdout));
-                viewer.installedOut = Console.Out;
-                Console.SetError(viewer.CreateCaptureWriter(viewer.originalError, LogStream.Stderr));
-                viewer.installedError = Console.Error;
-                activeCapture = viewer;
-            }
+                if (settings.CaptureConsole)
+                {
+                    activeCapture = viewer;
+                    Console.SetOut(viewer.CreateCaptureWriter(viewer.originalOut, LogStream.Stdout));
+                    viewer.installedOut = Console.Out;
+                    Console.SetError(viewer.CreateCaptureWriter(viewer.originalError, LogStream.Stderr));
+                    viewer.installedError = Console.Error;
+                }
 
-            viewer.originalError.WriteLine($"Log Studio: {viewer.Url}");
-            if (settings.OpenBrowser)
+                viewer.originalError.WriteLine($"Log Studio: {viewer.Url}");
+                if (settings.OpenBrowser)
+                {
+                    viewer.OpenBrowser();
+                }
+
+                return viewer;
+            }
+            catch
             {
-                viewer.OpenBrowser();
+                viewer.Dispose();
+                throw;
             }
-
-            return viewer;
         }
     }
 
@@ -202,12 +214,19 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
     /// <param name="exitCode">The child process exit code, if known.</param>
     public void Complete(int? exitCode = null)
     {
-        lock (this.lifecycleGate)
+        try
         {
-            ObjectDisposedException.ThrowIf(this.disposeTask is not null, this);
-            this.FlushWriters();
-            this.logs.Complete(exitCode);
-            this.sessions.Save(this.logs, closing: true);
+            lock (this.lifecycleGate)
+            {
+                ObjectDisposedException.ThrowIf(this.disposeTask is not null, this);
+                this.FlushWriters();
+                this.logs.Complete(exitCode);
+                this.sessions.Save(this.logs, closing: true);
+            }
+        }
+        finally
+        {
+            this.telemetry.Dispose();
         }
     }
 
@@ -264,6 +283,7 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
 
     private async Task DisposeCoreAsync()
     {
+        this.telemetry.Dispose();
         lock (ConsoleCaptureGate)
         {
             if (ReferenceEquals(activeCapture, this))

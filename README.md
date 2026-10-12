@@ -670,7 +670,8 @@ instances. They only capture telemetry the application or runtime actually emits
 | `LOG_STUDIO_TELEMETRY_INTERVAL_MS` | `TelemetryIntervalMilliseconds` | `1000` |
 | `LOG_STUDIO_TELEMETRY_CAPACITY` | `TelemetryCapacity` | `2000` per signal |
 
-Source filters are comma-separated name patterns with `*` wildcards. Prefer narrow filters
+Source filters are comma-separated, case-sensitive name patterns with `*` (any sequence)
+and `?` (one character) wildcards. An empty filter selects no sources. Prefer narrow filters
 for busy applications. The observable-metric interval accepts 100–60000 milliseconds;
 capacity accepts 1–10000 records per signal.
 
@@ -683,10 +684,15 @@ Trace collection requests activity data without forcing the sampled/recorded fla
 still cause activities to be created and increase application overhead.
 
 Telemetry is held separately from logs in bounded, recent **in-memory** buffers. Older records
-are evicted, and dropped-record counts are exposed. Strings, tags, and links are bounded;
+are evicted, and dropped-record counts are exposed. Capture processes at most 10000 records
+per signal per configured interval; excess records are dropped before payload conversion.
+At most 1024 metric instruments are enabled; `suppressedInstruments` reports cap rejections.
+These limits bound collector work, not the execution time of application-provided observable
+callbacks. Strings, tags, and links are bounded;
 this is a development view, not a lossless telemetry archive. GET `<session-url>api/telemetry`
-returns `{ enabled, metrics, spans, droppedMetrics, droppedSpans }`, with at most the latest
-500 records of each signal in chronological capture order. It uses the same loopback,
+returns `{ enabled, metrics, spans, droppedMetrics, droppedSpans, omittedMetrics, omittedSpans, suppressedInstruments }`,
+with at most the latest 500 records of each signal in chronological capture order.
+The omitted counts identify retained records outside that response window. It uses the same loopback,
 secret-URL, and Origin protections as the log APIs. Telemetry tags can contain sensitive data
 and are not redacted.
 

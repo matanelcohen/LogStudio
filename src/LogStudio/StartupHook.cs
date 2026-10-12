@@ -42,6 +42,11 @@ internal static class StartupHook
             FlushEveryEntries = ReadInteger(ViewerConstants.FlushEveryEnvironmentVariable, ViewerConstants.DefaultFlushEveryEntries),
             OpenBrowser = ReadBoolean(ViewerConstants.OpenEnvironmentVariable, false),
             ApplicationName = Environment.GetEnvironmentVariable(ViewerConstants.NameEnvironmentVariable),
+            CaptureTelemetry = ReadBoolean("LOG_STUDIO_TELEMETRY", false),
+            MeterSources = Environment.GetEnvironmentVariable("LOG_STUDIO_METER_SOURCES") ?? "*",
+            ActivitySources = Environment.GetEnvironmentVariable("LOG_STUDIO_ACTIVITY_SOURCES") ?? "*",
+            TelemetryIntervalMilliseconds = ReadInteger("LOG_STUDIO_TELEMETRY_INTERVAL_MS", 1000),
+            TelemetryCapacity = ReadInteger("LOG_STUDIO_TELEMETRY_CAPACITY", 2000),
         });
         AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
     }

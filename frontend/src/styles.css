@@ -1,3 +1,24 @@
+.app [hidden] { display: none !important; }
+.telemetry-workspace { overflow: auto; flex: 1; min-height: 0; padding: 24px; }
+.telemetry-workspace > p { margin: 12px 0; line-height: 1.6; }
+.telemetry-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 16px; }
+.telemetry-card { padding: 18px; margin: 12px 0; border: 1px solid var(--cp-border); border-radius: 8px; background: var(--cp-surface); overflow-wrap: anywhere; }
+.telemetry-card h3, .telemetry-card h4 { margin: 0 0 12px; }
+.telemetry-card h4 { margin-top: 16px; }
+.telemetry-card p { margin: 10px 0; }
+.telemetry-tags { margin: 12px 0; }
+.telemetry-tags > div { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0; }
+.telemetry-tags dt { color: var(--cp-text-muted); }
+.telemetry-tags dd { margin: 0; }
+.telemetry-chart { display: block; width: 100%; color: var(--cp-accent); }
+.telemetry-axis { stroke: var(--cp-border); }
+.telemetry-card summary { cursor: pointer; padding: 8px 0; }
+.telemetry-card table { width: 100%; border-collapse: collapse; text-align: left; }
+.telemetry-card th, .telemetry-card td { padding: 8px; border-bottom: 1px solid var(--cp-border); }
+.telemetry-spans { list-style: none; padding: 0; }
+.telemetry-spans li { display: flex; align-items: flex-start; flex-direction: column; gap: 6px; margin: 12px 0; }
+.telemetry-spans button { white-space: normal; text-align: left; }
+.telemetry-spans button[aria-pressed="true"] { background: var(--cp-accent-soft); outline: 2px solid var(--cp-accent); }
 :root {
   color-scheme: light;
   --cp-bg: #edf1f3;
@@ -563,14 +584,14 @@ mark { background: var(--cp-highlight); color: var(--cp-text); border-radius: 2p
   .details-panel { max-height: 480px; }
 }
 @media (max-width: 1360px) {
-  .workspace-region:has(.copilot-panel):has(.workspace[data-fields="true"][data-inspector="true"]) { flex-direction: column; overflow: auto; }
+  .workspace-region:has(.copilot-panel:not([hidden])):has(.workspace[data-fields="true"][data-inspector="true"]) { flex-direction: column; overflow: auto; }
   .workspace-region:has(.workspace[data-fields="true"][data-inspector="true"]) .copilot-panel { flex: none; max-height: 40dvh; }
-  .workspace-region:has(.copilot-panel) .workspace[data-fields="true"][data-inspector="true"] { flex: none; height: max(420px, 60dvh); min-height: 420px; }
+  .workspace-region:has(.copilot-panel:not([hidden])) .workspace[data-fields="true"][data-inspector="true"] { flex: none; height: max(420px, 60dvh); min-height: 420px; }
 }
 @media (max-width: 1080px) {
-  .workspace-region:has(.copilot-panel) { flex-direction: column; overflow: auto; }
-  .workspace-region:has(.copilot-panel) .copilot-panel { flex: none; max-height: 40dvh; }
-  .workspace-region:has(.copilot-panel) .workspace { flex: none; height: max(420px, 60dvh); min-height: 420px; }
+  .workspace-region:has(.copilot-panel:not([hidden])) { flex-direction: column; overflow: auto; }
+  .workspace-region:has(.copilot-panel:not([hidden])) .copilot-panel { flex: none; max-height: 40dvh; }
+  .workspace-region:has(.copilot-panel:not([hidden])) .workspace { flex: none; height: max(420px, 60dvh); min-height: 420px; }
   .copilot-panel { flex-basis: 300px; }
   .workspace[data-inspector="true"] { grid-template-columns: minmax(0, 1fr) 300px; }
   .workspace[data-fields="true"] { grid-template-columns: 160px minmax(0, 1fr); }
@@ -593,8 +614,8 @@ mark { background: var(--cp-highlight); color: var(--cp-text); border-radius: 2p
   .app { min-height: 100dvh; height: auto; grid-template-rows: auto auto minmax(0,1fr) auto; }
   .workspace, .workspace[data-inspector="true"], .workspace[data-fields="true"], .workspace[data-fields="true"][data-inspector="true"] { grid-template-columns: minmax(0, 1fr); }
   .workspace-region { margin: 0 12px 12px; flex-direction: column; }
-  .workspace-region:has(.copilot-panel) .workspace,
-  .workspace-region:has(.copilot-panel) .workspace[data-fields="true"][data-inspector="true"] { height: auto; }
+  .workspace-region:has(.copilot-panel:not([hidden])) .workspace,
+  .workspace-region:has(.copilot-panel:not([hidden])) .workspace[data-fields="true"][data-inspector="true"] { height: auto; }
   .copilot-panel { flex: none; max-height: 65dvh; }
   .query-region { padding: 20px 12px 12px; }
   .workspace-heading { margin-bottom: 16px; }

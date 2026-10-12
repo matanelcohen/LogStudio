@@ -38,6 +38,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private readonly Func<LogClearResult> clearLogs;
     private readonly Func<string, SessionInfo> renameSession;
     private readonly SessionCatalog sessions;
+    private readonly TelemetryRecorder? telemetry;
     private readonly string pathPrefix;
     private readonly string authority;
     private readonly string contentSecurityPolicy;
@@ -50,13 +51,14 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private readonly ConcurrentDictionary<Task, byte> requests = new();
     private readonly Task acceptTask;
 
-    internal HttpLogServer(ViewerSettings settings, LogBuffer logs, TextWriter diagnostics, Func<LogClearResult> clearLogs, SessionCatalog sessions, Func<string, SessionInfo> renameSession, CopilotCliClient? copilot = null)
+    internal HttpLogServer(ViewerSettings settings, LogBuffer logs, TextWriter diagnostics, Func<LogClearResult> clearLogs, SessionCatalog sessions, Func<string, SessionInfo> renameSession, CopilotCliClient? copilot = null, TelemetryRecorder? telemetry = null)
     {
         this.logs = logs;
         this.diagnostics = diagnostics;
         this.clearLogs = clearLogs;
         this.renameSession = renameSession;
         this.sessions = sessions;
+        this.telemetry = telemetry;
         this.copilot = copilot ?? new CopilotCliClient();
         this.pathPrefix = $"/{Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant()}/";
         string nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(24));
@@ -336,7 +338,30 @@ internal sealed class HttpLogServer : IAsyncDisposable
                 return;
             }
 
-            if (route == ViewerConstants.EventsRoute || route == ViewerConstants.UpdatesRoute)
+            if (route == "api/telemetry")
+            {
+                if (!string.IsNullOrEmpty(request.QueryString[ViewerConstants.SessionIdQuery]))
+                {
+                    await WriteErrorAsync(response, HttpStatusCode.BadRequest, "Telemetry is available only for the current run; omit sessionId.", cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                if (!this.historySlots.Wait(0))
+                {
+                    await WriteErrorAsync(response, HttpStatusCode.TooManyRequests, "Wait for current history requests before reading telemetry.", cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                try
+                {
+                    TelemetrySnapshot snapshot = this.telemetry?.Snapshot() ?? new TelemetrySnapshot(false, [], [], 0, 0, 0, 0, 0);
+                    await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(snapshot, ViewerConstants.JsonOptions),
+                        ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    this.historySlots.Release();
+                }
+            }
+            else if (route == ViewerConstants.EventsRoute || route == ViewerConstants.UpdatesRoute)
             {
                 await this.StreamAsync(context, cancellationToken, route == ViewerConstants.UpdatesRoute).ConfigureAwait(false);
             }

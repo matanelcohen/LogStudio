@@ -3,9 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import { askCopilot, connectCopilot } from "./api";
 import { errorMessage, MaximumChatQuestionLength, NumberFormatter, type ChatMessage, type ViewerStatus } from "./model";
 
-export function CopilotChatPanel({ status, sessionId, onClose, returnFocus }: {
+export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, returnFocus }: {
   status: ViewerStatus | null;
   sessionId: string;
+  hidden?: boolean;
   onClose(): void;
   returnFocus(): void;
 }) {
@@ -52,7 +53,7 @@ export function CopilotChatPanel({ status, sessionId, onClose, returnFocus }: {
     finally { setBusy(false); }
   }
 
-  return <aside className="copilot-panel" aria-labelledby="copilotTitle" onKeyDown={event => {
+  return <aside className="copilot-panel" hidden={hidden} aria-labelledby="copilotTitle" onKeyDown={event => {
     if (event.key === "Escape" && !busy) { event.stopPropagation(); close(); }
   }}>
         <div className="dialog-titlebar"><div className="dialog-icon"><MessageSquare size={21} /></div><div>
