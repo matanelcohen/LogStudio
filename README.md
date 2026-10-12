@@ -95,8 +95,9 @@ dependencies and targeting packs; it does not perform an online package-vulnerab
 
 ## Optional Copilot log chat
 
-Click **Ask Copilot** in the header to ask questions about a snapshot of the selected log page,
-including saved/imported sessions. The feature is off until you explicitly connect and send a question.
+Click **Ask Copilot** in the header to open a chat panel on the left, alongside the log results.
+Chat uses the **full selected session**, including saved/imported sessions, regardless of visible
+filters or paging. The feature is off until you explicitly connect and send a question.
 
 1. Install the current [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli)
    on the **machine running Log Studio**, and run `copilot login` in a terminal. A Copilot entitlement
@@ -104,13 +105,13 @@ including saved/imported sessions. The feature is off until you explicitly conne
 2. Ensure `copilot` is on Log Studio's `PATH` (`copilot.exe` on Windows). Alternatively, set
    `LOG_STUDIO_COPILOT_PATH` to the absolute executable path before launching Log Studio.
    Windows requires the native executable, not a `.cmd`/PowerShell shim. Restart Log Studio after changing it.
-3. Search/filter/page to the records you want to discuss, open **Ask Copilot**, and click
+3. Select the session you want to discuss, open **Ask Copilot**, and click
    **Connect local Copilot**. Connecting only checks the CLI version; it does not send logs.
-4. Review the privacy notice, grant consent, and ask your question. Follow-up questions include
+4. Review the privacy notice and ask your question—there is no approval checkbox. Follow-up questions include
    up to three recent question/answer pairs. **Clear chat** discards the browser conversation;
-   closing and reopening chat starts over with a new page snapshot.
+   closing and reopening chat starts over. Switching sessions resets the conversation.
 
-**Local CLI does not mean local inference.** Questions, selected log text, and recent conversation are
+**Local CLI does not mean local inference.** Questions, session log text read by Copilot, and recent conversation are
 sent to GitHub Copilot's service using your existing CLI authentication. Log text is **not automatically
 redacted**: do not send credentials, secrets, personal data, or other sensitive information.
 The bridge uses an isolated temporary CLI configuration, reusing only authentication state and the
@@ -119,21 +120,24 @@ after each request. Clearing browser chat does not delete provider history.
 No authentication tokens are entered into or stored by the chat UI.
 The rest of Log Studio remains fully offline and does not require Copilot.
 
-Context contains at most the **100 newest entries on the visible page**, not the complete history.
-Each record's message is capped at 2,000 characters and total serialized log context at 24,000 characters;
-the response indicates how many records were used and whether context was truncated.
-Questions are limited to 2,000 characters; answers to 16,000. Filter to a smaller page for detailed analysis.
-The snapshot does not follow new logs; if records are cleared/expired, reopen chat.
+Every question streams all stored records of the selected session into a private temporary JSONL file
+that Copilot can read. There is no 100-record limit or message/context truncation in this file.
+This includes records hidden by the viewer's capacity setting, but records deleted with **Clear logs**
+are unavailable. Each question gets a fresh file containing newly captured logs; its contents stay
+stable while Copilot answers. Files are deleted after the request, including on failures.
+The panel reports how many records are **available**, not how many the model actually read.
+Copilot may read relevant portions of large files rather than load every record into its context window.
+Questions are limited to 2,000 characters; answers to 16,000.
 Answers cite sequence IDs but can be wrong—verify them against the original records.
 
 The bridge launches the CLI directly without a shell, passes context over standard input, uses a
-fresh owner-private temporary working/configuration directory, and limits available tools to the
-file-view tool while explicitly denying read permission. All other model tools are unavailable.
+fresh owner-private temporary working/configuration directories, and limits available tools to the
+file-view tool for reading the session file. All other model tools are unavailable.
 Custom instructions, hooks, built-in MCP servers, and inherited permission/provider opt-ins are disabled;
 user plugins, extensions, and MCP configuration are not copied into the isolated configuration.
 Remote session/export features are disabled (inference still uses Copilot's service).
-It never grants automatic tool approval or lets browser requests choose an
-executable. Current CLI support for these read-only flags is required; unsupported versions fail closed.
+Browser requests cannot choose an executable or a file path. Current CLI support for these read-only
+flags is required; unsupported versions fail closed.
 Only one Copilot request runs at a time. Connection checks time out after 10 seconds; questions after
 two minutes. Closing is disabled while a request runs; stopping Log Studio cancels its owned CLI process.
 
