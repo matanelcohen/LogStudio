@@ -72,6 +72,22 @@ describe("opt-in log chat", () => {
     expect((screen.getByLabelText("Question about these logs") as HTMLTextAreaElement).value).toBe("Keep this question");
   });
 
+  it("bounds outbound history without truncating answers already displayed", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue("test CLI");
+    const longAnswer = `${"Diagnosis ".repeat(300)} See #42 at the end.`;
+    const chat = vi.spyOn(api, "askCopilot")
+      .mockResolvedValueOnce({ answer: longAnswer, contextEntryCount: 1, contextTruncated: false })
+      .mockResolvedValueOnce({ answer: "Follow-up answer", contextEntryCount: 1, contextTruncated: false });
+    render(<CopilotChatDialog page={fixturePage()} sessionId="" onClose={vi.fn()} returnFocus={vi.fn()} />);
+    await connectAndConsent();
+    ask("First question");
+    await screen.findByText(/See #42 at the end/);
+    ask("Follow-up question");
+    await screen.findByText("Follow-up answer");
+    expect(screen.getByRole("log").textContent).toContain(longAnswer);
+    expect(chat.mock.calls[1]?.[3][1]?.content.length).toBe(2000);
+  });
+
   it("prevents duplicate requests and closing while the owned process is running", async () => {
     vi.spyOn(api, "connectCopilot").mockResolvedValue("test CLI");
     let finish: ((value: ChatResponse) => void) | undefined;

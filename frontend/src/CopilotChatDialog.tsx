@@ -38,7 +38,7 @@ export function CopilotChatDialog({ page, sessionId, onClose, returnFocus }: {
     try {
       const history = messages.slice(-6).map(message => ({ ...message, content: message.content.slice(0, MaximumChatQuestionLength) }));
       const response = await askCopilot(sessionId, snapshot.ids, text, history);
-      setMessages([...history, { role: "user", content: text }, { role: "assistant", content: response.answer }]);
+      setMessages([...messages.slice(-6), { role: "user", content: text }, { role: "assistant", content: response.answer }]);
       setQuestion("");
       setContextNote(`${response.contextEntryCount} log records used.${response.contextTruncated ? " Context was truncated; narrow the visible page for more detail." : ""}`);
     } catch (error) { setError(errorMessage(error)); }
