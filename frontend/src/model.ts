@@ -7,6 +7,7 @@ export const RenameActionValue = "rename";
 export const DeleteSessionActionValue = "delete";
 export const CopilotConnectActionValue = "copilot-connect";
 export const CopilotChatActionValue = "copilot-chat";
+export const TelemetryConfigureActionValue = "telemetry-configure";
 export const MaximumChatQuestionLength = 2000;
 export const MaximumChatAnswerLength = 16000;
 export const MaximumChatRequestBytes = 32768;
@@ -19,7 +20,7 @@ export const MaximumConditionValueLength = 256;
 export const MaximumConditionsJsonLength = 4096;
 export const MaximumCategorySuggestions = 1024;
 export const MaximumHighlights = 80;
-export const ApiRoutes = { Search: "api/search", Updates: "api/updates", Export: "api/export", Clear: "api/clear", Sessions: "api/sessions", Import: "api/import", SessionExport: "api/export-session", CopilotConnect: "api/copilot/connect", CopilotChat: "api/copilot/chat" } as const;
+export const ApiRoutes = { Search: "api/search", Updates: "api/updates", Export: "api/export", Clear: "api/clear", Sessions: "api/sessions", Import: "api/import", SessionExport: "api/export-session", CopilotConnect: "api/copilot/connect", CopilotChat: "api/copilot/chat", Telemetry: "api/telemetry", TelemetrySettings: "api/telemetry/settings" } as const;
 export const LiveStatusEvent = "status";
 export const QueryKeys = {
   Search: "q", MatchCase: "matchCase", Severity: "severity", Stream: "stream", Category: "category",

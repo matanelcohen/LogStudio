@@ -19,6 +19,35 @@ Same command. No app changes. One local browser tab.
 **From noise to the exact entry.** Search and filter a session, then inspect a log without leaving the results.
 The optional timeline shows the **visible page only**, not the full session.
 
+### Metrics
+
+![Log Studio's Metrics page with tagged raw measurement charts in dark mode](docs/design/metrics-dark.png)
+
+**See the measurements.** Inspect separate tagged series and recent raw values.
+Shown with synthetic demo telemetry, not production data.
+
+### Traces
+
+![Log Studio's Traces page with selected span details, parent relationships, status, tags, and links in dark mode](docs/design/traces-dark.png)
+
+**Follow the request.** Inspect completed spans, parent relationships, and error details.
+Shown with synthetic demo telemetry, not production data.
+
+### Configure telemetry sources
+
+![Log Studio's source configuration dialog with independent meter and activity filters and discovered runtime sources](docs/design/telemetry-config-dark.png)
+
+**Choose what to capture.** Configure metric and trace sources independently, including sources
+discovered outside the current filters. Shown with synthetic demo data.
+
+### AI-assisted configuration
+
+![Log Studio's consent-based source suggestion preview with recommended metric and trace filters, runtime evidence, and warnings](docs/design/telemetry-suggestions-dark.png)
+
+**Discover, suggest, review.** Optional Copilot suggestions explain recommended sources.
+Choose **Use suggestion**, then **Apply**—configuration is never applied automatically.
+Shown with a synthetic suggestion fixture, not a live Copilot response.
+
 <details>
 <summary>More views: light mode, filters, and mobile</summary>
 
@@ -643,6 +672,129 @@ Unlike the wrapper, the hook / library server **ends when its host process exits
 is recommended for SkillRunner because it keeps the finished run available.
 In-process capture covers managed writes to `Console.Out` / `Console.Error` after attachment;
 native writes and subprocess output bypassing these writers require wrapper mode.
+
+### Native metrics and traces
+
+Opt into telemetry collection for an existing .NET 8+ process:
+
+```bash
+LOG_STUDIO_TELEMETRY=true \
+LOG_STUDIO_METER_SOURCES="System.Runtime,MyApp.*" \
+LOG_STUDIO_ACTIVITY_SOURCES="MyApp.*,System.Net.Http" \
+DOTNET_STARTUP_HOOKS="<viewer>/src/LogStudio/bin/Release/net8.0/LogStudio.dll" \
+  dotnet /path/to/App.dll
+```
+
+For library attachment, set `ConsoleLogViewerOptions.CaptureTelemetry = true`.
+Collection is disabled by default and does not require an OpenTelemetry SDK or exporter.
+Listeners discover existing and newly published `Meter` instruments and `ActivitySource`
+instances. They only capture telemetry the application or runtime actually emits; console
+`Trace` messages are still logs, not distributed spans.
+
+| Startup-hook variable | Library option | Default |
+| --- | --- | --- |
+| `LOG_STUDIO_TELEMETRY` | `CaptureTelemetry` | `false` |
+| `LOG_STUDIO_METER_SOURCES` | `MeterSources` | `*` |
+| `LOG_STUDIO_ACTIVITY_SOURCES` | `ActivitySources` | `*` |
+| `LOG_STUDIO_TELEMETRY_INTERVAL_MS` | `TelemetryIntervalMilliseconds` | `1000` |
+| `LOG_STUDIO_TELEMETRY_CAPACITY` | `TelemetryCapacity` | `2000` per signal |
+
+Source filters are comma-separated, case-sensitive name patterns with `*` (any sequence)
+and `?` (one character) wildcards. An empty filter selects no sources. Prefer narrow filters
+for busy applications. The observable-metric interval accepts 100–60000 milliseconds;
+capacity accepts 1–10000 records per signal.
+
+#### Configure sources in the UI
+
+On either **Metrics** or **Traces**, choose **Configure sources** to edit the meter and
+activity source patterns independently. The dialog starts with the current server settings.
+Use comma-separated names or `*`/`?` wildcard patterns; leave a field empty to capture no
+sources of that signal. Each field accepts up to 4096 characters and 64 comma-separated
+patterns. **Apply** changes capture for the current run; **Cancel** leaves it unchanged.
+
+These are capture filters, not display filters. Changes cover existing and newly created
+meters/activity sources and affect future records; already captured telemetry remains visible.
+Settings are run-local, not saved in the browser or carried into another session. Startup
+environment variables and library options still set the initial values.
+
+Live configuration requires telemetry to have been enabled when the viewer started.
+Disabled or completed runs are read-only, and saved sessions have no telemetry settings.
+The UI cannot attach listeners to a child process from the plain command wrapper.
+
+GET `<session-url>api/telemetry/settings` returns
+`{ meterSources, activitySources, canConfigure }`.
+POST to the same route applies `{ meterSources, activitySources }` and returns the
+authoritative settings. It requires `X-Log-Studio-Action: telemetry-configure` and the
+same loopback, secret-URL, and Origin protections as other mutations.
+
+#### Discover and suggest sources
+
+The source configuration dialog lists discovered meter and activity source names, including
+names excluded by the current capture filters. Discovery observes existing and newly published
+instrumentation without enabling measurements or sampling excluded activities. A meter is
+discovered when it publishes an instrument. Use **Refresh sources** to update the list.
+Each discovery list retains at most 256 names; omission counts count notifications and may
+include repeated names. Discovery requires telemetry to have been enabled at startup; it cannot
+inspect telemetry inside the wrapper's child process.
+
+For optional AI assistance, explicitly consent and choose **Suggest sources**. This uses the
+existing locally installed, authenticated GitHub Copilot CLI; Copilot analysis needs network
+access and your Copilot account. Manual configuration and runtime discovery do not require AI.
+The assistant recommends only source identifiers supported by the collected evidence, with an
+explanation and uncertainty warnings. Review the preview, choose **Use suggestion** to copy it
+into the draft, then **Apply** to change capture. Generating or accepting a preview never applies
+filters automatically.
+
+Optionally select project files you approve for analysis (`.cs`, `.csproj`, `.props`, `.targets`,
+or `.json`). No project directories are scanned automatically, and the server does not open
+project paths. Published applications can use runtime evidence without supplying any files.
+At most eight files are accepted, with 32768 characters per file and 65536 characters combined.
+Files are submitted to the local server only when you explicitly request a suggestion.
+
+Project analysis extracts simple literal C# `Meter`/`ActivitySource` constructors,
+`AddMeter`/`AddSource` calls, and JSON `meterSources`/`activitySources` arrays into bounded
+source-name evidence (at most 64 evidence items per signal, 128 combined).
+It is not a compiler or complete project analysis: dynamic names, aliases,
+raw strings, and XML project configuration are not analyzed, and C# scanning stops at an
+interpolated string. Only validated instrumentation identifiers and their generic file/line provenance
+are supplied to Copilot, not raw project files, logs, environment variables, or unrelated
+configuration values. Suspicious identifiers are excluded, but namespace-like identifiers can
+still reveal application information; screening is not a general secrecy guarantee. Project contents and runtime
+metadata are treated as untrusted data, not instructions; Copilot suggestions cannot execute
+commands, read project files, or modify capture. Only select files you are authorized to
+analyze, and avoid placing credentials in telemetry source names.
+
+GET `<session-url>api/telemetry/sources` returns bounded discovery lists and omission counts.
+POST `<session-url>api/telemetry/suggest` requires
+`X-Log-Studio-Action: telemetry-suggest` and explicit `consent: true`; optional `projectFiles`
+contains the approved file names and contents. Suggestions are current-run-only and are
+unavailable for disabled or completed capture.
+
+Open **Metrics** for tagged measurement series and charts, or **Traces** for completed spans
+and their trace/parent relationships, timing, status, tags, and links. Metric values are
+raw measurements: counter additions and histogram samples are not automatically converted
+into rates, totals, or percentile estimates. Observable instruments are polled periodically.
+Spans appear after they stop; a parent may be outside the capture window or filtered out.
+Trace collection requests activity data without forcing the sampled/recorded flag, but it can
+still cause activities to be created and increase application overhead.
+
+Telemetry is held separately from logs in bounded, recent **in-memory** buffers. Older records
+are evicted, and dropped-record counts are exposed. Capture processes at most 10000 records
+per signal per configured interval; excess records are dropped before payload conversion.
+At most 1024 metric instruments are enabled; `suppressedInstruments` reports cap rejections.
+These limits bound collector work, not the execution time of application-provided observable
+callbacks. Strings, tags, and links are bounded;
+this is a development view, not a lossless telemetry archive. GET `<session-url>api/telemetry`
+returns `{ enabled, metrics, spans, droppedMetrics, droppedSpans, omittedMetrics, omittedSpans, suppressedInstruments }`,
+with at most the latest 500 records of each signal in chronological capture order.
+The omitted counts identify retained records outside that response window. It uses the same loopback,
+secret-URL, and Origin protections as the log APIs. Telemetry tags can contain sensitive data
+and are not redacted.
+
+Telemetry is current-run-only: it is not included in saved sessions, log imports/exports,
+or console-log clearing. Listeners stop when the run is completed or the viewer is disposed.
+The plain command wrapper cannot listen to telemetry inside its child process, and the
+startup-hook viewer ends with its host process; inspect telemetry while that process is alive.
 
 ## Local data and limits
 

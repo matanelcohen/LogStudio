@@ -120,7 +120,16 @@ internal sealed class CopilotCliClient
         return new ChatResponse(answer, context.EntryCount, context.Truncated);
     }
 
-    internal ProcessStartInfo StartInfo(bool chat, bool sessionFile = false)
+    internal async Task<TelemetrySuggestion> AskSuggestionsAsync(TelemetryEvidence[] evidence, CancellationToken cancellationToken)
+    {
+        if (!this.IsConnected) throw new CopilotException("Connect to the local Copilot CLI before requesting suggestions. Run copilot login in a terminal if authentication is required.");
+        if (evidence.Length == 0) return TelemetrySuggestions.Empty();
+        string output = await this.ExecuteAsync(TelemetrySuggestions.BuildPrompt(evidence), TimeSpan.FromMinutes(2),
+            cancellationToken, suggestions: true).ConfigureAwait(false);
+        return TelemetrySuggestions.ParseResponse(output, evidence);
+    }
+
+    internal ProcessStartInfo StartInfo(bool chat, bool sessionFile = false, bool suggestions = false)
     {
         ProcessStartInfo start = new(this.executable)
         {
@@ -138,7 +147,8 @@ internal sealed class CopilotCliClient
             foreach (string argument in new[]
             {
                 "--silent", "--stream=off", "--no-ask-user", "--no-custom-instructions",
-                "--available-tools=view", sessionFile ? "--allow-tool=read" : "--deny-tool=read",
+                suggestions ? "--available-tools=" : "--available-tools=view",
+                sessionFile && !suggestions ? "--allow-tool=read" : "--deny-tool=read",
                 "--disallow-temp-dir", "--disable-builtin-mcps",
                 "--no-remote", "--no-remote-export", "--no-auto-update",
             })
@@ -148,13 +158,14 @@ internal sealed class CopilotCliClient
         return start;
     }
 
-    private async Task<string> ExecuteAsync(string? prompt, TimeSpan timeout, CancellationToken cancellationToken, string? workingDirectory = null)
+    private async Task<string> ExecuteAsync(string? prompt, TimeSpan timeout, CancellationToken cancellationToken,
+        string? workingDirectory = null, bool suggestions = false)
     {
         using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout);
         try
         {
-            ProcessStartInfo start = this.StartInfo(prompt is not null, workingDirectory is not null);
+            ProcessStartInfo start = this.StartInfo(prompt is not null, workingDirectory is not null, suggestions);
             if (workingDirectory is not null) start.WorkingDirectory = workingDirectory;
             string output = await this.run(start, prompt, deadline.Token).ConfigureAwait(false);
             string clean = LogParser.StripTerminalEscapes(output).Trim();

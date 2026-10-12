@@ -25,6 +25,23 @@ public sealed class ConsoleLogViewerOptions
     /// <summary>Gets or sets whether to tee Console.Out and Console.Error at startup.</summary>
     public bool CaptureConsole { get; set; } = true;
 
+    /// <summary>Gets or sets whether to capture native .NET metrics and activities in memory. Defaults to false.</summary>
+    /// <remarks>Capture processes at most 10000 records per signal per telemetry interval and enables at most 1024 metric instruments.
+    /// Excess records and instruments are disclosed in telemetry snapshots. Telemetry is not persisted with log sessions.</remarks>
+    public bool CaptureTelemetry { get; set; }
+
+    /// <summary>Gets or sets comma-separated meter name patterns. Supports * and ? wildcards; defaults to *.</summary>
+    public string MeterSources { get; set; } = "*";
+
+    /// <summary>Gets or sets comma-separated activity source name patterns. Supports * and ? wildcards; defaults to *.</summary>
+    public string ActivitySources { get; set; } = "*";
+
+    /// <summary>Gets or sets the observable polling and capture-budget interval, from 100 to 60000 milliseconds. Defaults to 1000.</summary>
+    public int TelemetryIntervalMilliseconds { get; set; } = 1000;
+
+    /// <summary>Gets or sets the in-memory capacity per telemetry signal, from 1 to 10000. Defaults to 2000.</summary>
+    public int TelemetryCapacity { get; set; } = 2000;
+
     /// <summary>Gets or sets whether to open the browser automatically.</summary>
     public bool OpenBrowser { get; set; }
 
@@ -63,6 +80,13 @@ public sealed class ConsoleLogViewerOptions
             throw new ArgumentOutOfRangeException(nameof(this.FlushEveryEntries), "FlushEveryEntries must be positive.");
         }
 
+        if (this.TelemetryIntervalMilliseconds is < 100 or > 60000)
+            throw new ArgumentOutOfRangeException(nameof(this.TelemetryIntervalMilliseconds), "TelemetryIntervalMilliseconds must be between 100 and 60000.");
+        if (this.TelemetryCapacity is < 1 or > 10000)
+            throw new ArgumentOutOfRangeException(nameof(this.TelemetryCapacity), "TelemetryCapacity must be between 1 and 10000.");
+        TelemetryRecorder.ValidatePatterns(this.MeterSources, nameof(this.MeterSources));
+        TelemetryRecorder.ValidatePatterns(this.ActivitySources, nameof(this.ActivitySources));
+
         if (this.MaxLineLength < ViewerConstants.MinimumMaxLineLength ||
             this.MaxLineLength > ViewerConstants.MaximumMaxLineLength)
         {
@@ -80,7 +104,8 @@ public sealed class ConsoleLogViewerOptions
 
         ArgumentNullException.ThrowIfNull(this.RunArguments);
         return new ViewerSettings(this.Port, this.Capacity, this.FlushEveryEntries, this.MaxLineLength, this.CaptureConsole, this.OpenBrowser, name,
-            this.SaveSession, sessions, this.RunCommand, (string[])this.RunArguments.Clone(), this.RunWorkingDirectory ?? Environment.CurrentDirectory);
+            this.SaveSession, sessions, this.RunCommand, (string[])this.RunArguments.Clone(), this.RunWorkingDirectory ?? Environment.CurrentDirectory,
+            this.CaptureTelemetry, this.MeterSources, this.ActivitySources, this.TelemetryIntervalMilliseconds, this.TelemetryCapacity);
     }
 }
 
@@ -96,4 +121,9 @@ internal sealed record ViewerSettings(
     string SessionsDirectory,
     string? RunCommand,
     string[] RunArguments,
-    string RunWorkingDirectory);
+    string RunWorkingDirectory,
+    bool CaptureTelemetry,
+    string MeterSources,
+    string ActivitySources,
+    int TelemetryIntervalMilliseconds,
+    int TelemetryCapacity);

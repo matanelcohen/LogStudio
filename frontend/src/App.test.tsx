@@ -1,9 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { fixturePage, Status } from "./test-fixtures";
 import { useLiveStatus, useLogPage } from "./useLogExplorer";
 import { DefaultTypography, TypographyStorageKey } from "./useTypography";
+import * as api from "./api";
+import type { ChatResponse } from "./model";
 
 const reconnect = vi.hoisted(() => vi.fn());
 
@@ -22,6 +24,76 @@ vi.mock("./useLogExplorer", async () => {
 });
 
 describe("log-first workspace", () => {
+  it("preserves Copilot conversation and drafts across logs-to-metrics navigation", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue("test CLI");
+    vi.spyOn(api, "askCopilot").mockResolvedValue({ answer: "Existing answer", contextEntryCount: 1, contextTruncated: false });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+      enabled: true, metrics: [], spans: [], droppedMetrics: 0, droppedSpans: 0
+    })))));
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Copilot" }));
+    const panel = screen.getByRole("complementary", { name: "Ask Copilot about logs" });
+    fireEvent.click(screen.getByRole("button", { name: "Connect local Copilot" }));
+    const input = await screen.findByLabelText("Question about these logs") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "First question" } });
+    fireEvent.click(within(panel).getByRole("button", { name: "Ask Copilot" }));
+    await screen.findByText("Existing answer");
+    fireEvent.change(input, { target: { value: "Keep this draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Metrics" }));
+    await screen.findByText("No metric measurements captured yet.");
+    expect(panel.isConnected).toBe(true);
+    expect(panel.hidden).toBe(true);
+    expect(screen.queryByRole("complementary", { name: "Ask Copilot about logs" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Discover logs" }));
+    expect(screen.getByRole("complementary", { name: "Ask Copilot about logs" })).toBe(panel);
+    expect(panel.hidden).toBe(false);
+    expect(input.value).toBe("Keep this draft");
+    expect(screen.getByRole("log").textContent).toContain("First question");
+    expect(screen.getByRole("log").textContent).toContain("Existing answer");
+  });
+
+  it("retains an in-flight Copilot response while its panel is hidden by telemetry", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue("test CLI");
+    let finish!: (value: ChatResponse) => void;
+    const ask = vi.spyOn(api, "askCopilot").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+      enabled: true, metrics: [], spans: [], droppedMetrics: 0, droppedSpans: 0
+    })))));
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Copilot" }));
+    const panel = screen.getByRole("complementary", { name: "Ask Copilot about logs" });
+    fireEvent.click(screen.getByRole("button", { name: "Connect local Copilot" }));
+    const input = await screen.findByLabelText("Question about these logs");
+    fireEvent.change(input, { target: { value: "In-flight question" } });
+    fireEvent.click(within(panel).getByRole("button", { name: "Ask Copilot" }));
+    fireEvent.click(screen.getByRole("button", { name: "Metrics" }));
+    await screen.findByText("No metric measurements captured yet.");
+    await act(async () => finish({ answer: "Response while hidden", contextEntryCount: 1, contextTruncated: false }));
+    fireEvent.click(screen.getByRole("button", { name: "Discover logs" }));
+    expect(screen.getByText("Response while hidden")).toBeDefined();
+    expect(screen.getByRole("log").textContent).toContain("In-flight question");
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Close Copilot chat" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("navigates telemetry only on demand and preserves the log query when returning", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      enabled: true, metrics: [], spans: [], droppedMetrics: 0, droppedSpans: 0
+    })));
+    vi.stubGlobal("fetch", fetch);
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "Hello" } });
+    expect(fetch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Metrics" }));
+    expect(screen.getByRole("main", { name: "Metrics workspace" })).toBeDefined();
+    expect(screen.queryByRole("textbox", { name: "Search logs" })).toBeNull();
+    await screen.findByText("No metric measurements captured yet.");
+    const signal = fetch.mock.calls[0]?.[1].signal as AbortSignal;
+    fireEvent.click(screen.getByRole("button", { name: "Discover logs" }));
+    expect(signal.aborted).toBe(true);
+    expect((screen.getByLabelText("Search logs") as HTMLInputElement).value).toBe("Hello");
+    expect(screen.getByRole("main", { name: "Log exploration workspace" })).toBeDefined();
+  });
   it("keeps the summary, field browser, timeline, and empty inspector out of the default layout", () => {
     const { container } = render(<App />);
     expect(screen.getByRole("heading", { name: "Log Studio" })).toBeDefined();

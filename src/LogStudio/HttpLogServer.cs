@@ -38,6 +38,8 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private readonly Func<LogClearResult> clearLogs;
     private readonly Func<string, SessionInfo> renameSession;
     private readonly SessionCatalog sessions;
+    private readonly TelemetryRecorder? telemetry;
+    private readonly TelemetrySettings initialTelemetrySettings;
     private readonly string pathPrefix;
     private readonly string authority;
     private readonly string contentSecurityPolicy;
@@ -50,13 +52,15 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private readonly ConcurrentDictionary<Task, byte> requests = new();
     private readonly Task acceptTask;
 
-    internal HttpLogServer(ViewerSettings settings, LogBuffer logs, TextWriter diagnostics, Func<LogClearResult> clearLogs, SessionCatalog sessions, Func<string, SessionInfo> renameSession, CopilotCliClient? copilot = null)
+    internal HttpLogServer(ViewerSettings settings, LogBuffer logs, TextWriter diagnostics, Func<LogClearResult> clearLogs, SessionCatalog sessions, Func<string, SessionInfo> renameSession, CopilotCliClient? copilot = null, TelemetryRecorder? telemetry = null)
     {
         this.logs = logs;
         this.diagnostics = diagnostics;
         this.clearLogs = clearLogs;
         this.renameSession = renameSession;
         this.sessions = sessions;
+        this.telemetry = telemetry;
+        this.initialTelemetrySettings = new(settings.MeterSources, settings.ActivitySources, false);
         this.copilot = copilot ?? new CopilotCliClient();
         this.pathPrefix = $"/{Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant()}/";
         string nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(24));
@@ -208,6 +212,16 @@ internal sealed class HttpLogServer : IAsyncDisposable
             }
 
             string route = request.Url.AbsolutePath[this.pathPrefix.Length..];
+            if (route is "api/telemetry/sources" or "api/telemetry/suggest")
+            {
+                await this.TelemetrySuggestionsAsync(context, route == "api/telemetry/suggest", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            if (route == ViewerConstants.TelemetrySettingsRoute)
+            {
+                await this.TelemetrySettingsAsync(context, cancellationToken).ConfigureAwait(false);
+                return;
+            }
             if (route is ViewerConstants.CopilotConnectRoute or ViewerConstants.CopilotChatRoute)
             {
                 if (request.HttpMethod != ViewerConstants.PostMethod)
@@ -336,7 +350,30 @@ internal sealed class HttpLogServer : IAsyncDisposable
                 return;
             }
 
-            if (route == ViewerConstants.EventsRoute || route == ViewerConstants.UpdatesRoute)
+            if (route == "api/telemetry")
+            {
+                if (!string.IsNullOrEmpty(request.QueryString[ViewerConstants.SessionIdQuery]))
+                {
+                    await WriteErrorAsync(response, HttpStatusCode.BadRequest, "Telemetry is available only for the current run; omit sessionId.", cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                if (!this.historySlots.Wait(0))
+                {
+                    await WriteErrorAsync(response, HttpStatusCode.TooManyRequests, "Wait for current history requests before reading telemetry.", cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                try
+                {
+                    TelemetrySnapshot snapshot = this.telemetry?.Snapshot() ?? new TelemetrySnapshot(false, [], [], 0, 0, 0, 0, 0);
+                    await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(snapshot, ViewerConstants.JsonOptions),
+                        ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    this.historySlots.Release();
+                }
+            }
+            else if (route == ViewerConstants.EventsRoute || route == ViewerConstants.UpdatesRoute)
             {
                 await this.StreamAsync(context, cancellationToken, route == ViewerConstants.UpdatesRoute).ConfigureAwait(false);
             }
@@ -399,6 +436,188 @@ internal sealed class HttpLogServer : IAsyncDisposable
         {
             response.Close();
         }
+    }
+
+    private async Task TelemetrySettingsAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        HttpListenerRequest request = context.Request;
+        HttpListenerResponse response = context.Response;
+        if (request.HttpMethod is not (ViewerConstants.GetMethod or ViewerConstants.PostMethod))
+        {
+            await WriteErrorAsync(response, HttpStatusCode.MethodNotAllowed, "Use GET to read telemetry settings or POST to configure source filters.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (!string.IsNullOrEmpty(request.QueryString[ViewerConstants.SessionIdQuery]))
+            throw new ArgumentException("Telemetry settings are available only for the current run; omit sessionId.");
+        TelemetrySettings settings;
+        if (request.HttpMethod == ViewerConstants.GetMethod)
+        {
+            settings = this.telemetry?.GetSettings() ?? this.initialTelemetrySettings;
+        }
+        else
+        {
+            if (request.Headers[ViewerConstants.ClearRequestHeader] != ViewerConstants.TelemetryConfigureAction)
+            {
+                await WriteErrorAsync(response, HttpStatusCode.Forbidden, "An explicit telemetry-configure action header is required.", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            if (request.ContentLength64 < 1 || request.ContentLength64 > ViewerConstants.MaximumTelemetrySettingsBytes)
+            {
+                await WriteErrorAsync(response, HttpStatusCode.RequestEntityTooLarge, "Telemetry settings require 1–65536 bytes with a known content length.", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            if (!this.historySlots.Wait(0))
+            {
+                await WriteErrorAsync(response, HttpStatusCode.TooManyRequests, "Wait for current history requests before configuring telemetry.", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            try
+            {
+                byte[] bytes = new byte[ViewerConstants.MaximumTelemetrySettingsBytes + 1];
+                int length = 0;
+                while (length < bytes.Length)
+                {
+                    int read = await request.InputStream.ReadAsync(bytes.AsMemory(length), cancellationToken).ConfigureAwait(false);
+                    if (read == 0) break;
+                    length += read;
+                }
+                if (length > ViewerConstants.MaximumTelemetrySettingsBytes)
+                {
+                    await WriteErrorAsync(response, HttpStatusCode.RequestEntityTooLarge, "Telemetry settings are limited to 65536 bytes.", cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                JsonDocument body;
+                try
+                {
+                    body = JsonDocument.Parse(bytes.AsMemory(0, length));
+                }
+                catch (JsonException exception)
+                {
+                    throw new ArgumentException("Telemetry settings must contain valid JSON.", exception);
+                }
+                using (body)
+                {
+                    string? meters = null, activities = null;
+                    if (body.RootElement.ValueKind != JsonValueKind.Object)
+                        throw new ArgumentException("Telemetry settings require exactly meterSources and activitySources strings.");
+                    foreach (JsonProperty property in body.RootElement.EnumerateObject())
+                    {
+                        if (property.Value.ValueKind != JsonValueKind.String)
+                            throw new ArgumentException("Telemetry source filters must be strings.");
+                        if (property.Name == "meterSources" && meters is null) meters = property.Value.GetString();
+                        else if (property.Name == "activitySources" && activities is null) activities = property.Value.GetString();
+                        else throw new ArgumentException("Telemetry settings require exactly meterSources and activitySources strings, without duplicates.");
+                    }
+                    if (meters is null || activities is null)
+                        throw new ArgumentException("Both meterSources and activitySources strings are required.");
+                    TelemetryRecorder.ValidatePatterns(meters, nameof(meters));
+                    TelemetryRecorder.ValidatePatterns(activities, nameof(activities));
+                    try
+                    {
+                        if (this.telemetry is null)
+                            throw new InvalidOperationException("Telemetry capture is disabled; source filters cannot be changed.");
+                        settings = this.telemetry.Configure(meters, activities);
+                    }
+                    catch (InvalidOperationException exception)
+                    {
+                        await WriteErrorAsync(response, HttpStatusCode.Conflict, exception.Message, cancellationToken).ConfigureAwait(false);
+                        return;
+                    }
+                }
+            }
+            finally
+            {
+                this.historySlots.Release();
+            }
+        }
+        await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(settings, ViewerConstants.JsonOptions),
+            ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task TelemetrySuggestionsAsync(HttpListenerContext context, bool suggest, CancellationToken cancellationToken)
+    {
+        HttpListenerRequest request = context.Request;
+        HttpListenerResponse response = context.Response;
+        if (request.HttpMethod != (suggest ? ViewerConstants.PostMethod : ViewerConstants.GetMethod))
+        {
+            await WriteErrorAsync(response, HttpStatusCode.MethodNotAllowed, suggest ? "Use POST to request suggestions." : "Use GET to discover sources.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (Array.Exists(request.QueryString.AllKeys, key => string.Equals(key, ViewerConstants.SessionIdQuery, StringComparison.OrdinalIgnoreCase)))
+            throw new ArgumentException("Telemetry discovery and suggestions only support the current run; omit sessionId.");
+        TelemetrySources sources = this.telemetry?.GetSources() ?? new([], [], 0, 0);
+        if (!suggest)
+        {
+            await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(sources, ViewerConstants.JsonOptions),
+                ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (request.Headers[ViewerConstants.ClearRequestHeader] != "telemetry-suggest")
+        {
+            await WriteErrorAsync(response, HttpStatusCode.Forbidden, "An explicit telemetry-suggest action header is required.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (request.ContentLength64 < 1 || request.ContentLength64 > TelemetrySuggestions.MaximumRequestBytes)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.RequestEntityTooLarge, "Suggestion requests require a known content length of 1–524288 bytes.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (!this.copilotSlot.Wait(0))
+        {
+            await WriteErrorAsync(response, HttpStatusCode.TooManyRequests, "A Copilot request is already running. Wait for it to finish.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        try
+        {
+            TelemetrySuggestionRequest suggestion;
+            try
+            {
+                using MemoryStream body = new();
+                byte[] buffer = new byte[8192];
+                int count;
+                while ((count = await request.InputStream.ReadAsync(buffer.AsMemory(0,
+                    Math.Min(buffer.Length, TelemetrySuggestions.MaximumRequestBytes + 1 - (int)body.Length)), cancellationToken).ConfigureAwait(false)) > 0)
+                {
+                    body.Write(buffer, 0, count);
+                    if (body.Length > TelemetrySuggestions.MaximumRequestBytes)
+                    {
+                        await WriteErrorAsync(response, HttpStatusCode.RequestEntityTooLarge, "Suggestion request exceeded its byte limit.", cancellationToken).ConfigureAwait(false);
+                        return;
+                    }
+                }
+                using JsonDocument document = JsonDocument.Parse(body.ToArray(), new JsonDocumentOptions { MaxDepth = 32 });
+                suggestion = TelemetrySuggestions.ParseRequest(document.RootElement);
+            }
+            catch (JsonException)
+            {
+                throw new ArgumentException("Suggestion requests must contain valid JSON.");
+            }
+            if (!suggestion.Consent)
+            {
+                await WriteErrorAsync(response, HttpStatusCode.Forbidden, "Explicit consent is required to send screened telemetry identifiers to Copilot.", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            if (this.telemetry?.GetSettings().CanConfigure != true)
+            {
+                await WriteErrorAsync(response, HttpStatusCode.Conflict, "Suggestions require enabled telemetry capture in an active current run.", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            TelemetryEvidence[] evidence = TelemetrySuggestions.BuildEvidence(sources, suggestion);
+            TelemetrySuggestion result;
+            if (evidence.Length == 0) result = TelemetrySuggestions.Empty();
+            else
+            {
+                await this.copilot.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                result = await this.copilot.AskSuggestionsAsync(evidence, cancellationToken).ConfigureAwait(false);
+            }
+            await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(result, ViewerConstants.JsonOptions),
+                ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+        }
+        catch (CopilotException exception)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.ServiceUnavailable, exception.Message, cancellationToken).ConfigureAwait(false);
+        }
+        finally { this.copilotSlot.Release(); }
     }
 
     private async Task ChatAsync(HttpListenerContext context, bool connect, CancellationToken cancellationToken)
