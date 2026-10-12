@@ -37,7 +37,9 @@ internal sealed class SessionCatalog
 
     internal string Id { get; }
 
-    internal static string GenerateName() => $"session-{Guid.NewGuid():N}";
+    internal static string GenerateName(string sessionsDirectory) => SessionNameGenerator.Generate(sessionsDirectory);
+
+    internal string GenerateName() => GenerateName(this.settings.SessionsDirectory);
 
     internal static string ValidateName(string name)
     {

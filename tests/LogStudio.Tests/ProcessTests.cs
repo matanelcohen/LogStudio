@@ -103,8 +103,7 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
             Assert.Equal(7, status.GetProperty("exitCode").GetInt32());
             Assert.True(status.GetProperty("retainedCount").GetInt32() > 0);
             string name = status.GetProperty("applicationName").GetString()!;
-            Assert.StartsWith("session-", name, StringComparison.Ordinal);
-            Assert.True(Guid.TryParseExact(name["session-".Length..], "N", out _));
+            SessionNameGeneratorTests.AssertFriendlyName(name);
         }
         finally
         {
@@ -214,11 +213,14 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
     [Fact]
     public async Task StartupHookCapturesAnUnmodifiedDotnetHost()
     {
+        string hookDirectory = Directory.CreateTempSubdirectory("logstudio-hook-test-").FullName;
+        string hookPath = Path.Combine(hookDirectory, "LogStudio.dll");
+        File.Copy(typeof(ConsoleLogViewer).Assembly.Location, hookPath);
         using Process process = StartProcess(
             new[] { DemoPath, "--count", "0", "--interactive", "--exit-code", "7" },
             new Dictionary<string, string>
             {
-                [StartupHooksEnvironmentVariable] = typeof(ConsoleLogViewer).Assembly.Location,
+                [StartupHooksEnvironmentVariable] = hookPath,
                 [ViewerConstants.EnabledEnvironmentVariable] = "true",
                 [ViewerConstants.CapacityEnvironmentVariable] = "0",
             });
@@ -231,6 +233,7 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
             do
             {
                 using JsonDocument snapshot = JsonDocument.Parse(await client.GetStringAsync(new Uri(url, ViewerConstants.SnapshotRoute), timeout.Token));
+                SessionNameGeneratorTests.AssertFriendlyName(snapshot.RootElement.GetProperty("status").GetProperty("applicationName").GetString()!);
                 captured = snapshot.RootElement.GetProperty("entries").EnumerateArray()
                     .Any(entry => entry.GetProperty("message").GetString()?.Contains("Search seed", StringComparison.Ordinal) == true);
                 if (!captured) await Task.Delay(20, timeout.Token);
@@ -248,6 +251,7 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
         finally
         {
             await KillAsync(process);
+            Directory.Delete(hookDirectory, true);
         }
     }
 

@@ -16,6 +16,11 @@
     <None Include="../../frontend/dist/third-party-notices.txt" Pack="true" PackagePath="/" />
     <InternalsVisibleTo Include="LogStudio.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="RandomFriendlyNameGenerator" Version="1.0.9" GeneratePathProperty="true" />
+    <EmbeddedResource Include="$(PkgRandomFriendlyNameGenerator)/lib/net8.0/RandomFriendlyNameGenerator.dll"
+                      LogicalName="LogStudio.Dependencies.RandomFriendlyNameGenerator.dll" />
+  </ItemGroup>
   <Target Name="ValidateFrontendAssets" BeforeTargets="PrepareForBuild">
     <Error Condition="!Exists('$(MSBuildThisFileDirectory)../../frontend/dist/index.html') or !Exists('$(MSBuildThisFileDirectory)../../frontend/dist/styles.css') or !Exists('$(MSBuildThisFileDirectory)../../frontend/dist/viewer.js') or !Exists('$(MSBuildThisFileDirectory)../../frontend/dist/third-party-notices.txt')"
            Text="Build the frontend first: cd frontend &amp;&amp; npm ci &amp;&amp; npm run build. Or use ./install.sh from the LogStudio root." />

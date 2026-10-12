@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Reflection;
+using System.Runtime.Loader;
 using LogStudio;
 
 internal static class StartupHook
@@ -32,6 +34,7 @@ internal static class StartupHook
             return;
         }
 
+        AssemblyLoadContext.Default.Resolving += ResolveNameGenerator;
         viewer = ConsoleLogViewer.Start(new ConsoleLogViewerOptions
         {
             Port = ReadInteger(ViewerConstants.PortEnvironmentVariable, 0),
@@ -41,6 +44,13 @@ internal static class StartupHook
             ApplicationName = Environment.GetEnvironmentVariable(ViewerConstants.NameEnvironmentVariable),
         });
         AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
+    }
+
+    private static Assembly? ResolveNameGenerator(AssemblyLoadContext context, AssemblyName name)
+    {
+        if (name.Name != "RandomFriendlyNameGenerator") return null;
+        using Stream? assembly = typeof(StartupHook).Assembly.GetManifestResourceStream("LogStudio.Dependencies.RandomFriendlyNameGenerator.dll");
+        return assembly is null ? null : context.LoadFromStream(assembly);
     }
 
     private static void OnProcessExit(object? sender, EventArgs args) => viewer?.Dispose();
