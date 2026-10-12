@@ -6,6 +6,12 @@ import { fetchTelemetrySettings, readTelemetrySettings, saveTelemetrySettings, v
 
 const settings: TelemetrySettings = { meterSources: "App.*,System?", activitySources: "App.*", canConfigure: true };
 const snapshot = { enabled: true, metrics: [], spans: [], droppedMetrics: 0, droppedSpans: 0 };
+vi.mock("./telemetry-suggestions-api", async importOriginal => ({
+  ...await importOriginal<typeof import("./telemetry-suggestions-api")>(),
+  fetchDiscoveredTelemetrySources: vi.fn().mockResolvedValue({
+    meterSources: [], activitySources: [], omittedMeterSources: 0, omittedActivitySources: 0
+  })
+}));
 function response(value: unknown = settings, status = 200) { return new Response(JSON.stringify(value), { status }); }
 function input(label = "Meter source patterns") { return screen.getByRole("textbox", { name: label }) as HTMLInputElement; }
 function applyButton() { return screen.getByRole("button", { name: "Apply" }) as HTMLButtonElement; }
@@ -155,7 +161,7 @@ describe("source configuration modal", () => {
       .mockResolvedValueOnce(response()));
     render(<TelemetrySourcesDialog />);
     fireEvent.click(screen.getByRole("button", { name: "Configure sources" }));
-    expect(screen.getByRole("status").textContent).toContain("Loading source configuration");
+    expect(screen.getByText("Loading source configuration…")).toBeDefined();
     expect(applyButton().disabled).toBe(true);
     fail(new Error("Offline"));
     await screen.findByRole("alert");

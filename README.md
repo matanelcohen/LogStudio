@@ -712,6 +712,49 @@ POST to the same route applies `{ meterSources, activitySources }` and returns t
 authoritative settings. It requires `X-Log-Studio-Action: telemetry-configure` and the
 same loopback, secret-URL, and Origin protections as other mutations.
 
+#### Discover and suggest sources
+
+The source configuration dialog lists discovered meter and activity source names, including
+names excluded by the current capture filters. Discovery observes existing and newly published
+instrumentation without enabling measurements or sampling excluded activities. A meter is
+discovered when it publishes an instrument. Use **Refresh sources** to update the list.
+Each discovery list retains at most 256 names; omission counts count notifications and may
+include repeated names. Discovery requires telemetry to have been enabled at startup; it cannot
+inspect telemetry inside the wrapper's child process.
+
+For optional AI assistance, explicitly consent and choose **Suggest sources**. This uses the
+existing locally installed, authenticated GitHub Copilot CLI; Copilot analysis needs network
+access and your Copilot account. Manual configuration and runtime discovery do not require AI.
+The assistant recommends only source identifiers supported by the collected evidence, with an
+explanation and uncertainty warnings. Review the preview, choose **Use suggestion** to copy it
+into the draft, then **Apply** to change capture. Generating or accepting a preview never applies
+filters automatically.
+
+Optionally select project files you approve for analysis (`.cs`, `.csproj`, `.props`, `.targets`,
+or `.json`). No project directories are scanned automatically, and the server does not open
+project paths. Published applications can use runtime evidence without supplying any files.
+At most eight files are accepted, with 32768 characters per file and 65536 characters combined.
+Files are submitted to the local server only when you explicitly request a suggestion.
+
+Project analysis extracts simple literal C# `Meter`/`ActivitySource` constructors,
+`AddMeter`/`AddSource` calls, and JSON `meterSources`/`activitySources` arrays into bounded
+source-name evidence (at most 64 evidence items per signal, 128 combined).
+It is not a compiler or complete project analysis: dynamic names, aliases,
+raw strings, and XML project configuration are not analyzed, and C# scanning stops at an
+interpolated string. Only validated instrumentation identifiers and their generic file/line provenance
+are supplied to Copilot, not raw project files, logs, environment variables, or unrelated
+configuration values. Suspicious identifiers are excluded, but namespace-like identifiers can
+still reveal application information; screening is not a general secrecy guarantee. Project contents and runtime
+metadata are treated as untrusted data, not instructions; Copilot suggestions cannot execute
+commands, read project files, or modify capture. Only select files you are authorized to
+analyze, and avoid placing credentials in telemetry source names.
+
+GET `<session-url>api/telemetry/sources` returns bounded discovery lists and omission counts.
+POST `<session-url>api/telemetry/suggest` requires
+`X-Log-Studio-Action: telemetry-suggest` and explicit `consent: true`; optional `projectFiles`
+contains the approved file names and contents. Suggestions are current-run-only and are
+unavailable for disabled or completed capture.
+
 Open **Metrics** for tagged measurement series and charts, or **Traces** for completed spans
 and their trace/parent relationships, timing, status, tags, and links. Metric values are
 raw measurements: counter additions and histogram samples are not automatically converted

@@ -2,6 +2,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Settings2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { errorMessage } from "./model";
+import { TelemetrySourceSuggestions } from "./TelemetrySourceSuggestions";
 import { fetchTelemetrySettings, MaximumSourcePatternLength, saveTelemetrySettings, validateSourcePatterns, type TelemetrySettings, type TelemetrySourcePatterns } from "./telemetry-api";
 
 export function TelemetrySourcesDialog() {
@@ -85,6 +86,7 @@ export function TelemetrySourcesDialog() {
           {!loading && !settings && error && <button type="button" onClick={() => setReload(value => value + 1)}>Retry loading</button>}
           {saving && <p role="status">Applying source patterns…</p>}
           {applied && <p role="status">Source patterns applied to native capture. Retained records are unchanged.</p>}
+          {open && <TelemetrySourceSuggestions disabled={disabled} onUse={patterns => { setDraft(patterns); setApplied(false); }} />}
           <div className="dialog-footer"><Dialog.Close asChild><button type="button">{applied ? "Done" : "Cancel"}</button></Dialog.Close>
             <button type="submit" className="primary" disabled={disabled || !!validation}>{saving ? "Applying…" : "Apply"}</button></div>
         </form>

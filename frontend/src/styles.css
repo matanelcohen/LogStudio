@@ -442,6 +442,10 @@ th:hover .column-menu, .column-menu:focus-visible, .column-menu[data-state="open
 .import-content { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
 .telemetry-sources-dialog { max-height: calc(100dvh - 32px); overflow: auto; }
 .telemetry-sources-dialog p { line-height: 1.6; }
+.telemetry-source-list { max-height: 180px; overflow: auto; overflow-wrap: anywhere; }
+.telemetry-suggestion-preview { overflow-wrap: anywhere; }
+.telemetry-sources-dialog section { display: flex; flex-direction: column; gap: 10px; }
+.telemetry-sources-dialog dd { white-space: pre-wrap; }
 .telemetry-workspace .workspace-heading { flex-wrap: wrap; }
 #sessionImportFile { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
 .import-dropzone { display: flex; flex-direction: column; gap: 8px; padding: 28px 16px; min-height: 160px; width: 100%; border: 1px dashed var(--cp-border-strong); border-radius: 8px; background: var(--cp-surface-soft); white-space: normal; }

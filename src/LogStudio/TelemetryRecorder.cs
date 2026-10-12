@@ -18,6 +18,7 @@ internal sealed record TelemetrySpan(long Id, string Source, string Name, string
 internal sealed record TelemetrySnapshot(bool Enabled, TelemetryMetric[] Metrics, TelemetrySpan[] Spans,
     long DroppedMetrics, long DroppedSpans, int OmittedMetrics, int OmittedSpans, long SuppressedInstruments);
 internal sealed record TelemetrySettings(string MeterSources, string ActivitySources, bool CanConfigure);
+internal sealed record TelemetrySources(string[] MeterSources, string[] ActivitySources, int OmittedMeterSources, int OmittedActivitySources);
 
 internal sealed class TelemetryRecorder : IDisposable
 {
@@ -43,6 +44,12 @@ internal sealed class TelemetryRecorder : IDisposable
     private long droppedMetrics;
     private long droppedSpans;
     private long suppressedInstruments;
+    private readonly HashSet<string> meterNames = new(StringComparer.Ordinal);
+    private readonly HashSet<string> activityNames = new(StringComparer.Ordinal);
+    private MeterListener? discoveryMeter;
+    private ActivityListener? discoveryActivity;
+    private int omittedMeterNames;
+    private int omittedActivityNames;
     private readonly long budgetDurationTicks;
     private long budgetStart;
     private int metricBudget = MaximumRecordsPerInterval;
@@ -58,6 +65,16 @@ internal sealed class TelemetryRecorder : IDisposable
         if (!this.enabled) return;
         try
         {
+            this.discoveryMeter = new MeterListener
+            {
+                InstrumentPublished = (instrument, _) => this.Discover(instrument.Meter.Name, true),
+            };
+            this.discoveryActivity = new ActivityListener
+            {
+                ShouldListenTo = source => { this.Discover(source.Name, false); return false; },
+            };
+            this.discoveryMeter.Start();
+            ActivitySource.AddActivityListener(this.discoveryActivity);
             this.Configure(settings.MeterSources, settings.ActivitySources);
             this.timer = new Timer(_ => this.CollectObservables(), null,
                 settings.TelemetryIntervalMilliseconds, settings.TelemetryIntervalMilliseconds);
@@ -72,6 +89,27 @@ internal sealed class TelemetryRecorder : IDisposable
     internal TelemetrySettings GetSettings()
     {
         lock (this.gate) return this.settings with { CanConfigure = this.enabled && this.stopped == 0 };
+    }
+
+    private void Discover(string name, bool meter)
+    {
+        lock (this.gate)
+        {
+            if (this.stopped != 0) return;
+            HashSet<string> names = meter ? this.meterNames : this.activityNames;
+            if (names.Contains(name)) return;
+            if (name.Length is > 0 and <= MaximumStringLength && name.IndexOfAny([',', '*', '?']) < 0 && names.Count < 256)
+                names.Add(name);
+            else if (meter) this.omittedMeterNames = Math.Min(int.MaxValue - 1, this.omittedMeterNames) + 1;
+            else this.omittedActivityNames = Math.Min(int.MaxValue - 1, this.omittedActivityNames) + 1;
+        }
+    }
+
+    internal TelemetrySources GetSources()
+    {
+        lock (this.gate)
+            return new(this.meterNames.Order(StringComparer.Ordinal).ToArray(),
+                this.activityNames.Order(StringComparer.Ordinal).ToArray(), this.omittedMeterNames, this.omittedActivityNames);
     }
 
     internal TelemetrySettings Configure(string meterSources, string activitySources)
@@ -430,6 +468,8 @@ internal sealed class TelemetryRecorder : IDisposable
         }
         // In-flight application observables are not awaited and run without any viewer/recorder locks.
         this.timer?.Dispose();
+        this.discoveryActivity?.Dispose();
+        this.discoveryMeter?.Dispose();
         previous?.Dispose();
     }
 }
