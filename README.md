@@ -689,6 +689,29 @@ and `?` (one character) wildcards. An empty filter selects no sources. Prefer na
 for busy applications. The observable-metric interval accepts 100–60000 milliseconds;
 capacity accepts 1–10000 records per signal.
 
+#### Configure sources in the UI
+
+On either **Metrics** or **Traces**, choose **Configure sources** to edit the meter and
+activity source patterns independently. The dialog starts with the current server settings.
+Use comma-separated names or `*`/`?` wildcard patterns; leave a field empty to capture no
+sources of that signal. Each field accepts up to 4096 characters and 64 comma-separated
+patterns. **Apply** changes capture for the current run; **Cancel** leaves it unchanged.
+
+These are capture filters, not display filters. Changes cover existing and newly created
+meters/activity sources and affect future records; already captured telemetry remains visible.
+Settings are run-local, not saved in the browser or carried into another session. Startup
+environment variables and library options still set the initial values.
+
+Live configuration requires telemetry to have been enabled when the viewer started.
+Disabled or completed runs are read-only, and saved sessions have no telemetry settings.
+The UI cannot attach listeners to a child process from the plain command wrapper.
+
+GET `<session-url>api/telemetry/settings` returns
+`{ meterSources, activitySources, canConfigure }`.
+POST to the same route applies `{ meterSources, activitySources }` and returns the
+authoritative settings. It requires `X-Log-Studio-Action: telemetry-configure` and the
+same loopback, secret-URL, and Origin protections as other mutations.
+
 Open **Metrics** for tagged measurement series and charts, or **Traces** for completed spans
 and their trace/parent relationships, timing, status, tags, and links. Metric values are
 raw measurements: counter additions and histogram samples are not automatically converted
