@@ -644,6 +644,57 @@ is recommended for SkillRunner because it keeps the finished run available.
 In-process capture covers managed writes to `Console.Out` / `Console.Error` after attachment;
 native writes and subprocess output bypassing these writers require wrapper mode.
 
+### Native metrics and traces
+
+Opt into telemetry collection for an existing .NET 8+ process:
+
+```bash
+LOG_STUDIO_TELEMETRY=true \
+LOG_STUDIO_METER_SOURCES="System.Runtime,MyApp.*" \
+LOG_STUDIO_ACTIVITY_SOURCES="MyApp.*,System.Net.Http" \
+DOTNET_STARTUP_HOOKS="<viewer>/src/LogStudio/bin/Release/net8.0/LogStudio.dll" \
+  dotnet /path/to/App.dll
+```
+
+For library attachment, set `ConsoleLogViewerOptions.CaptureTelemetry = true`.
+Collection is disabled by default and does not require an OpenTelemetry SDK or exporter.
+Listeners discover existing and newly published `Meter` instruments and `ActivitySource`
+instances. They only capture telemetry the application or runtime actually emits; console
+`Trace` messages are still logs, not distributed spans.
+
+| Startup-hook variable | Library option | Default |
+| --- | --- | --- |
+| `LOG_STUDIO_TELEMETRY` | `CaptureTelemetry` | `false` |
+| `LOG_STUDIO_METER_SOURCES` | `MeterSources` | `*` |
+| `LOG_STUDIO_ACTIVITY_SOURCES` | `ActivitySources` | `*` |
+| `LOG_STUDIO_TELEMETRY_INTERVAL_MS` | `TelemetryIntervalMilliseconds` | `1000` |
+| `LOG_STUDIO_TELEMETRY_CAPACITY` | `TelemetryCapacity` | `2000` per signal |
+
+Source filters are comma-separated name patterns with `*` wildcards. Prefer narrow filters
+for busy applications. The observable-metric interval accepts 100–60000 milliseconds;
+capacity accepts 1–10000 records per signal.
+
+Open **Metrics** for tagged measurement series and charts, or **Traces** for completed spans
+and their trace/parent relationships, timing, status, tags, and links. Metric values are
+raw measurements: counter additions and histogram samples are not automatically converted
+into rates, totals, or percentile estimates. Observable instruments are polled periodically.
+Spans appear after they stop; a parent may be outside the capture window or filtered out.
+Trace collection requests activity data without forcing the sampled/recorded flag, but it can
+still cause activities to be created and increase application overhead.
+
+Telemetry is held separately from logs in bounded, recent **in-memory** buffers. Older records
+are evicted, and dropped-record counts are exposed. Strings, tags, and links are bounded;
+this is a development view, not a lossless telemetry archive. GET `<session-url>api/telemetry`
+returns `{ enabled, metrics, spans, droppedMetrics, droppedSpans }`, with at most the latest
+500 records of each signal in chronological capture order. It uses the same loopback,
+secret-URL, and Origin protections as the log APIs. Telemetry tags can contain sensitive data
+and are not redacted.
+
+Telemetry is current-run-only: it is not included in saved sessions, log imports/exports,
+or console-log clearing. Listeners stop when the run is completed or the viewer is disposed.
+The plain command wrapper cannot listen to telemetry inside its child process, and the
+startup-hook viewer ends with its host process; inspect telemetry while that process is alive.
+
 ## Local data and limits
 
 - Listens only on IPv4 loopback. No remote binding option is exposed.
