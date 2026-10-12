@@ -1,14 +1,53 @@
 # Log Studio
 
-A local browser log viewer for **any C# / .NET application or console command**, including
-Medeina TestConsole and SkillRunner.
+**Stop scrolling. Start finding.**
+
+Turn your C# / .NET app or console command into a live, searchable log workspace.
+Same command. No app changes. One local browser tab.
+
+- **Catch it live** — tail output, search history, and filter the noise.
+- **Find the why** — inspect entries, highlight matches, and build include/exclude filters.
+- **Keep the context** — save sessions, import runs, and export JSONL.
+- **Stay local** — embedded, offline-ready viewer with disk-backed history.
+
+[Get started](#quick-start-wrapper-recommended) · [Search tools](#search-tools) · [Ask Copilot](#optional-copilot-log-chat)
+
+## See it in action
+
+![Log Studio in dark mode with search, log results, a timeline, and an entry inspector](docs/design/discover-dark.png)
+
+**From noise to the exact entry.** Search and filter a session, then inspect a log without leaving the results.
+The optional timeline shows the **visible page only**, not the full session.
+
+<details>
+<summary>More views: light mode, filters, and mobile</summary>
+
+### Light mode
+
+![Log Studio's Discover workspace in light mode](docs/design/discover-light.png)
+
+**Same workspace, lighter look.** Switch between light and dark themes.
+
+### Focused filters
+
+![Log Studio's include and exclude filter dialog](docs/design/filter-dialog.png)
+
+**Less noise. More signal.** Combine include/exclude conditions to narrow down your logs.
+
+### Mobile view
+
+![Log Studio's log explorer at a mobile screen size](docs/design/discover-mobile.png)
+
+**A compact view for smaller screens.** Browse the workspace in a responsive layout.
+
+</details>
+
+<details>
+<summary>Under the hood</summary>
+
 The primary entry point is a **NuGet-packaged .NET wrapper tool**: keep using your existing command,
 without changing the application, logging providers, configuration, or repository.
-
-The viewer includes live tail, server-side search, severity / stream / category / time filters,
-include/exclude condition building, safe regex patterns, highlighting, pause, paging, entry inspection,
-JSON copy, streaming JSONL / portable-session export, session import and management, and light / dark themes. History lives in private temporary files;
-neither the capture process nor the browser keeps the entire run in RAM.
+History lives in private temporary files; neither the capture process nor the browser keeps the entire run in RAM.
 All browser assets are embedded and work offline.
 
 The workspace follows the **OpenSearch Dashboards Discover** interaction model: compact application
@@ -27,6 +66,8 @@ There is no runtime CDN, Node server, or accumulating client-side query cache.
 
 This is a standalone workspace, independent of the application's repository. Medeina is an
 optional compatibility example / test, not a package or runtime dependency.
+
+</details>
 
 ## Appearance
 
