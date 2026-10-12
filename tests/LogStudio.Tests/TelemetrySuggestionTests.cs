@@ -303,7 +303,8 @@ public sealed class TelemetrySuggestionTests
         ViewerSettings settings = Settings();
         using TelemetryRecorder recorder = new(settings);
         using LogBuffer logs = new(settings);
-        CopilotCliClient cli = new((_, _, _) => throw new InvalidOperationException("Must not run"));
+        int calls = 0;
+        CopilotCliClient cli = new((_, _, _) => { calls++; return Task.FromResult("version"); });
         await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, new(settings), _ => throw new InvalidOperationException(), cli, recorder);
         using HttpClient client = new();
         using HttpResponseMessage sources = await client.GetAsync(new Uri(server.Url, "api/telemetry/sources"));
@@ -344,6 +345,11 @@ public sealed class TelemetrySuggestionTests
         using HttpRequestMessage completed = Post(server.Url, """{"consent":true}""");
         using HttpResponseMessage completedResponse = await client.SendAsync(completed);
         Assert.Equal(HttpStatusCode.Conflict, completedResponse.StatusCode);
+        Assert.Equal(0, calls);
+        using HttpRequestMessage afterCompleted = Post(server.Url, "{}", ViewerConstants.CopilotConnectAction, ViewerConstants.CopilotConnectRoute);
+        using HttpResponseMessage afterCompletedResponse = await client.SendAsync(afterCompleted);
+        Assert.Equal(HttpStatusCode.OK, afterCompletedResponse.StatusCode);
+        Assert.Equal(1, calls);
     }
 
     [Fact]
@@ -386,7 +392,8 @@ public sealed class TelemetrySuggestionTests
     [Fact]
     public async Task DisabledCaptureConflictsWithoutLaunchingModel()
     {
-        CopilotCliClient cli = new((_, _, _) => throw new InvalidOperationException("No model needed"));
+        int calls = 0;
+        CopilotCliClient cli = new((_, _, _) => { calls++; return Task.FromResult("version"); });
         using HttpClient client = new();
         ViewerSettings disabledSettings = Settings(false);
         using LogBuffer disabledLogs = new(disabledSettings);
@@ -394,6 +401,11 @@ public sealed class TelemetrySuggestionTests
         using HttpRequestMessage disabledRequest = Post(disabled.Url, """{"consent":true}""");
         using HttpResponseMessage disabledResponse = await client.SendAsync(disabledRequest);
         Assert.Equal(HttpStatusCode.Conflict, disabledResponse.StatusCode);
+        Assert.Equal(0, calls);
+        using HttpRequestMessage afterDisabled = Post(disabled.Url, "{}", ViewerConstants.CopilotConnectAction, ViewerConstants.CopilotConnectRoute);
+        using HttpResponseMessage afterDisabledResponse = await client.SendAsync(afterDisabled);
+        Assert.Equal(HttpStatusCode.OK, afterDisabledResponse.StatusCode);
+        Assert.Equal(1, calls);
     }
 
     [Fact]
@@ -422,5 +434,8 @@ public sealed class TelemetrySuggestionTests
         Assert.Equal(HttpStatusCode.ServiceUnavailable, failed.StatusCode);
         Assert.Contains("copilot login", await failed.Content.ReadAsStringAsync(), StringComparison.Ordinal);
         Assert.Equal("", recorder.GetSettings().MeterSources);
+        using HttpRequestMessage afterFailure = Post(server.Url, "{}", ViewerConstants.CopilotConnectAction, ViewerConstants.CopilotConnectRoute);
+        using HttpResponseMessage afterFailureResponse = await client.SendAsync(afterFailure);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, afterFailureResponse.StatusCode);
     }
 }
