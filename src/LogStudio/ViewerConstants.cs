@@ -28,7 +28,6 @@ internal static class ViewerConstants
     internal const int StreamBatchSize = 256;
     internal const int MaximumLiveClients = 16;
     internal const string LoopbackHost = "127.0.0.1";
-    internal const string DefaultApplicationName = "Console application";
     internal const string ResourcePrefix = "LogStudio.Web.";
     internal const string IndexFile = "index.html";
     internal const string StylesFile = "styles.css";

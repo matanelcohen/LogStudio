@@ -23,6 +23,7 @@ internal sealed class LogBuffer : IDisposable
     private readonly HashSet<string?> categories = new(StringComparer.Ordinal);
     private readonly LogParser[] parsers = { new(), new(), new() };
     private readonly ViewerSettings settings;
+    private string applicationName;
     private readonly DateTimeOffset startedAt = DateTimeOffset.UtcNow;
     private TaskCompletionSource changed = NewSignal();
     private long lastId;
@@ -41,6 +42,7 @@ internal sealed class LogBuffer : IDisposable
     internal LogBuffer(ViewerSettings settings)
     {
         this.settings = settings;
+        this.applicationName = settings.ApplicationName;
         this.StorageDirectory = Directory.CreateTempSubdirectory(TemporaryDirectoryPrefix).FullName;
         FileStream? journal = null;
         FileStream? index = null;
@@ -64,6 +66,16 @@ internal sealed class LogBuffer : IDisposable
     }
 
     internal string StorageDirectory { get; }
+
+    internal void Rename(string name)
+    {
+        lock (this.gate)
+        {
+            this.EnsureAvailable();
+            this.applicationName = name;
+            this.Pulse();
+        }
+    }
 
     internal void Append(string message, LogStream stream, bool isPartial = false, LogSeverity? severity = null, string? category = null)
     {
@@ -320,7 +332,7 @@ internal sealed class LogBuffer : IDisposable
     }
 
     private ViewerStatus Status() => new(
-        this.settings.ApplicationName,
+        this.applicationName,
         this.startedAt,
         this.settings.Capacity,
         this.settings.Capacity == 0 ? this.lastId - this.clearedThroughId : Math.Min(this.lastId - this.clearedThroughId, this.settings.Capacity),

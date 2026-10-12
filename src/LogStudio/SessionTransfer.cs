@@ -41,7 +41,6 @@ internal static class SessionTransfer
     private const string TimestampProperty = "timestamp";
     private const string SeverityProperty = "severity";
     private const string PartialProperty = "isPartial";
-    private const string ImportedName = "Imported logs";
     private const UnixFileMode FilePermissions = UnixFileMode.UserRead | UnixFileMode.UserWrite;
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
@@ -110,7 +109,7 @@ internal static class SessionTransfer
             }
             else
             {
-                imported = RebuildJournal(source, staging, name?.Trim() ?? ImportedName, null, cancellationToken);
+                imported = RebuildJournal(source, staging, name?.Trim() ?? SessionCatalog.GenerateName(), null, cancellationToken);
             }
             source.Dispose();
             File.Delete(uploadPath);

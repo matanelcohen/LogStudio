@@ -193,7 +193,7 @@ public sealed class CopilotChatTests
         ViewerSettings settings = new ConsoleLogViewerOptions().Validate();
         using LogBuffer logs = new(settings);
         SessionCatalog sessions = new(settings);
-        await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, sessions, copilot);
+        await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, sessions, UnusedRename, copilot);
         using HttpClient client = new();
         foreach (string route in new[] { ViewerConstants.CopilotChatRoute, ViewerConstants.CopilotConnectRoute })
         {
@@ -226,7 +226,7 @@ public sealed class CopilotChatTests
             saved.Save(savedLogs);
             string? prompt = null;
             CopilotCliClient copilot = new((_, input, _) => { prompt = input; return Task.FromResult(input is null ? "version" : "Answer #1"); });
-            await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, sessions, copilot);
+            await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, sessions, UnusedRename, copilot);
             using HttpClient client = new();
             using HttpRequestMessage connect = Post(server.Url, ViewerConstants.CopilotConnectRoute, ViewerConstants.CopilotConnectAction);
             using HttpResponseMessage connected = await client.SendAsync(connect);
@@ -256,7 +256,7 @@ public sealed class CopilotChatTests
         ViewerSettings settings = new ConsoleLogViewerOptions().Validate();
         using LogBuffer logs = new(settings);
         logs.Append("record", LogStream.Stdout);
-        await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, new SessionCatalog(settings), copilot);
+        await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, new SessionCatalog(settings), UnusedRename, copilot);
         using HttpClient client = new();
         using HttpRequestMessage ask = Post(server.Url, ViewerConstants.CopilotChatRoute, ViewerConstants.CopilotChatAction, json);
         using HttpResponseMessage response = await client.SendAsync(ask);
@@ -272,7 +272,7 @@ public sealed class CopilotChatTests
         CopilotCliClient copilot = new((_, _, token) => { entered.SetResult(); return pending.Task.WaitAsync(token); });
         ViewerSettings settings = new ConsoleLogViewerOptions().Validate();
         using LogBuffer logs = new(settings);
-        await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, new SessionCatalog(settings), copilot);
+        await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, new SessionCatalog(settings), UnusedRename, copilot);
         using HttpClient client = new();
         using HttpRequestMessage oversized = Post(server.Url, ViewerConstants.CopilotChatRoute, ViewerConstants.CopilotChatAction, new string('x', CopilotChat.MaximumRequestBytes + 1));
         using HttpResponseMessage rejected = await client.SendAsync(oversized);
@@ -289,6 +289,8 @@ public sealed class CopilotChatTests
     }
 
     private static ChatRequest Request(long[] ids) => new("Why did this fail?", ids, Array.Empty<ChatMessage>());
+
+    private static SessionInfo UnusedRename(string name) => throw new InvalidOperationException("Chat must not rename sessions.");
 
     private static HttpRequestMessage Post(Uri url, string route, string action, string? json = null)
     {

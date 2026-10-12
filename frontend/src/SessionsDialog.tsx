@@ -7,11 +7,12 @@ import { SessionImportDialog } from "./SessionImportDialog";
 
 const SessionDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
-export function SessionsDialog({ open, selected, onClose, onSelect, onDeleted, returnFocus }: {
+export function SessionsDialog({ open, selected, onClose, onSelect, onRenamed, onDeleted, returnFocus }: {
   open: boolean;
   selected: string;
   onClose(): void;
   onSelect(session: SessionInfo): void;
+  onRenamed?(session: SessionInfo): void;
   onDeleted?(id: string): void;
   returnFocus(): void;
 }) {
@@ -45,7 +46,11 @@ export function SessionsDialog({ open, selected, onClose, onSelect, onDeleted, r
     setBusy(true);
     setError(null);
     try {
-      if (action.kind === "rename") await renameSession(action.session.id, newName);
+      if (action.kind === "rename") {
+        const renamed = await renameSession(action.session.id, newName);
+        setSessions(sessions => sessions.map(session => session.id === renamed.id ? renamed : session));
+        onRenamed?.(renamed);
+      }
       else { await deleteSession(action.session.id); onDeleted?.(action.session.id); }
       setAction(null);
       setRevision(value => value + 1);
@@ -76,7 +81,7 @@ export function SessionsDialog({ open, selected, onClose, onSelect, onDeleted, r
                   {session.completedAt ? ` · exit ${session.exitCode ?? "unknown"}` : " · running"}</p></div>
                 <div className="session-card-actions">
                   <a className="button small" aria-label={`Export ${session.name}`} href={buildSessionExportUrl(session.isCurrent ? "" : session.id)} download><Download size={13} /></a>
-                  <button className="icon-button" disabled={session.isCurrent || busy} aria-label={`Rename ${session.name}`} title={session.isCurrent ? "Use --name for the current run" : "Rename saved session"}
+                  <button className="icon-button" disabled={busy} aria-label={`Rename ${session.name}`} title="Rename session"
                     onClick={event => { actionButton.current = event.currentTarget; setAction({ kind: "rename", session }); setNewName(session.name); setError(null); }}><Pencil size={13} /></button>
                   <button className="icon-button" disabled={session.isCurrent || busy} aria-label={`Delete ${session.name}`} title={session.isCurrent ? "Clear logs to reset the current run" : "Delete saved session"}
                     onClick={event => { actionButton.current = event.currentTarget; setAction({ kind: "delete", session }); setError(null); }}><Trash2 size={13} /></button>

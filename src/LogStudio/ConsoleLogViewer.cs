@@ -39,7 +39,7 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
         bool started = false;
         try
         {
-            this.server = new HttpLogServer(settings, this.logs, this.originalError, this.ClearCore, this.sessions);
+            this.server = new HttpLogServer(settings, this.logs, this.originalError, this.ClearCore, this.sessions, this.RenameCore);
             this.flushTask = this.FlushIdleAsync();
             started = true;
         }
@@ -170,6 +170,23 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
     /// <summary>Deletes all captured session logs through this call without stopping capture.</summary>
     /// <returns>The number of entries deleted from the journal, including entries hidden by retention.</returns>
     public long ClearLogs() => this.ClearCore().DeletedCount;
+
+    /// <summary>Changes the current session's display name without changing its identity or captured logs.</summary>
+    /// <param name="name">A nonblank name containing at most 128 characters.</param>
+    public void RenameSession(string name) => this.RenameCore(name);
+
+    private SessionInfo RenameCore(string name)
+    {
+        name = SessionCatalog.ValidateName(name);
+        lock (this.lifecycleGate)
+        {
+            ObjectDisposedException.ThrowIf(this.disposeTask is not null, this);
+            this.logs.GetStatus();
+            this.sessions.UpdateCurrentName(name);
+            this.logs.Rename(name);
+            return this.sessions.Describe(this.logs.GetStatus());
+        }
+    }
 
     private LogClearResult ClearCore()
     {

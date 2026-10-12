@@ -91,6 +91,41 @@ describe("bounded single-page requests", () => {
       expect(hook.result.current.status?.retainedCount).toBe(0);
     });
 
+    it("applies ordered name updates while paused without changing the log snapshot", async () => {
+      vi.useFakeTimers();
+      EventSourceFixture.instances = [];
+      vi.stubGlobal("EventSource", EventSourceFixture);
+      const hook = renderHook(({ paused }) => useLiveStatus(paused), { initialProps: { paused: false } });
+      act(() => EventSourceFixture.instances[0]?.emit(Status));
+      await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+      hook.rerender({ paused: true });
+      act(() => EventSourceFixture.instances[1]?.emit({ ...Status, applicationName: "Newer investigation", lastId: 30000, revision: 30001 }));
+      await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+      expect(hook.result.current.status?.lastId).toBe(Status.lastId);
+      expect(hook.result.current.status?.applicationName).toBe("Newer investigation");
+      act(() => EventSourceFixture.instances[1]?.emit({ ...Status, applicationName: "Obsolete investigation", revision: 30000 }));
+      await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+      expect(hook.result.current.status?.applicationName).toBe("Newer investigation");
+      expect(hook.result.current.status?.lastId).toBe(Status.lastId);
+    });
+
+    it("publishes a debounced rename after pausing even when it already matches the latest metadata", async () => {
+      vi.useFakeTimers();
+      EventSourceFixture.instances = [];
+      vi.stubGlobal("EventSource", EventSourceFixture);
+      const hook = renderHook(({ paused }) => useLiveStatus(paused), { initialProps: { paused: false } });
+      act(() => EventSourceFixture.instances[0]?.emit(Status));
+      await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+      const renamed = { ...Status, applicationName: "Latest investigation", lastId: Status.lastId + 1, revision: Status.revision + 2 };
+      act(() => EventSourceFixture.instances[0]?.emit(renamed));
+      hook.rerender({ paused: true });
+      act(() => EventSourceFixture.instances[1]?.emit(renamed));
+      await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+      expect(hook.result.current.status?.applicationName).toBe(renamed.applicationName);
+      expect(hook.result.current.status?.lastId).toBe(Status.lastId);
+      expect(hook.result.current.status?.retainedCount).toBe(Status.retainedCount);
+    });
+
     it("reports invalid live payloads instead of applying silent defaults", () => {
       EventSourceFixture.instances = [];
       vi.stubGlobal("EventSource", EventSourceFixture);

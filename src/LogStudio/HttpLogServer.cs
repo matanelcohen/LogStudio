@@ -36,6 +36,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private readonly LogBuffer logs;
     private readonly TextWriter diagnostics;
     private readonly Func<LogClearResult> clearLogs;
+    private readonly Func<string, SessionInfo> renameSession;
     private readonly SessionCatalog sessions;
     private readonly string pathPrefix;
     private readonly string authority;
@@ -49,11 +50,12 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private readonly ConcurrentDictionary<Task, byte> requests = new();
     private readonly Task acceptTask;
 
-    internal HttpLogServer(ViewerSettings settings, LogBuffer logs, TextWriter diagnostics, Func<LogClearResult> clearLogs, SessionCatalog sessions, CopilotCliClient? copilot = null)
+    internal HttpLogServer(ViewerSettings settings, LogBuffer logs, TextWriter diagnostics, Func<LogClearResult> clearLogs, SessionCatalog sessions, Func<string, SessionInfo> renameSession, CopilotCliClient? copilot = null)
     {
         this.logs = logs;
         this.diagnostics = diagnostics;
         this.clearLogs = clearLogs;
+        this.renameSession = renameSession;
         this.sessions = sessions;
         this.copilot = copilot ?? new CopilotCliClient();
         this.pathPrefix = $"/{Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant()}/";
@@ -262,7 +264,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
                     await WriteErrorAsync(response, HttpStatusCode.Forbidden, "An explicit rename or delete action is required.", cancellationToken).ConfigureAwait(false);
                     return;
                 }
-                string id = request.QueryString[ViewerConstants.SessionIdQuery] ?? throw new ArgumentException("Choose a saved session.");
+                string id = request.QueryString[ViewerConstants.SessionIdQuery] ?? throw new ArgumentException("Choose a session.");
                 try
                 {
                     if (action == ViewerConstants.DeleteSessionAction)
@@ -289,7 +291,8 @@ internal sealed class HttpLogServer : IAsyncDisposable
                             if (body.RootElement.ValueKind != JsonValueKind.Object ||
                                 !body.RootElement.TryGetProperty(ViewerConstants.SessionNameProperty, out JsonElement name) || name.ValueKind != JsonValueKind.String)
                                 throw new ArgumentException("A session name is required.");
-                            SessionInfo renamed = this.sessions.Rename(id, name.GetString() ?? string.Empty);
+                            string value = name.GetString() ?? string.Empty;
+                            SessionInfo renamed = id == this.sessions.Id ? this.renameSession(value) : this.sessions.Rename(id, value);
                             await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(renamed, ViewerConstants.JsonOptions),
                                 ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
                         }
