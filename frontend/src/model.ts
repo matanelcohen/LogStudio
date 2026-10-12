@@ -10,6 +10,7 @@ export const CopilotChatActionValue = "copilot-chat";
 export const MaximumChatEntries = 100;
 export const MaximumChatQuestionLength = 2000;
 export const MaximumChatAnswerLength = 16000;
+export const MaximumChatRequestBytes = 32768;
 export const MaximumImportBytes = 256 * 1024 * 1024;
 export const MaximumSessionNameLength = 128;
 export const UploadContentType = "application/octet-stream";

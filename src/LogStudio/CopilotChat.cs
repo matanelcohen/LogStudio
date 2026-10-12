@@ -126,7 +126,8 @@ internal sealed class CopilotCliClient
             foreach (string argument in new[]
             {
                 "--silent", "--stream=off", "--no-ask-user", "--no-custom-instructions",
-                "--deny-tool=*", "--disable-builtin-mcps", "--disable-mcp-server=*",
+                "--available-tools=view", "--deny-tool=read", "--disable-builtin-mcps",
+                "--no-remote", "--no-remote-export",
             })
                 start.ArgumentList.Add(argument);
         }
@@ -158,9 +159,13 @@ internal sealed class CopilotCliClient
         {
             throw new CopilotException("The Copilot process connection failed. Check the local CLI in a terminal and try again.");
         }
+        catch (Exception exception) when (exception is JsonException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            throw new CopilotException("Could not read Copilot authentication state. Run copilot login in a terminal and check local file permissions.");
+        }
     }
 
-    private static async Task<string> RunProcessAsync(ProcessStartInfo start, string? input, CancellationToken cancellationToken)
+    internal static async Task<string> RunProcessAsync(ProcessStartInfo start, string? input, CancellationToken cancellationToken)
     {
         string directory = Directory.CreateTempSubdirectory("logstudio-copilot-").FullName;
         try
@@ -168,6 +173,7 @@ internal sealed class CopilotCliClient
             if (!OperatingSystem.IsWindows())
                 File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             start.WorkingDirectory = directory;
+            PrepareEnvironment(start, directory);
             using Process process = new() { StartInfo = start };
             if (!process.Start()) throw new CopilotException("Could not start the local Copilot CLI.");
             using CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -192,7 +198,8 @@ internal sealed class CopilotCliClient
             finally
             {
                 stop.Cancel();
-                if (!process.HasExited) process.Kill(entireProcessTree: true);
+                try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+                catch (InvalidOperationException) { }
                 await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
                 try { await Task.WhenAll(output, error).ConfigureAwait(false); }
                 catch (Exception exception) when (exception is OperationCanceledException or CopilotException or IOException) { }
@@ -202,6 +209,55 @@ internal sealed class CopilotCliClient
         {
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    internal static void PrepareEnvironment(ProcessStartInfo start, string directory)
+    {
+        string sourceHome = start.Environment.TryGetValue("COPILOT_HOME", out string? configured) && !string.IsNullOrWhiteSpace(configured) ?
+            configured : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".copilot");
+        string home = Path.Combine(directory, "copilot-home");
+        Directory.CreateDirectory(home);
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(home, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        string source = Path.Combine(sourceHome, "config.json");
+        if (File.Exists(source))
+        {
+            if (new FileInfo(source).Length > 262_144)
+                throw new CopilotException("Copilot authentication state is too large. Check the local CLI configuration.");
+            using JsonDocument auth = JsonDocument.Parse(File.ReadAllBytes(source),
+                new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+            using MemoryStream filtered = new();
+            using (Utf8JsonWriter writer = new(filtered))
+            {
+                writer.WriteStartObject();
+                // Reuse authentication only, never user settings, plugins, providers, or saved permissions.
+                foreach (string key in new[]
+                {
+                    "logged_in_users", "last_logged_in_user", "copilot_tokens", "auth_tokens", "store_token_plaintext",
+                    "loggedInUsers", "lastLoggedInUser", "copilotTokens", "authTokens", "storeTokenPlaintext",
+                })
+                    if (auth.RootElement.TryGetProperty(key, out JsonElement value))
+                    {
+                        writer.WritePropertyName(key);
+                        value.WriteTo(writer);
+                    }
+                writer.WriteEndObject();
+            }
+            WritePrivateFile(Path.Combine(home, "config.json"), filtered.ToArray());
+        }
+        WritePrivateFile(Path.Combine(home, "settings.json"), Encoding.UTF8.GetBytes("{\"disableAllHooks\":true}"));
+        foreach (string key in start.Environment.Keys.ToArray())
+            if (key == "COPILOT_ALLOW_ALL" || key == "COPILOT_PROVIDERS_CONFIG" ||
+                key.StartsWith("COPILOT_PROVIDER_", StringComparison.Ordinal) ||
+                key.StartsWith("GITHUB_COPILOT_PROMPT_MODE_", StringComparison.Ordinal))
+                start.Environment.Remove(key);
+        start.Environment["COPILOT_HOME"] = home;
+    }
+
+    private static void WritePrivateFile(string path, byte[] bytes)
+    {
+        File.WriteAllBytes(path, bytes);
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
 
     internal static async Task<string> ReadBoundedAsync(TextReader reader, CancellationToken cancellationToken)

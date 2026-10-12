@@ -52,4 +52,12 @@ describe("log-first workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     expect(screen.getByRole("heading", { name: "Import a session" })).toBeDefined();
   });
+
+  it("opens optional Copilot chat only on request", () => {
+    render(<App />);
+    expect(screen.queryByRole("heading", { name: "Ask Copilot about logs" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ask Copilot" }));
+    expect(screen.getByRole("heading", { name: "Ask Copilot about logs" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Connect local Copilot" })).toBeDefined();
+  });
 });

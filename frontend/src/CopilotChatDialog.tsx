@@ -59,7 +59,7 @@ export function CopilotChatDialog({ page, sessionId, onClose, returnFocus }: {
             {snapshot.ids.length > 0 && ` (#${snapshot.ids[0]}–#${snapshot.ids.at(-1)})`}. Not the full session.</p>
           <p className="muted">Filter or page the logs before opening chat. Reopen to use a new snapshot. Long records and context may be truncated.</p>
           <p>The CLI runs locally, but questions, log text, and recent conversation are sent to GitHub Copilot's service.
-            Logs are not automatically redacted. Do not share secrets or sensitive data. Copilot may retain chat history locally.</p>
+            Logs are not automatically redacted. Do not share secrets or sensitive data. Copilot's service may retain submitted data.</p>
           {!version ? <div className="copilot-setup">
             <p>Install the current GitHub Copilot CLI and run <code>copilot login</code> in a terminal first. A Copilot entitlement and internet connection are required.</p>
             <button className="primary" disabled={busy} onClick={connect}>{busy ? "Connecting…" : "Connect local Copilot"}</button>

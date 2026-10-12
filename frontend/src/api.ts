@@ -1,5 +1,5 @@
 import {
-  ApiRoutes, ClearActionHeader, ClearActionValue, CopilotChatActionValue, CopilotConnectActionValue, DeleteSessionActionValue, ImportActionValue, importFormat, MaximumCategorySuggestions, MaximumChatAnswerLength, MaximumChatEntries, MaximumHighlights, MaximumPageSize, PageSize, QueryKeys, RenameActionValue, Severities, Streams, UploadContentType, validateImportFile,
+  ApiRoutes, ClearActionHeader, ClearActionValue, CopilotChatActionValue, CopilotConnectActionValue, DeleteSessionActionValue, ImportActionValue, importFormat, MaximumCategorySuggestions, MaximumChatAnswerLength, MaximumChatEntries, MaximumChatRequestBytes, MaximumHighlights, MaximumPageSize, PageSize, QueryKeys, RenameActionValue, Severities, Streams, UploadContentType, validateImportFile,
   type ChatMessage, type ChatResponse, type ClearResult, type LogEntry, type LogPage, type SessionInfo, type ViewerStatus
 } from "./model";
 
@@ -219,10 +219,16 @@ export async function connectCopilot(): Promise<string> {
 
 export async function askCopilot(sessionId: string, entryIds: number[], question: string, messages: ChatMessage[]): Promise<ChatResponse> {
   const query = sessionId ? `?${new URLSearchParams({ [QueryKeys.SessionId]: sessionId })}` : "";
+  let history = messages;
+  let body = JSON.stringify({ entryIds, question, messages: history });
+  while (history.length > 0 && new TextEncoder().encode(body).length > MaximumChatRequestBytes) {
+    history = history.slice(2);
+    body = JSON.stringify({ entryIds, question, messages: history });
+  }
   const response = await fetch(ApiRoutes.CopilotChat + query, {
     method: "POST",
     headers: { [ClearActionHeader]: CopilotChatActionValue, "Content-Type": "application/json" },
-    body: JSON.stringify({ entryIds, question, messages })
+    body
   });
   const data = object(await response.json());
   if (!response.ok) throw new ApiError(text(data.error, "Copilot chat error"), response.status);
