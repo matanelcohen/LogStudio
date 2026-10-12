@@ -1,6 +1,6 @@
 import {
-  ApiRoutes, ClearActionHeader, ClearActionValue, DeleteSessionActionValue, ImportActionValue, importFormat, MaximumCategorySuggestions, MaximumHighlights, MaximumPageSize, PageSize, QueryKeys, RenameActionValue, Severities, Streams, UploadContentType, validateImportFile,
-  type ClearResult, type LogEntry, type LogPage, type SessionInfo, type ViewerStatus
+  ApiRoutes, ClearActionHeader, ClearActionValue, CopilotChatActionValue, CopilotConnectActionValue, DeleteSessionActionValue, ImportActionValue, importFormat, MaximumCategorySuggestions, MaximumChatAnswerLength, MaximumChatEntries, MaximumChatRequestBytes, MaximumHighlights, MaximumPageSize, PageSize, QueryKeys, RenameActionValue, Severities, Streams, UploadContentType, validateImportFile,
+  type ChatMessage, type ChatResponse, type ClearResult, type LogEntry, type LogPage, type SessionInfo, type ViewerStatus
 } from "./model";
 
 export class ApiError extends Error {
@@ -206,4 +206,35 @@ export async function renameSession(id: string, name: string): Promise<SessionIn
 export async function deleteSession(id: string): Promise<void> {
   const result = object(await manageSession(id, DeleteSessionActionValue));
   if (result.deleted !== true) throw new Error("The server did not confirm deletion.");
+}
+
+export async function connectCopilot(): Promise<string> {
+  const response = await fetch(ApiRoutes.CopilotConnect, {
+    method: "POST", headers: { [ClearActionHeader]: CopilotConnectActionValue }
+  });
+  const data = object(await response.json());
+  if (!response.ok) throw new ApiError(text(data.error, "Copilot connection error"), response.status);
+  return text(data.version, "Copilot version");
+}
+
+export async function askCopilot(sessionId: string, entryIds: number[], question: string, messages: ChatMessage[]): Promise<ChatResponse> {
+  const query = sessionId ? `?${new URLSearchParams({ [QueryKeys.SessionId]: sessionId })}` : "";
+  let history = messages;
+  let body = JSON.stringify({ entryIds, question, messages: history });
+  while (history.length > 0 && new TextEncoder().encode(body).length > MaximumChatRequestBytes) {
+    history = history.slice(2);
+    body = JSON.stringify({ entryIds, question, messages: history });
+  }
+  const response = await fetch(ApiRoutes.CopilotChat + query, {
+    method: "POST",
+    headers: { [ClearActionHeader]: CopilotChatActionValue, "Content-Type": "application/json" },
+    body
+  });
+  const data = object(await response.json());
+  if (!response.ok) throw new ApiError(text(data.error, "Copilot chat error"), response.status);
+  const answer = text(data.answer, "Copilot answer");
+  const contextEntryCount = count(data.contextEntryCount, "Copilot context count");
+  if (!answer.trim() || answer.length > MaximumChatAnswerLength || contextEntryCount < 1 || contextEntryCount > MaximumChatEntries)
+    throw new Error("The server returned an invalid Copilot response.");
+  return { answer, contextEntryCount, contextTruncated: boolean(data.contextTruncated, "Copilot context truncation") };
 }

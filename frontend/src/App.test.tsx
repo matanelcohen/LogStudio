@@ -60,6 +60,14 @@ describe("log-first workspace", () => {
     expect(screen.getByRole("heading", { name: "Import a session" })).toBeDefined();
   });
 
+  it("opens optional Copilot chat only on request", () => {
+    render(<App />);
+    expect(screen.queryByRole("heading", { name: "Ask Copilot about logs" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ask Copilot" }));
+    expect(screen.getByRole("heading", { name: "Ask Copilot about logs" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Connect local Copilot" })).toBeDefined();
+  });
+
   it("updates the session name while paused without resetting the frozen log cursor", async () => {
     const current = {
       id: "current", name: "Current run", startedAt: "2026-10-12T08:00:00Z",
