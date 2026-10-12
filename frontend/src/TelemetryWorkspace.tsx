@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { errorMessage } from "./model";
 import { fetchTelemetry, type TelemetrySnapshot, type TelemetrySpan, type TelemetryTag } from "./telemetry-api";
 import { chartPoints, displayText, MaximumDisplayedPoints, MaximumDisplayedSeries, MaximumDisplayedTraces, metricSeries, spanRelation, traceGroups } from "./telemetry-model";
+import { TelemetrySourcesDialog } from "./TelemetrySourcesDialog";
 
 export type TelemetryView = "metrics" | "traces";
 function Tags({ tags }: { tags: TelemetryTag[] }) {
@@ -57,7 +58,8 @@ export function TelemetryWorkspace({ view, archived }: { view: TelemetryView; ar
   return <div className="telemetry-workspace">
     <div className="workspace-heading"><div><span className="workspace-kicker">NATIVE TELEMETRY</span>
       <h2>{view === "metrics" ? "Metrics" : "Traces"}</h2>
-      <p>Recent in-process capture · bounded memory · current run only</p></div></div>
+      <p>Recent in-process capture · bounded memory · current run only</p></div>
+      {!archived && <TelemetrySourcesDialog key={view} />}</div>
     {archived ? <p role="status">Telemetry is not saved with sessions. Select the current run to view metrics and traces.</p> : <>
       <p className="muted">Capture is opt-in: LOG_STUDIO_TELEMETRY=true with the startup hook, or CaptureTelemetry=true in the library.
         The wrapper alone cannot capture a child process's metrics or traces. Telemetry is separate from log history.</p>

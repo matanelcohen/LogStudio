@@ -1,5 +1,46 @@
 import { ApiError } from "./api";
-import { ApiRoutes } from "./model";
+import { ApiRoutes, ClearActionHeader, TelemetryConfigureActionValue } from "./model";
+
+export interface TelemetrySourcePatterns { meterSources: string; activitySources: string; }
+export interface TelemetrySettings extends TelemetrySourcePatterns { canConfigure: boolean; }
+export const MaximumSourcePatternLength = 4096;
+export const MaximumSourcePatternParts = 64;
+
+export function validateSourcePatterns(patterns: TelemetrySourcePatterns): string | null {
+  for (const [label, value] of [["Meter", patterns.meterSources], ["Activity", patterns.activitySources]]) {
+    if (typeof value !== "string") return `${label} source patterns must be text.`;
+    if (value.length > MaximumSourcePatternLength) return `${label} source patterns must be at most ${MaximumSourcePatternLength} characters.`;
+    if (value.split(",").length > MaximumSourcePatternParts) return `${label} source patterns must have at most ${MaximumSourcePatternParts} comma-delimited parts.`;
+  }
+  return null;
+}
+
+export function readTelemetrySettings(value: unknown): TelemetrySettings {
+  const data = object(value);
+  if (typeof data.meterSources !== "string" || typeof data.activitySources !== "string" ||
+    typeof data.canConfigure !== "boolean") throw new Error("The server returned invalid telemetry settings.");
+  const settings = { meterSources: data.meterSources, activitySources: data.activitySources, canConfigure: data.canConfigure };
+  if (validateSourcePatterns(settings)) throw new Error("The server returned invalid telemetry settings.");
+  return settings;
+}
+
+export async function fetchTelemetrySettings(signal: AbortSignal): Promise<TelemetrySettings> {
+  const response = await fetch(ApiRoutes.TelemetrySettings, { signal });
+  if (!response.ok) throw new ApiError(`Could not load telemetry settings (HTTP ${response.status}).`, response.status);
+  return readTelemetrySettings(await response.json());
+}
+
+export async function saveTelemetrySettings(patterns: TelemetrySourcePatterns, signal: AbortSignal): Promise<TelemetrySettings> {
+  const error = validateSourcePatterns(patterns);
+  if (error) throw new Error(error);
+  const response = await fetch(ApiRoutes.TelemetrySettings, {
+    method: "POST", signal,
+    headers: { "Content-Type": "application/json", [ClearActionHeader]: TelemetryConfigureActionValue },
+    body: JSON.stringify({ meterSources: patterns.meterSources, activitySources: patterns.activitySources })
+  });
+  if (!response.ok) throw new ApiError(`Could not apply telemetry source patterns (HTTP ${response.status}).`, response.status);
+  return readTelemetrySettings(await response.json());
+}
 
 export interface TelemetryTag { key: string; value: string; }
 export interface MetricMeasurement {

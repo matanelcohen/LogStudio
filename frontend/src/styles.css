@@ -440,6 +440,9 @@ th:hover .column-menu, .column-menu:focus-visible, .column-menu[data-state="open
 .export-menu .menu-item small { display: block; color: var(--cp-secondary-text); font-size: calc(10px * var(--ui-font-scale, 1)); margin-top: 3px; }
 .import-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 70; width: min(600px,calc(100vw - 32px)); border: 1px solid var(--cp-material-border); border-radius: 12px; background: var(--cp-panel-strong); box-shadow: var(--cp-window-shadow); }
 .import-content { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+.telemetry-sources-dialog { max-height: calc(100dvh - 32px); overflow: auto; }
+.telemetry-sources-dialog p { line-height: 1.6; }
+.telemetry-workspace .workspace-heading { flex-wrap: wrap; }
 #sessionImportFile { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
 .import-dropzone { display: flex; flex-direction: column; gap: 8px; padding: 28px 16px; min-height: 160px; width: 100%; border: 1px dashed var(--cp-border-strong); border-radius: 8px; background: var(--cp-surface-soft); white-space: normal; }
 .import-dropzone strong { word-break: break-word; }

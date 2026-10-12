@@ -17,6 +17,7 @@ internal sealed record TelemetrySpan(long Id, string Source, string Name, string
     string? StatusDescription, TelemetryTag[] Tags, TelemetryLink[] Links);
 internal sealed record TelemetrySnapshot(bool Enabled, TelemetryMetric[] Metrics, TelemetrySpan[] Spans,
     long DroppedMetrics, long DroppedSpans, int OmittedMetrics, int OmittedSpans, long SuppressedInstruments);
+internal sealed record TelemetrySettings(string MeterSources, string ActivitySources, bool CanConfigure);
 
 internal sealed class TelemetryRecorder : IDisposable
 {
@@ -31,10 +32,9 @@ internal sealed class TelemetryRecorder : IDisposable
     private readonly Queue<TelemetrySpan> spans = new();
     private readonly bool enabled;
     private readonly int capacity;
-    private readonly string[] meterPatterns;
-    private readonly string[] activityPatterns;
-    private MeterListener? meterListener;
-    private ActivityListener? activityListener;
+    private TelemetrySettings settings;
+    private ListenerGeneration? generation;
+    private int configuring;
     private Timer? timer;
     private int stopped;
     private int collecting;
@@ -43,7 +43,6 @@ internal sealed class TelemetryRecorder : IDisposable
     private long droppedMetrics;
     private long droppedSpans;
     private long suppressedInstruments;
-    private int enabledInstruments;
     private readonly long budgetDurationTicks;
     private long budgetStart;
     private int metricBudget = MaximumRecordsPerInterval;
@@ -55,59 +54,11 @@ internal sealed class TelemetryRecorder : IDisposable
         this.capacity = settings.TelemetryCapacity;
         this.budgetDurationTicks = (long)settings.TelemetryIntervalMilliseconds * Stopwatch.Frequency / 1000;
         this.budgetStart = Stopwatch.GetTimestamp();
-        this.meterPatterns = ParsePatterns(settings.MeterSources);
-        this.activityPatterns = ParsePatterns(settings.ActivitySources);
+        this.settings = new(settings.MeterSources, settings.ActivitySources, this.enabled);
         if (!this.enabled) return;
         try
         {
-            this.meterListener = new MeterListener
-            {
-                InstrumentPublished = (instrument, listener) =>
-                {
-                    try
-                    {
-                        if (Volatile.Read(ref this.stopped) != 0 || !Matches(instrument.Meter.Name, this.meterPatterns)) return;
-                        lock (this.gate)
-                        {
-                            if (this.stopped != 0) return;
-                            if (this.enabledInstruments == MaximumInstruments)
-                            {
-                                this.suppressedInstruments++;
-                                return;
-                            }
-                            listener.EnableMeasurementEvents(instrument);
-                            this.enabledInstruments++;
-                        }
-                    }
-                    catch (Exception)
-                    {
-                        this.DropMetric();
-                    }
-                },
-                MeasurementsCompleted = (_, _) =>
-                {
-                    lock (this.gate)
-                    {
-                        if (this.stopped == 0 && this.enabledInstruments > 0) this.enabledInstruments--;
-                    }
-                },
-            };
-            this.meterListener.SetMeasurementEventCallback<byte>(this.Measurement);
-            this.meterListener.SetMeasurementEventCallback<short>(this.Measurement);
-            this.meterListener.SetMeasurementEventCallback<int>(this.Measurement);
-            this.meterListener.SetMeasurementEventCallback<long>(this.Measurement);
-            this.meterListener.SetMeasurementEventCallback<float>(this.Measurement);
-            this.meterListener.SetMeasurementEventCallback<double>(this.Measurement);
-            this.meterListener.SetMeasurementEventCallback<decimal>(this.Measurement);
-            this.meterListener.Start();
-            this.activityListener = new ActivityListener
-            {
-                ShouldListenTo = source => Volatile.Read(ref this.stopped) == 0 && Matches(source.Name, this.activityPatterns),
-                Sample = (ref ActivityCreationOptions<ActivityContext> _) => this.Sampling(),
-                SampleUsingParentId = (ref ActivityCreationOptions<string> _) => this.Sampling(),
-                ActivityStopped = this.ActivityStopped,
-            };
-            ActivitySource.AddActivityListener(this.activityListener);
+            this.Configure(settings.MeterSources, settings.ActivitySources);
             this.timer = new Timer(_ => this.CollectObservables(), null,
                 settings.TelemetryIntervalMilliseconds, settings.TelemetryIntervalMilliseconds);
         }
@@ -115,6 +66,152 @@ internal sealed class TelemetryRecorder : IDisposable
         {
             this.Dispose();
             throw;
+        }
+    }
+
+    internal TelemetrySettings GetSettings()
+    {
+        lock (this.gate) return this.settings with { CanConfigure = this.enabled && this.stopped == 0 };
+    }
+
+    internal TelemetrySettings Configure(string meterSources, string activitySources)
+    {
+        ValidatePatterns(meterSources, nameof(meterSources));
+        ValidatePatterns(activitySources, nameof(activitySources));
+        // Never wait for configuration: subscription notifications can reenter the recorder.
+        if (Interlocked.CompareExchange(ref this.configuring, 1, 0) != 0)
+            throw new InvalidOperationException("Telemetry configuration is already changing; try again.");
+        ListenerGeneration? next = null;
+        try
+        {
+            next = new ListenerGeneration(this, meterSources, activitySources);
+            ListenerGeneration? previous;
+            lock (this.gate)
+            {
+                if (!this.enabled || this.stopped != 0)
+                    throw new InvalidOperationException("Telemetry filters can only be changed while telemetry capture is enabled and the current run is active.");
+                previous = this.generation;
+                this.generation = null;
+            }
+            // Detach before rediscovery; no recorder locks are held across native listener calls.
+            previous?.Dispose();
+            lock (this.gate)
+            {
+                if (this.stopped != 0)
+                    throw new InvalidOperationException("The current run has completed; telemetry filters cannot be changed.");
+                this.settings = new(meterSources, activitySources, true);
+                this.generation = next;
+            }
+            next.Meter.Start();
+            if (this.IsCurrent(next)) ActivitySource.AddActivityListener(next.Activity);
+            if (!this.IsCurrent(next))
+                throw new InvalidOperationException("The current run has completed; telemetry filters cannot be changed.");
+            return this.GetSettings();
+        }
+        catch
+        {
+            if (next is not null)
+            {
+                if (this.IsCurrent(next)) this.Dispose();
+                next.Dispose();
+            }
+            throw;
+        }
+        finally
+        {
+            Volatile.Write(ref this.configuring, 0);
+        }
+    }
+
+    private bool IsCurrent(ListenerGeneration candidate) =>
+        Volatile.Read(ref this.stopped) == 0 && ReferenceEquals(Volatile.Read(ref this.generation), candidate);
+
+    private sealed class Subscription(ListenerGeneration generation)
+    {
+        internal readonly ListenerGeneration Generation = generation;
+        internal bool Released;
+    }
+
+    private sealed class ListenerGeneration : IDisposable
+    {
+        internal readonly string[] MeterPatterns;
+        internal readonly string[] ActivityPatterns;
+        internal readonly MeterListener Meter;
+        internal readonly ActivityListener Activity;
+        internal int Instruments;
+
+        internal ListenerGeneration(TelemetryRecorder owner, string meters, string activities)
+        {
+            this.MeterPatterns = ParsePatterns(meters);
+            this.ActivityPatterns = ParsePatterns(activities);
+            this.Meter = new MeterListener
+            {
+                InstrumentPublished = (instrument, listener) => owner.Subscribe(this, instrument, listener),
+                MeasurementsCompleted = (_, state) =>
+                {
+                    if (state is Subscription subscription) owner.Release(subscription);
+                },
+            };
+            this.Meter.SetMeasurementEventCallback<byte>(owner.Measurement);
+            this.Meter.SetMeasurementEventCallback<short>(owner.Measurement);
+            this.Meter.SetMeasurementEventCallback<int>(owner.Measurement);
+            this.Meter.SetMeasurementEventCallback<long>(owner.Measurement);
+            this.Meter.SetMeasurementEventCallback<float>(owner.Measurement);
+            this.Meter.SetMeasurementEventCallback<double>(owner.Measurement);
+            this.Meter.SetMeasurementEventCallback<decimal>(owner.Measurement);
+            this.Activity = new ActivityListener
+            {
+                ShouldListenTo = source => owner.IsCurrent(this) && Matches(source.Name, this.ActivityPatterns),
+                Sample = (ref ActivityCreationOptions<ActivityContext> options) => owner.Sampling(this, options.Source.Name),
+                SampleUsingParentId = (ref ActivityCreationOptions<string> options) => owner.Sampling(this, options.Source.Name),
+                ActivityStopped = owner.ActivityStopped,
+            };
+        }
+
+        public void Dispose()
+        {
+            this.Activity.Dispose();
+            this.Meter.Dispose();
+        }
+    }
+
+    private void Release(Subscription subscription)
+    {
+        lock (this.gate)
+        {
+            if (subscription.Released) return;
+            subscription.Released = true;
+            subscription.Generation.Instruments--;
+        }
+    }
+
+    private void Subscribe(ListenerGeneration candidate, Instrument instrument, MeterListener listener)
+    {
+        Subscription? subscription = null;
+        try
+        {
+            lock (this.gate)
+            {
+                if (!this.IsCurrent(candidate) || !Matches(instrument.Meter.Name, candidate.MeterPatterns)) return;
+                if (candidate.Instruments == MaximumInstruments)
+                {
+                    this.suppressedInstruments++;
+                    return;
+                }
+                subscription = new(candidate);
+                candidate.Instruments++;
+            }
+            listener.EnableMeasurementEvents(instrument, subscription);
+            if (!this.IsCurrent(candidate))
+            {
+                listener.DisableMeasurementEvents(instrument);
+                this.Release(subscription);
+            }
+        }
+        catch (Exception)
+        {
+            if (subscription is not null) this.Release(subscription);
+            this.DropMetric();
         }
     }
 
@@ -158,13 +255,15 @@ internal sealed class TelemetryRecorder : IDisposable
         return false;
     }
 
-    private ActivitySamplingResult Sampling() => Volatile.Read(ref this.stopped) == 0
+    private ActivitySamplingResult Sampling(ListenerGeneration candidate, string source) =>
+        this.IsCurrent(candidate) && Matches(source, candidate.ActivityPatterns)
         ? ActivitySamplingResult.AllData : ActivitySamplingResult.None;
 
     private void Measurement<T>(Instrument instrument, T measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags, object? state)
         where T : struct
     {
-        if (!this.TryCapture(metric: true)) return;
+        if (state is not Subscription subscription ||
+            !this.TryCapture(metric: true, instrument.Meter.Name, subscription.Generation)) return;
         try
         {
             double value = Convert.ToDouble(measurement, CultureInfo.InvariantCulture);
@@ -180,7 +279,7 @@ internal sealed class TelemetryRecorder : IDisposable
                 instrument.Unit is null ? null : Bound(instrument.Unit), Bound(instrument.GetType().Name.Split('`')[0]), value, capturedTags);
             lock (this.gate)
             {
-                if (this.stopped != 0) return;
+                if (!this.IsCurrent(subscription.Generation) || !Matches(instrument.Meter.Name, subscription.Generation.MeterPatterns)) return;
                 if (this.metrics.Count == this.capacity)
                 {
                     this.metrics.Dequeue();
@@ -197,7 +296,7 @@ internal sealed class TelemetryRecorder : IDisposable
 
     private void ActivityStopped(Activity activity)
     {
-        if (!this.TryCapture(metric: false)) return;
+        if (!this.TryCapture(metric: false, activity.Source.Name)) return;
         try
         {
             TelemetryTag[] tags = activity.TagObjects.Take(MaximumTags).Select(Tag).ToArray();
@@ -209,7 +308,8 @@ internal sealed class TelemetryRecorder : IDisposable
                 activity.Status.ToString(), activity.StatusDescription is null ? null : Bound(activity.StatusDescription), tags, links);
             lock (this.gate)
             {
-                if (this.stopped != 0) return;
+                if (this.stopped != 0 || this.generation is null ||
+                    !Matches(activity.Source.Name, this.generation.ActivityPatterns)) return;
                 if (this.spans.Count == this.capacity)
                 {
                     this.spans.Dequeue();
@@ -247,7 +347,7 @@ internal sealed class TelemetryRecorder : IDisposable
         try
         {
             if (Volatile.Read(ref this.stopped) == 0)
-                this.meterListener?.RecordObservableInstruments();
+                Volatile.Read(ref this.generation)?.Meter.RecordObservableInstruments();
         }
         catch (Exception)
         {
@@ -267,12 +367,14 @@ internal sealed class TelemetryRecorder : IDisposable
         }
     }
 
-    private bool TryCapture(bool metric)
+    private bool TryCapture(bool metric, string source, ListenerGeneration? candidate = null)
     {
         if (Volatile.Read(ref this.stopped) != 0) return false;
         lock (this.gate)
         {
-            if (this.stopped != 0) return false;
+            if (this.stopped != 0 || this.generation is null ||
+                (metric && !ReferenceEquals(this.generation, candidate)) ||
+                !Matches(source, metric ? this.generation.MeterPatterns : this.generation.ActivityPatterns)) return false;
             this.ResetBudget();
             if (metric)
             {
@@ -318,14 +420,16 @@ internal sealed class TelemetryRecorder : IDisposable
 
     public void Dispose()
     {
+        ListenerGeneration? previous;
         lock (this.gate)
         {
             if (this.stopped != 0) return;
             Volatile.Write(ref this.stopped, 1);
+            previous = this.generation;
+            this.generation = null;
         }
         // In-flight application observables are not awaited and run without any viewer/recorder locks.
         this.timer?.Dispose();
-        this.activityListener?.Dispose();
-        this.meterListener?.Dispose();
+        previous?.Dispose();
     }
 }

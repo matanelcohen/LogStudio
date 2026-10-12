@@ -23,6 +23,7 @@ internal static class ViewerConstants
     internal const int MaximumCategoryLength = 512;
     internal const int MaximumApplicationNameLength = 128;
     internal const int MaximumSessionActionBytes = 2048;
+    internal const int MaximumTelemetrySettingsBytes = 65536;
     internal const int MaximumPort = 65_535;
     internal const int AutomaticPortAttempts = 10;
     internal const int StreamBatchSize = 256;
@@ -45,6 +46,8 @@ internal static class ViewerConstants
     internal const string BundleExportRoute = "api/export-session";
     internal const string CopilotConnectRoute = "api/copilot/connect";
     internal const string CopilotChatRoute = "api/copilot/chat";
+    internal const string TelemetrySettingsRoute = "api/telemetry/settings";
+    internal const string TelemetryConfigureAction = "telemetry-configure";
     internal const string CopilotConnectAction = "copilot-connect";
     internal const string CopilotChatAction = "copilot-chat";
     internal const string ImportFormatQuery = "format";

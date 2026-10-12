@@ -39,6 +39,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private readonly Func<string, SessionInfo> renameSession;
     private readonly SessionCatalog sessions;
     private readonly TelemetryRecorder? telemetry;
+    private readonly TelemetrySettings initialTelemetrySettings;
     private readonly string pathPrefix;
     private readonly string authority;
     private readonly string contentSecurityPolicy;
@@ -59,6 +60,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
         this.renameSession = renameSession;
         this.sessions = sessions;
         this.telemetry = telemetry;
+        this.initialTelemetrySettings = new(settings.MeterSources, settings.ActivitySources, false);
         this.copilot = copilot ?? new CopilotCliClient();
         this.pathPrefix = $"/{Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant()}/";
         string nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(24));
@@ -210,6 +212,11 @@ internal sealed class HttpLogServer : IAsyncDisposable
             }
 
             string route = request.Url.AbsolutePath[this.pathPrefix.Length..];
+            if (route == ViewerConstants.TelemetrySettingsRoute)
+            {
+                await this.TelemetrySettingsAsync(context, cancellationToken).ConfigureAwait(false);
+                return;
+            }
             if (route is ViewerConstants.CopilotConnectRoute or ViewerConstants.CopilotChatRoute)
             {
                 if (request.HttpMethod != ViewerConstants.PostMethod)
@@ -424,6 +431,102 @@ internal sealed class HttpLogServer : IAsyncDisposable
         {
             response.Close();
         }
+    }
+
+    private async Task TelemetrySettingsAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        HttpListenerRequest request = context.Request;
+        HttpListenerResponse response = context.Response;
+        if (request.HttpMethod is not (ViewerConstants.GetMethod or ViewerConstants.PostMethod))
+        {
+            await WriteErrorAsync(response, HttpStatusCode.MethodNotAllowed, "Use GET to read telemetry settings or POST to configure source filters.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (!string.IsNullOrEmpty(request.QueryString[ViewerConstants.SessionIdQuery]))
+            throw new ArgumentException("Telemetry settings are available only for the current run; omit sessionId.");
+        TelemetrySettings settings;
+        if (request.HttpMethod == ViewerConstants.GetMethod)
+        {
+            settings = this.telemetry?.GetSettings() ?? this.initialTelemetrySettings;
+        }
+        else
+        {
+            if (request.Headers[ViewerConstants.ClearRequestHeader] != ViewerConstants.TelemetryConfigureAction)
+            {
+                await WriteErrorAsync(response, HttpStatusCode.Forbidden, "An explicit telemetry-configure action header is required.", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            if (request.ContentLength64 < 1 || request.ContentLength64 > ViewerConstants.MaximumTelemetrySettingsBytes)
+            {
+                await WriteErrorAsync(response, HttpStatusCode.RequestEntityTooLarge, "Telemetry settings require 1–65536 bytes with a known content length.", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            if (!this.historySlots.Wait(0))
+            {
+                await WriteErrorAsync(response, HttpStatusCode.TooManyRequests, "Wait for current history requests before configuring telemetry.", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            try
+            {
+                byte[] bytes = new byte[ViewerConstants.MaximumTelemetrySettingsBytes + 1];
+                int length = 0;
+                while (length < bytes.Length)
+                {
+                    int read = await request.InputStream.ReadAsync(bytes.AsMemory(length), cancellationToken).ConfigureAwait(false);
+                    if (read == 0) break;
+                    length += read;
+                }
+                if (length > ViewerConstants.MaximumTelemetrySettingsBytes)
+                {
+                    await WriteErrorAsync(response, HttpStatusCode.RequestEntityTooLarge, "Telemetry settings are limited to 65536 bytes.", cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                JsonDocument body;
+                try
+                {
+                    body = JsonDocument.Parse(bytes.AsMemory(0, length));
+                }
+                catch (JsonException exception)
+                {
+                    throw new ArgumentException("Telemetry settings must contain valid JSON.", exception);
+                }
+                using (body)
+                {
+                    string? meters = null, activities = null;
+                    if (body.RootElement.ValueKind != JsonValueKind.Object)
+                        throw new ArgumentException("Telemetry settings require exactly meterSources and activitySources strings.");
+                    foreach (JsonProperty property in body.RootElement.EnumerateObject())
+                    {
+                        if (property.Value.ValueKind != JsonValueKind.String)
+                            throw new ArgumentException("Telemetry source filters must be strings.");
+                        if (property.Name == "meterSources" && meters is null) meters = property.Value.GetString();
+                        else if (property.Name == "activitySources" && activities is null) activities = property.Value.GetString();
+                        else throw new ArgumentException("Telemetry settings require exactly meterSources and activitySources strings, without duplicates.");
+                    }
+                    if (meters is null || activities is null)
+                        throw new ArgumentException("Both meterSources and activitySources strings are required.");
+                    TelemetryRecorder.ValidatePatterns(meters, nameof(meters));
+                    TelemetryRecorder.ValidatePatterns(activities, nameof(activities));
+                    try
+                    {
+                        if (this.telemetry is null)
+                            throw new InvalidOperationException("Telemetry capture is disabled; source filters cannot be changed.");
+                        settings = this.telemetry.Configure(meters, activities);
+                    }
+                    catch (InvalidOperationException exception)
+                    {
+                        await WriteErrorAsync(response, HttpStatusCode.Conflict, exception.Message, cancellationToken).ConfigureAwait(false);
+                        return;
+                    }
+                }
+            }
+            finally
+            {
+                this.historySlots.Release();
+            }
+        }
+        await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(settings, ViewerConstants.JsonOptions),
+            ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task ChatAsync(HttpListenerContext context, bool connect, CancellationToken cancellationToken)
