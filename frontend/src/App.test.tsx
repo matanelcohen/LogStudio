@@ -18,6 +18,11 @@ describe("log-first workspace", () => {
   it("keeps the summary, field browser, timeline, and empty inspector out of the default layout", () => {
     const { container } = render(<App />);
     expect(screen.getByRole("heading", { name: "Log Studio" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Discover" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Discover logs" }).getAttribute("aria-current")).toBe("page");
+    const workspace = screen.getByRole("main", { name: "Log exploration workspace" });
+    expect(screen.getByRole("link", { name: "Skip to log results" }).getAttribute("href")).toBe(`#${workspace.id}`);
+    expect(workspace.tabIndex).toBe(-1);
     expect(container.querySelector(".summary")).toBeNull();
     expect(container.querySelector(".discover-fields")).toBeNull();
     expect(container.querySelector(".page-chart")).toBeNull();

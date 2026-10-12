@@ -145,10 +145,12 @@ export default function App() {
   return (
     <Tooltip.Provider delayDuration={400}>
       <div className="discover-shell">
+        <a className="skip-link" href="#workspace">Skip to log results</a>
         <nav className="discover-rail" aria-label="Workspace applications">
-          <span className="rail-brand"><Logs size={21} /></span>
-          <button className="rail-item active" aria-label="Discover logs" title="Discover logs" onClick={() => searchRef.current?.focus()}><Compass size={19} /></button>
-          <button className="rail-item" aria-label="Browse sessions" title="Sessions" onClick={() => setSessionsOpen(true)}><History size={19} /></button>
+          <span className="rail-brand" aria-hidden="true"><Logs size={23} /></span>
+          <span className="rail-label" aria-hidden="true">WORKSPACE</span>
+          <button className="rail-item active" aria-label="Discover logs" aria-current="page" title="Discover logs" onClick={() => searchRef.current?.focus()}><Compass size={20} /><span>Discover</span></button>
+          <button className="rail-item" aria-label="Browse sessions" title="Sessions" onClick={() => setSessionsOpen(true)}><History size={20} /><span>Sessions</span></button>
         </nav>
       <div className="app">
         <header className="app-header">
@@ -188,7 +190,7 @@ export default function App() {
                 <Menu.Label className="menu-label">Appearance</Menu.Label>
                 <Menu.RadioGroup value={appearance.appearance} onValueChange={value => appearance.setAppearance(readChoice(value, AppearanceChoices))}>
                   {[
-                    { value: "system", label: "Automatic · macOS", icon: <Monitor size={14} /> },
+                    { value: "system", label: "System preference", icon: <Monitor size={14} /> },
                     { value: "light", label: "Light Mode", icon: <Sun size={14} /> },
                     { value: "dark", label: "Dark Mode", icon: <Moon size={14} /> }
                   ].map(option => <Menu.RadioItem value={option.value} className="menu-item" key={option.value}>
@@ -200,6 +202,10 @@ export default function App() {
           </div>
         </header>
         <div className="query-region">
+          <div className="workspace-heading">
+            <div><span className="workspace-kicker">LOG EXPLORER</span><h2>Discover</h2><p>Search, filter, and inspect your session history.</p></div>
+            <span className="workspace-context"><Database size={14} /> Disk-backed history <span className="context-divider" /> Local workspace</span>
+          </div>
           <QueryBar query={query} page={activePage} loading={history.loading} error={history.error} searchRef={searchRef}
             maximumId={pause?.maximumId ?? null} onChange={changeQuery} onEdit={condition => openEditor(condition ?? null)}
             onReset={() => { changeQuery({ ...defaultQuery(), pageSize: query.pageSize, sessionId: query.sessionId }); setNotice(null); }}
@@ -209,7 +215,7 @@ export default function App() {
             {live.error ? <button onClick={live.reconnect}>Reconnect</button> : <button className="icon-button" aria-label="Dismiss notification" onClick={() => setNotice(null)}><X size={14} /></button>}
           </div>}
         </div>
-        <main className="workspace" data-inspector={inspector} data-fields={fields}>
+        <main id="workspace" className="workspace" tabIndex={-1} aria-label="Log exploration workspace" data-inspector={inspector} data-fields={fields}>
           {fields && <DiscoverSidebar page={activePage} onFilter={openEditor} />}
           <LogTable page={activePage} loading={history.loading} error={history.error} selected={visibleSelection}
             matchCase={query.matchCase} follow={follow} wrap={wrap} pageSize={query.pageSize}
