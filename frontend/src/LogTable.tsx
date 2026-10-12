@@ -11,6 +11,7 @@ import { MaximumHighlights, NumberFormatter, SeverityLabels, TimeFormatter, type
 import { ColumnHeader } from "./ColumnHeader";
 import { PageSizeControl } from "./PageSizeControl";
 import { VisiblePageChart } from "./VisiblePageChart";
+import type { TypographySettings } from "./useTypography";
 
 const DefaultOrder = ["id", "timestamp", "severity", "stream", "category", "message"];
 const DefaultVisibility: VisibilityState = { id: false, stream: false };
@@ -34,7 +35,7 @@ export function Highlight({ message, terms, matchCase }: { message: string; term
   return <>{fragments}</>;
 }
 
-export function LogTable({ page, loading, error, selected, matchCase, follow, wrap, pageSize, fields, inspector, onFields, onSeverity, onPageSize, onClearSession, clearing, clearButtonRef, onSelect, onOlder, onNewer, onLive, onFollow, onWrap, onClear, onRetry, onInspector }: {
+export function LogTable({ page, loading, error, selected, matchCase, follow, wrap, pageSize, typography, fields, inspector, onFields, onSeverity, onPageSize, onClearSession, clearing, clearButtonRef, onSelect, onOlder, onNewer, onLive, onFollow, onWrap, onClear, onRetry, onInspector }: {
   page: LogPage | null;
   loading: boolean;
   error: string | null;
@@ -43,6 +44,7 @@ export function LogTable({ page, loading, error, selected, matchCase, follow, wr
   follow: boolean;
   wrap: boolean;
   pageSize: number;
+  typography: TypographySettings;
   fields: boolean;
   inspector: boolean;
   clearing: boolean;
@@ -101,7 +103,7 @@ export function LogTable({ page, loading, error, selected, matchCase, follow, wr
 
   useEffect(() => {
     if (follow && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
-  }, [entries, follow]);
+  }, [entries, follow, typography]);
   useEffect(() => {
     const pane = scroll.current;
     if (!pane) return;

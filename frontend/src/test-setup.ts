@@ -2,6 +2,7 @@ import { cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, vi } from "vitest";
 
 beforeEach(() => {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
     media: query,

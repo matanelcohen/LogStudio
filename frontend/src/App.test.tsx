@@ -1,7 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { useLogPage } from "./useLogExplorer";
+import { DefaultTypography, TypographyStorageKey } from "./useTypography";
+
+beforeEach(() => localStorage.removeItem(TypographyStorageKey));
+afterEach(() => localStorage.removeItem(TypographyStorageKey));
 
 vi.mock("./useLogExplorer", async () => {
   const { Status, fixturePage } = await import("./test-fixtures");
@@ -51,5 +55,53 @@ describe("log-first workspace", () => {
     expect(vi.mocked(useLogPage).mock.calls.at(-1)?.[0].levels).toEqual(["warning"]);
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     expect(screen.getByRole("heading", { name: "Import a session" })).toBeDefined();
+  });
+
+  it("changes typography immediately, keeps the current query, and restores focus on dismissal", async () => {
+    render(<App />);
+    const search = screen.getByLabelText("Search logs") as HTMLInputElement;
+    fireEvent.change(search, { target: { value: "Hello" } });
+    const opener = screen.getByRole("button", { name: "Settings" });
+    fireEvent.click(opener);
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeDefined();
+    expect(screen.getByRole("combobox", { name: "UI font" })).toBeDefined();
+    expect(screen.getByRole("combobox", { name: "Log font" })).toBeDefined();
+    expect(screen.getByLabelText("Log font preview").textContent).toContain("Application started");
+
+    async function choose(label: string, option: string) {
+      fireEvent.keyDown(screen.getByRole("combobox", { name: label }), { key: "Enter" });
+      fireEvent.keyDown(await screen.findByRole("option", { name: option }), { key: "Enter" });
+    }
+
+    const scroll = screen.getByLabelText("Scrollable log entries");
+    Object.defineProperty(scroll, "scrollHeight", { value: 500, configurable: true });
+    await choose("UI font", "Verdana");
+    await choose("UI font size", "18 px");
+    await choose("Log font", "Courier New");
+    await choose("Log font size", "24 px");
+    await choose("Log line spacing", "Spacious");
+    expect(document.documentElement.style.getPropertyValue("--log-font-size")).toBe("24px");
+    expect(document.documentElement.style.getPropertyValue("--log-line-height")).toBe("2");
+    expect(scroll.scrollTop).toBe(500);
+    expect(JSON.parse(localStorage.getItem(TypographyStorageKey)!)).toEqual({
+      uiFont: "verdana", uiFontSize: 18, logFont: "courier", logFontSize: 24, logLineHeight: 2
+    });
+    expect(search.value).toBe("Hello");
+    expect(vi.mocked(useLogPage).mock.calls.at(-1)?.[0].search).toBe("Hello");
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset typography" }));
+    expect(JSON.parse(localStorage.getItem(TypographyStorageKey)!)).toEqual(DefaultTypography);
+    expect(search.value).toBe("Hello");
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+  });
+
+  it("shows a storage warning without disabling settings", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("Storage blocked"); });
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByText(/Browser storage is unavailable/)).toBeDefined();
+    expect(screen.getByRole("button", { name: "Reset typography" })).toBeDefined();
   });
 });
