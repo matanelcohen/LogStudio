@@ -293,7 +293,7 @@ kbd { font-size: calc(10px * var(--ui-font-scale, 1)); white-space: nowrap; colo
 .filter-chip button { min-height: 22px; padding: 0 5px; border: 0; box-shadow: none; background: var(--cp-clear); font-size: calc(16px * var(--ui-font-scale, 1)); }
 .dialog-overlay { position: fixed; inset: 0; z-index: 40; background: rgba(12, 27, 38, .42); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
 .condition-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 41; width: min(960px, calc(100vw - 40px)); max-height: calc(100dvh - 64px); overflow: auto; border: 1px solid var(--cp-material-border); border-radius: 12px; background: var(--cp-panel-strong); box-shadow: var(--cp-window-shadow); }
-.condition-dialog, .clear-dialog, .sessions-dialog, .session-management-panel, .import-dialog, .copilot-dialog, .settings-dialog { -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
+.condition-dialog, .clear-dialog, .sessions-dialog, .session-management-panel, .import-dialog, .settings-dialog { -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
 .dialog-titlebar { display: flex; align-items: flex-start; gap: 12px; padding: 20px; border-bottom: 1px solid var(--cp-separator); }
 .dialog-titlebar > div:nth-child(2) { flex: 1; }
 .dialog-titlebar h2 { font-size: calc(17px * var(--ui-font-scale, 1)); }
@@ -315,10 +315,10 @@ kbd { font-size: calc(10px * var(--ui-font-scale, 1)); white-space: nowrap; colo
 .regex-guidance { display: flex; gap: 8px; align-items: center; color: var(--cp-secondary-text); font-size: calc(11px * var(--ui-font-scale, 1)); margin: 16px 0; padding: 10px; background: var(--cp-surface-soft); border-radius: 6px; }
 .regex-guidance svg { flex-shrink: 0; }
 .dialog-footer { justify-content: flex-end; padding-top: 16px; border-top: 1px solid var(--cp-separator); }
-.copilot-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 41; width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; border: 1px solid var(--cp-material-border); border-radius: 12px; background: var(--cp-panel-strong); box-shadow: var(--cp-window-shadow); }
-.copilot-content { padding: 20px; display: grid; gap: 12px; }
+.copilot-panel { flex: 0 0 360px; min-width: 0; min-height: 0; overflow: auto; border: 1px solid var(--cp-border); border-radius: 8px; background: var(--cp-surface); }
+.copilot-panel .dialog-titlebar { padding: 16px; }
+.copilot-content { padding: 16px; display: grid; gap: 12px; overflow-wrap: anywhere; }
 .copilot-setup, .copilot-content form { display: grid; gap: 10px; }
-.copilot-consent { display: flex; align-items: flex-start; gap: 8px; }
 .copilot-messages { display: grid; gap: 10px; max-height: 38dvh; overflow: auto; }
 .copilot-message { padding: 12px; border: 1px solid var(--cp-border); border-radius: 6px; background: var(--cp-surface-soft); }
 .copilot-message.user { background: var(--cp-accent-soft); }
@@ -326,8 +326,9 @@ kbd { font-size: calc(10px * var(--ui-font-scale, 1)); white-space: nowrap; colo
 .copilot-content textarea { width: 100%; resize: vertical; padding: 10px; color: var(--cp-text); background: var(--cp-surface); border: 1px solid var(--cp-border-strong); border-radius: 6px; font: inherit; }
 .entry-filter-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .entry-filter-actions button { white-space: normal; min-height: 32px; font-size: calc(11px * var(--ui-font-scale, 1)); }
-.workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; margin: 0 24px 16px; border: 1px solid var(--cp-border); border-radius: 8px; overflow: hidden; box-shadow: var(--cp-card-shadow); background: var(--cp-surface); }
-.workspace:focus-visible { outline: 2px solid var(--cp-native-accent); outline-offset: 2px; }
+.workspace-region { min-height: 0; min-width: 0; display: flex; gap: 12px; margin: 0 24px 16px; }
+.workspace { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; border: 1px solid var(--cp-border); border-radius: 8px; overflow: hidden; box-shadow: var(--cp-card-shadow); background: var(--cp-surface); }
+.workspace-region:focus-visible { outline: 2px solid var(--cp-native-accent); outline-offset: 2px; }
 .workspace[data-inspector="true"] { grid-template-columns: minmax(0, 1fr) 360px; }
 .workspace[data-fields="true"] { grid-template-columns: 210px minmax(0, 1fr); }
 .workspace[data-fields="true"][data-inspector="true"] { grid-template-columns: 210px minmax(0, 1fr) 360px; }
@@ -534,7 +535,7 @@ mark { background: var(--cp-highlight); color: var(--cp-text); border-radius: 2p
     --cp-window-shadow: none;
   }
   body { background-image: none; }
-  .app-header, .query-bar, .dialog-overlay, .condition-dialog, .clear-dialog, .sessions-dialog, .session-management-panel, .import-dialog, .copilot-dialog, .settings-dialog, .popover, .select-content, .menu-content, .tooltip {
+  .app-header, .query-bar, .dialog-overlay, .condition-dialog, .clear-dialog, .sessions-dialog, .session-management-panel, .import-dialog, .settings-dialog, .popover, .select-content, .menu-content, .tooltip {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
@@ -562,6 +563,7 @@ mark { background: var(--cp-highlight); color: var(--cp-text); border-radius: 2p
   .details-panel { max-height: 480px; }
 }
 @media (max-width: 1080px) {
+  .copilot-panel { flex-basis: 300px; }
   .workspace[data-inspector="true"] { grid-template-columns: minmax(0, 1fr) 300px; }
   .workspace[data-fields="true"] { grid-template-columns: 160px minmax(0, 1fr); }
   .workspace[data-fields="true"][data-inspector="true"] { grid-template-columns: 160px minmax(0, 1fr) 300px; }
@@ -582,7 +584,8 @@ mark { background: var(--cp-highlight); color: var(--cp-text); border-radius: 2p
   .rail-item span, .rail-label { display: none; }
   .app { min-height: 100dvh; height: auto; grid-template-rows: auto auto minmax(0,1fr) auto; }
   .workspace, .workspace[data-inspector="true"], .workspace[data-fields="true"], .workspace[data-fields="true"][data-inspector="true"] { grid-template-columns: minmax(0, 1fr); }
-  .workspace { margin: 0 12px 12px; }
+  .workspace-region { margin: 0 12px 12px; flex-direction: column; }
+  .copilot-panel { flex: none; max-height: 65dvh; }
   .query-region { padding: 20px 12px 12px; }
   .workspace-heading { margin-bottom: 16px; }
   .workspace-heading h2 { font-size: calc(23px * var(--ui-font-scale, 1)); }
