@@ -7,7 +7,6 @@ export const RenameActionValue = "rename";
 export const DeleteSessionActionValue = "delete";
 export const CopilotConnectActionValue = "copilot-connect";
 export const CopilotChatActionValue = "copilot-chat";
-export const MaximumChatEntries = 100;
 export const MaximumChatQuestionLength = 2000;
 export const MaximumChatAnswerLength = 16000;
 export const MaximumChatRequestBytes = 32768;

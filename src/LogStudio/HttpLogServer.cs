@@ -444,7 +444,9 @@ internal sealed class HttpLogServer : IAsyncDisposable
             string? selected = request.QueryString[ViewerConstants.SessionIdQuery];
             using (LogHistoryReader history = string.IsNullOrEmpty(selected) || selected == this.sessions.Id ? this.logs.OpenHistory() : this.sessions.Open(selected))
                 snapshot = CopilotChat.BuildContext(chat, history, cancellationToken);
-            ChatResponse result = await this.copilot.AskAsync(snapshot, cancellationToken).ConfigureAwait(false);
+            ChatResponse result;
+            using (snapshot)
+                result = await this.copilot.AskAsync(snapshot, cancellationToken).ConfigureAwait(false);
             await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(result, ViewerConstants.JsonOptions),
                 ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
         }

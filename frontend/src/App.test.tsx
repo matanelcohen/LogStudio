@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { Status } from "./test-fixtures";
+import { fixturePage, Status } from "./test-fixtures";
 import { useLiveStatus, useLogPage } from "./useLogExplorer";
 import { DefaultTypography, TypographyStorageKey } from "./useTypography";
 
@@ -60,12 +60,21 @@ describe("log-first workspace", () => {
     expect(screen.getByRole("heading", { name: "Import a session" })).toBeDefined();
   });
 
-  it("opens optional Copilot chat only on request", () => {
+  it("opens Copilot in a non-modal panel before the log results, even with no visible matches", () => {
+    vi.mocked(useLogPage).mockReturnValueOnce({ page: { ...fixturePage(), entries: [] }, loading: false, error: null, refresh: vi.fn() });
     render(<App />);
     expect(screen.queryByRole("heading", { name: "Ask Copilot about logs" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Ask Copilot" }));
     expect(screen.getByRole("heading", { name: "Ask Copilot about logs" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Connect local Copilot" })).toBeDefined();
+    const panel = screen.getByRole("complementary", { name: "Ask Copilot about logs" });
+    expect(panel.parentElement).toBe(screen.getByRole("main", { name: "Log exploration workspace" }));
+    expect(panel.nextElementSibling?.className).toBe("workspace");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByLabelText("Search logs").hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Close Copilot chat" }));
+    expect(screen.queryByRole("complementary", { name: "Ask Copilot about logs" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Ask Copilot" }));
   });
 
   it("updates the session name while paused without resetting the frozen log cursor", async () => {

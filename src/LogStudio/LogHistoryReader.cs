@@ -45,9 +45,18 @@ internal sealed class LogHistoryReader : IDisposable
 
     internal IEnumerable<LogEntry> ReadEntries(long firstId = 0, long? lastId = null, CancellationToken cancellationToken = default)
     {
+        return this.ReadEntriesCore(Math.Max(this.Status.FirstId, firstId), lastId, cancellationToken);
+    }
+
+    internal IEnumerable<LogEntry> ReadSessionEntries(CancellationToken cancellationToken = default)
+    {
+        return this.ReadEntriesCore(this.Status.ClearedThroughId + 1, null, cancellationToken);
+    }
+
+    private IEnumerable<LogEntry> ReadEntriesCore(long firstId, long? lastId, CancellationToken cancellationToken)
+    {
         this.EnsureCurrent();
-        if (this.Status.RetainedCount == 0) yield break;
-        long first = Math.Max(Math.Max(1, this.Status.FirstId), firstId);
+        long first = Math.Max(this.Status.ClearedThroughId + 1, firstId);
         long last = Math.Min(this.Status.LastId, lastId ?? this.Status.LastId);
         if (first > last) yield break;
         long position = this.GetPosition(first);
