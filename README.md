@@ -41,6 +41,16 @@ Opaque surfaces, fine separators, compact controls, and readable monospace logs 
 previous glass dashboard. Light and Dark Mode use the Clawpilot palette. System typography,
 keyboard navigation, resize/reorder grips, and per-query filter chips remain available.
 
+Open **Settings** (the gear in the header) to choose the UI font and base size (12–18 px),
+plus an independent monospace font, size (10–24 px), and line spacing for log messages in
+the table and inspector. Controls, headings, menus, and dialogs scale with the UI size.
+Changes apply immediately with previews; **Reset typography** restores the original fonts
+and sizes without changing your query, session, or theme.
+Fonts use installed local fallbacks and do not require downloads. Typography preferences
+are saved in browser storage for the current server origin, including its port, and survive
+reloads. A run on a different port has separate settings. If storage is blocked, changes
+still apply to the current tab and Settings shows a warning.
+
 Without a `clawpilotTheme` URL override, appearance follows system changes automatically.
 The mode button selects a manual light / dark override; reload without that query parameter to
 return to automatic appearance. Increased-contrast and reduced-transparency preferences remove

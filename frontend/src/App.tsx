@@ -1,12 +1,13 @@
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import * as Popover from "@radix-ui/react-popover";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { AlertCircle, Check, ChevronDown, ChevronRight, Clock3, Compass, Database, FileUp, HardDrive, History, Logs, Monitor, Moon, Pause, Play, Sun, X } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, ChevronRight, Clock3, Compass, Database, FileUp, HardDrive, History, Logs, Monitor, Moon, Pause, Play, Settings, Sun, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ConditionDialog } from "./ConditionDialog";
 import { ClearHistoryDialog } from "./ClearHistoryDialog";
 import { SessionsDialog } from "./SessionsDialog";
 import { SessionImportDialog } from "./SessionImportDialog";
+import { SettingsDialog } from "./SettingsDialog";
 import { DiscoverSidebar } from "./DiscoverSidebar";
 import { clearSessionLogs } from "./api";
 import { Inspector } from "./Inspector";
@@ -18,6 +19,7 @@ import {
 import { QueryBar } from "./QueryBar";
 import { Hint } from "./ui";
 import { AppearanceChoices, useAppearance } from "./useAppearance";
+import { useTypography } from "./useTypography";
 import { useLiveStatus, useLogPage } from "./useLogExplorer";
 
 interface PauseSnapshot { maximumId: number; status: ViewerStatus | null; }
@@ -38,14 +40,17 @@ export default function App() {
   const [clearError, setClearError] = useState<string | null>(null);
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
   const searchRef = useRef<HTMLInputElement>(null);
   const editorOpener = useRef<HTMLElement | null>(null);
   const clearOpener = useRef<HTMLButtonElement>(null);
   const sessionsOpener = useRef<HTMLButtonElement>(null);
   const importOpener = useRef<HTMLButtonElement>(null);
+  const settingsOpener = useRef<HTMLButtonElement>(null);
   const seenClear = useRef(0);
   const appearance = useAppearance();
+  const typography = useTypography();
   const live = useLiveStatus(pause !== null);
   const archived = !!query.sessionId;
   const clearedThroughId = archived ? 0 : live.status?.clearedThroughId ?? 0;
@@ -200,6 +205,7 @@ export default function App() {
                 </Menu.RadioGroup>
               </Menu.Content></Menu.Portal>
             </Menu.Root>
+            <button ref={settingsOpener} className="icon-button ghost-button" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={15} /></button>
           </div>
         </header>
         <div className="query-region">
@@ -219,7 +225,7 @@ export default function App() {
         <main id="workspace" className="workspace" tabIndex={-1} aria-label="Log exploration workspace" data-inspector={inspector} data-fields={fields}>
           {fields && <DiscoverSidebar page={activePage} onFilter={openEditor} />}
           <LogTable page={activePage} loading={history.loading} error={history.error} selected={visibleSelection}
-            matchCase={query.matchCase} follow={follow} wrap={wrap} pageSize={query.pageSize}
+            matchCase={query.matchCase} follow={follow} wrap={wrap} pageSize={query.pageSize} typography={typography.settings}
             fields={fields} inspector={inspector} onFields={() => setFields(value => !value)}
             onSeverity={levels => changeQuery({ ...query, levels, severity: "all" })}
             onPageSize={pageSize => changeQuery({ ...query, pageSize })}
@@ -265,6 +271,10 @@ export default function App() {
           returnFocus={() => sessionsOpener.current?.focus()} onSelect={selectSession} />
         <SessionImportDialog open={importOpen} onClose={() => setImportOpen(false)} onImported={selectSession}
           returnFocus={() => importOpener.current?.focus()} />
+        <SettingsDialog open={settingsOpen} settings={typography.settings} saved={typography.saved}
+          appearance={appearance.appearance} onAppearance={appearance.setAppearance}
+          onChange={typography.update} onReset={typography.reset} onClose={() => setSettingsOpen(false)}
+          returnFocus={() => settingsOpener.current?.focus()} />
       </div>
       </div>
     </Tooltip.Provider>
