@@ -28,7 +28,7 @@ describe("session browser", () => {
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Saved metadata unreadable"));
   });
 
-  it("exports any session but only renames saved sessions with a validated name", async () => {
+  it("exports any session and renames saved sessions with a validated name", async () => {
     const renamed = { ...Sessions[1], name: "Renamed investigation" };
     const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(Sessions)))
       .mockResolvedValueOnce(new Response(JSON.stringify(renamed)))
@@ -36,7 +36,7 @@ describe("session browser", () => {
     vi.stubGlobal("fetch", fetcher);
     render(<SessionsDialog open selected="" onClose={vi.fn()} onSelect={vi.fn()} returnFocus={vi.fn()} />);
     await screen.findByText("Named prior skill");
-    expect(screen.getByLabelText("Rename Current run").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByLabelText("Rename Current run").hasAttribute("disabled")).toBe(false);
     expect(screen.getByLabelText("Delete Current run").hasAttribute("disabled")).toBe(true);
     expect(screen.getByLabelText("Export Current run").getAttribute("href")).toBe("api/export-session");
     expect(screen.getByLabelText("Export Named prior skill").getAttribute("href")).toBe("api/export-session?sessionId=saved");
@@ -48,6 +48,26 @@ describe("session browser", () => {
     await screen.findByText(renamed.name);
     expect(fetcher).toHaveBeenNthCalledWith(2, "api/sessions?sessionId=saved",
       expect.objectContaining({ headers: expect.objectContaining({ "X-Log-Studio-Action": "rename" }) }));
+  });
+
+  it("renames the current session and notifies the explorer with its unchanged identity", async () => {
+    const renamed = { ...Sessions[0], name: "Current investigation" };
+    const onRenamed = vi.fn();
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(Sessions)))
+      .mockResolvedValueOnce(new Response(JSON.stringify(renamed)))
+      .mockResolvedValueOnce(new Response(JSON.stringify([renamed, Sessions[1]])));
+    vi.stubGlobal("fetch", fetcher);
+    render(<SessionsDialog open selected="" onClose={vi.fn()} onSelect={vi.fn()} onRenamed={onRenamed} returnFocus={vi.fn()} />);
+    await screen.findByText("Named prior skill");
+    fireEvent.click(screen.getByLabelText("Rename Current run"));
+    expect((screen.getByLabelText("New session name") as HTMLInputElement).value).toBe("Current run");
+    fireEvent.change(screen.getByLabelText("New session name"), { target: { value: renamed.name } });
+    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+    await screen.findByRole("button", { name: "Rename Current investigation" });
+    expect(onRenamed).toHaveBeenCalledWith(renamed);
+    expect(fetcher).toHaveBeenNthCalledWith(2, "api/sessions?sessionId=current",
+      expect.objectContaining({ body: JSON.stringify({ name: renamed.name }) }));
+    expect(screen.getByLabelText("Delete Current investigation").hasAttribute("disabled")).toBe(true);
   });
 
   it("requires confirmation before deleting and notifies the viewed-session owner", async () => {

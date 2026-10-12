@@ -15,6 +15,81 @@ public sealed class SessionCatalogTests
     private static readonly string[] Files = { "entries.jsonl", "entries.idx", MetadataFileName };
 
     [Fact]
+    public async Task DefaultNamesAreUniquePerStartAndExplicitNamesArePreserved()
+    {
+        ConsoleLogViewerOptions options = new() { CaptureConsole = false };
+        using HttpClient client = new();
+        using ConsoleLogViewer first = ConsoleLogViewer.Start(options);
+        using ConsoleLogViewer second = ConsoleLogViewer.Start(options);
+        SessionInfo firstSession = await CurrentSession(client, first);
+        SessionInfo secondSession = await CurrentSession(client, second);
+        Assert.StartsWith("session-", firstSession.Name, StringComparison.Ordinal);
+        Assert.True(Guid.TryParseExact(firstSession.Name["session-".Length..], "N", out _));
+        Assert.NotEqual(firstSession.Name, secondSession.Name);
+        Assert.Equal(firstSession.Name, (await CurrentSession(client, first)).Name);
+        Assert.Null(options.ApplicationName);
+        options.ApplicationName = "My investigation";
+        using ConsoleLogViewer named = ConsoleLogViewer.Start(options);
+        Assert.Equal(options.ApplicationName, (await CurrentSession(client, named)).Name);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CurrentRenamePersistsBeforeAndAfterCompletion(bool completeBeforeRename)
+    {
+        string root = Directory.CreateTempSubdirectory("logstudio-rename-test-").FullName;
+        try
+        {
+            using HttpClient client = new();
+            SessionInfo renamed;
+            using (ConsoleLogViewer viewer = ConsoleLogViewer.Start(new ConsoleLogViewerOptions
+            {
+                CaptureConsole = false, SaveSession = true, SessionsDirectory = root,
+            }))
+            {
+                viewer.Record("retained record");
+                SessionInfo original = await CurrentSession(client, viewer);
+                if (completeBeforeRename) viewer.Complete(7);
+                viewer.RenameSession(" Renamed investigation ");
+                renamed = await CurrentSession(client, viewer);
+                Assert.Equal("Renamed investigation", renamed.Name);
+                Assert.Equal(original.Id, renamed.Id);
+                Assert.Equal(original.StartedAt, renamed.StartedAt);
+                Assert.Equal("retained record", Assert.Single(viewer.GetLogs()).Message);
+                if (!completeBeforeRename) viewer.Complete(7);
+            }
+            using ConsoleLogViewer current = ConsoleLogViewer.Start(new ConsoleLogViewerOptions { CaptureConsole = false, SessionsDirectory = root });
+            using JsonDocument page = JsonDocument.Parse(await client.GetStringAsync(new Uri(current.Url, ViewerConstants.SearchRoute + "?sessionId=" + renamed.Id)));
+            Assert.Equal(renamed.Name, page.RootElement.GetProperty("status").GetProperty("applicationName").GetString());
+            Assert.Equal(7, page.RootElement.GetProperty("status").GetProperty("exitCode").GetInt32());
+            Assert.Equal("retained record", page.RootElement.GetProperty("entries")[0].GetProperty("message").GetString());
+            using JsonDocument metadata = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, renamed.Id, MetadataFileName)));
+            Assert.Equal(renamed.Name, metadata.RootElement.GetProperty("session").GetProperty("name").GetString());
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task InvalidNamesAndDisposedViewerCannotBeRenamed()
+    {
+        using ConsoleLogViewer viewer = CaptureTests.StartServer();
+        using HttpClient client = new();
+        SessionInfo original = await CurrentSession(client, viewer);
+        foreach (string name in new[] { "", "   ", new string('x', ViewerConstants.MaximumApplicationNameLength + 1) })
+        {
+            Assert.Throws<ArgumentException>(() => viewer.RenameSession(name));
+            Assert.Throws<ArgumentException>(() => new ConsoleLogViewerOptions { ApplicationName = name }.Validate());
+        }
+        Assert.Equal(original.Name, (await CurrentSession(client, viewer)).Name);
+        viewer.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => viewer.RenameSession("After disposal"));
+    }
+
+    [Fact]
     public async Task SavedSessionSurvivesViewerRestartAndRetainsRunDetails()
     {
         string root = Directory.CreateTempSubdirectory("logstudio-session-test-").FullName;
@@ -86,4 +161,8 @@ public sealed class SessionCatalogTests
         Assert.DoesNotContain(SecretValue, string.Join(" ", values), StringComparison.Ordinal);
         Assert.Equal("Safe.csproj", values[4]);
     }
+
+    private static async Task<SessionInfo> CurrentSession(HttpClient client, ConsoleLogViewer viewer) =>
+        (JsonSerializer.Deserialize<SessionInfo[]>(await client.GetStringAsync(new Uri(viewer.Url, ViewerConstants.SessionsRoute)), ViewerConstants.JsonOptions) ??
+            throw new InvalidOperationException("Session list missing.")).Single(session => session.IsCurrent);
 }

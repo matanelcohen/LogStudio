@@ -55,7 +55,8 @@ export default function App() {
   const archived = !!query.sessionId;
   const clearedThroughId = archived ? 0 : live.status?.clearedThroughId ?? 0;
   const history = useLogPage(query, cursor, archived ? null : pause?.maximumId ?? null, archived ? 0 : live.status?.revision ?? 0, archived || pause !== null, clearedThroughId);
-  const status = archived ? history.page?.status ?? null : pause?.status && pause.status.clearedThroughId >= clearedThroughId ? pause.status :
+  const status = archived ? history.page?.status ?? null : pause?.status && pause.status.clearedThroughId >= clearedThroughId ?
+    { ...pause.status, applicationName: live.status?.applicationName ?? pause.status.applicationName } :
     live.status ?? history.page?.status ?? null;
   const visibleSelection = selected && selected.id > (status?.clearedThroughId ?? 0) ? selected : null;
 
@@ -255,6 +256,12 @@ export default function App() {
           onClose={() => setClearOpen(false)} onConfirm={clearHistory}
           returnFocus={() => clearOpener.current?.focus()} />
         <SessionsDialog open={sessionsOpen} selected={query.sessionId} onClose={() => setSessionsOpen(false)}
+          onRenamed={session => {
+            if (session.isCurrent) {
+              live.reconnect();
+            }
+            if (session.isCurrent ? !query.sessionId : query.sessionId === session.id) history.refresh();
+          }}
           onDeleted={id => {
             if (query.sessionId === id) {
               setQuery({ ...defaultQuery(), pageSize: query.pageSize }); setSelected(null); setCursor({ before: null, after: null }); setPause(null); setFollow(true);

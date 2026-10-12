@@ -193,6 +193,24 @@ public sealed class HttpTests
     }
 
     [Fact]
+    public async Task RenameNotifiesIdleLiveClientsWithoutChangingHistory()
+    {
+        await using ConsoleLogViewer viewer = CaptureTests.StartServer();
+        viewer.Record("existing");
+        using HttpClient client = new() { Timeout = Timeout.InfiniteTimeSpan };
+        using HttpResponseMessage response = await client.GetAsync(new Uri(viewer.Url, ViewerConstants.UpdatesRoute), HttpCompletionOption.ResponseHeadersRead);
+        using StreamReader reader = new(await response.Content.ReadAsStreamAsync());
+        SseEvent initial = await ReadUntilAsync(reader, ViewerConstants.StatusEvent);
+        viewer.RenameSession("Live investigation");
+        SseEvent update = await ReadUntilAsync(reader, ViewerConstants.StatusEvent);
+        Assert.Equal("Live investigation", update.Data.GetProperty("applicationName").GetString());
+        Assert.Equal(initial.Data.GetProperty("revision").GetInt64() + 1, update.Data.GetProperty("revision").GetInt64());
+        Assert.Equal(1, update.Data.GetProperty("lastId").GetInt64());
+        Assert.False(update.Data.GetProperty("isCompleted").GetBoolean());
+        Assert.Equal("existing", Assert.Single(viewer.GetLogs()).Message);
+    }
+
+    [Fact]
     public async Task LiveStreamReplaysHistoryAndDeliversNewOutput()
     {
         await using ConsoleLogViewer viewer = CaptureTests.StartServer();

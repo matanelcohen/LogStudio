@@ -262,6 +262,18 @@ public sealed class SessionTransferTests
     }
 
     [Fact]
+    public async Task UnnamedJsonLinesImportsReceiveUniqueRandomNames()
+    {
+        using Fixture fixture = new();
+        byte[] records = Encoding.UTF8.GetBytes(Record());
+        SessionInfo first = await fixture.Import(records, SessionTransfer.JsonLinesFormat);
+        SessionInfo second = await fixture.Import(records, SessionTransfer.JsonLinesFormat);
+        Assert.StartsWith("session-", first.Name, StringComparison.Ordinal);
+        Assert.True(Guid.TryParseExact(first.Name["session-".Length..], "N", out _));
+        Assert.NotEqual(first.Name, second.Name);
+    }
+
+    [Fact]
     public async Task RenameAndConfirmedDeleteAffectOnlyChosenSavedSession()
     {
         using Fixture fixture = new();
@@ -309,18 +321,23 @@ public sealed class SessionTransferTests
     [InlineData("[]")]
     [InlineData("{\"name\":5}")]
     [InlineData("{\"name\":\"   \"}")]
+    [InlineData("{\"name\":null}")]
     public async Task InvalidRenameRequestsReturnActionableBadRequest(string body)
     {
         using Fixture fixture = new();
         SessionInfo imported = await fixture.Import(Encoding.UTF8.GetBytes(Record()), SessionTransfer.JsonLinesFormat);
-        using HttpResponseMessage response = await fixture.Action(ViewerConstants.SessionsRoute + "?sessionId=" + imported.Id, ViewerConstants.RenameAction, body);
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("session name", await response.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("Imported logs", (await fixture.List()).Single(session => !session.IsCurrent).Name);
+        SessionInfo current = (await fixture.List()).Single(session => session.IsCurrent);
+        foreach (SessionInfo session in new[] { imported, current })
+        {
+            using HttpResponseMessage response = await fixture.Action(ViewerConstants.SessionsRoute + "?sessionId=" + session.Id, ViewerConstants.RenameAction, body);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Contains("session name", await response.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(session.Name, (await fixture.List()).Single(entry => entry.Id == session.Id).Name);
+        }
     }
 
     [Fact]
-    public async Task CurrentRunAndInvalidSessionIdentifiersCannotBeManaged()
+    public async Task CurrentRunCannotBeDeletedAndInvalidSessionIdentifiersCannotBeManaged()
     {
         using Fixture fixture = new();
         SessionInfo current = (await fixture.List()).Single();
@@ -328,9 +345,48 @@ public sealed class SessionTransferTests
         {
             using HttpResponseMessage deleted = await fixture.Action(ViewerConstants.SessionsRoute + "?sessionId=" + Uri.EscapeDataString(id), ViewerConstants.DeleteSessionAction);
             Assert.Equal(HttpStatusCode.BadRequest, deleted.StatusCode);
-            using HttpResponseMessage renamed = await fixture.Action(ViewerConstants.SessionsRoute + "?sessionId=" + Uri.EscapeDataString(id), ViewerConstants.RenameAction, "{\"name\":\"No\"}");
-            Assert.Equal(HttpStatusCode.BadRequest, renamed.StatusCode);
+            if (id != current.Id)
+            {
+                using HttpResponseMessage renamed = await fixture.Action(ViewerConstants.SessionsRoute + "?sessionId=" + Uri.EscapeDataString(id), ViewerConstants.RenameAction, "{\"name\":\"No\"}");
+                Assert.Equal(HttpStatusCode.BadRequest, renamed.StatusCode);
+            }
         }
+    }
+
+    [Fact]
+    public async Task CurrentRenameUpdatesStatusSearchAndExportWithoutChangingLogs()
+    {
+        using Fixture fixture = new();
+        fixture.Viewer.Record("current retained");
+        SessionInfo current = (await fixture.List()).Single();
+        using HttpResponseMessage response = await fixture.Action(ViewerConstants.SessionsRoute + "?sessionId=" + current.Id,
+            ViewerConstants.RenameAction, "{\"name\":\" Current investigation \"}");
+        response.EnsureSuccessStatusCode();
+        SessionInfo renamed = JsonSerializer.Deserialize<SessionInfo>(await response.Content.ReadAsStringAsync(), ViewerConstants.JsonOptions)!;
+        Assert.True(renamed.IsCurrent);
+        Assert.Equal(current.Id, renamed.Id);
+        Assert.Equal(current.StartedAt, renamed.StartedAt);
+        Assert.Equal("Current investigation", renamed.Name);
+        Assert.Equal(renamed.Name, (await fixture.List()).Single().Name);
+        using JsonDocument page = JsonDocument.Parse(await fixture.Client.GetStringAsync(fixture.Url(ViewerConstants.SearchRoute)));
+        Assert.Equal(renamed.Name, page.RootElement.GetProperty("status").GetProperty("applicationName").GetString());
+        byte[] bundle = await fixture.Client.GetByteArrayAsync(fixture.Url(ViewerConstants.BundleExportRoute));
+        using ZipArchive archive = new(new MemoryStream(bundle), ZipArchiveMode.Read);
+        using JsonDocument manifest = JsonDocument.Parse(archive.GetEntry(ManifestFile)!.Open());
+        Assert.Equal(renamed.Name, manifest.RootElement.GetProperty("session").GetProperty("name").GetString());
+        Assert.Equal("current retained", Assert.Single(fixture.Viewer.GetLogs()).Message);
+        Assert.Empty(Directory.GetDirectories(fixture.Root));
+    }
+
+    [Fact]
+    public async Task OverlongCurrentRenameIsRejectedWithoutChangingItsName()
+    {
+        using Fixture fixture = new();
+        SessionInfo current = (await fixture.List()).Single();
+        using HttpResponseMessage response = await fixture.Action(ViewerConstants.SessionsRoute + "?sessionId=" + current.Id,
+            ViewerConstants.RenameAction, JsonSerializer.Serialize(new { name = new string('x', ViewerConstants.MaximumApplicationNameLength + 1) }));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(current.Name, (await fixture.List()).Single().Name);
     }
 
     [Theory]

@@ -99,7 +99,8 @@ The wrapper now saves named run histories for reopening. Click **Sessions** (or 
 in the application rail) to choose the current run or a previous run. Each entry shows its name,
 date/time, entry count and exit state. **Run parameters** expands the command, arguments, working
 directory and session ID. The search box matches names, dates, command names and argument values.
-Use `--name "My investigation"` to make a run easy to recognize.
+New runs get a unique random name such as `session-<guid>` by default.
+Use `--name "My investigation"` to choose a name at startup, or **Sessions → Rename** to change it later.
 
 Histories are saved under the current user's local application-data folder at `LogStudio/sessions`
 (typically `~/Library/Application Support/LogStudio/sessions` on macOS). To isolate another catalog:
@@ -116,10 +117,12 @@ without changing or stopping the current command. Clear logs affects only the se
 Cleared saved sessions retain their name/date/parameter metadata with zero log entries.
 
 The manager includes catalog counts, refresh, per-session export, **Rename**, and confirmed
-**Delete**. Names may contain 1–128 characters. Delete removes that saved session's journal,
-seek index, and metadata; it does not stop or erase the current run. Deleting the session you
-are viewing returns the explorer to the current run. Current-run rename/delete are disabled:
-use `--name` when starting a run, or **Clear logs** to delete its captured entries.
+**Delete**. Current and saved sessions can be renamed; names may contain 1–128 characters.
+Renaming updates the display and saved metadata without changing the session ID or logs.
+Delete removes that saved session's journal, seek index, and metadata; it does not stop or erase
+the current run. Deleting the session you
+are viewing returns the explorer to the current run. Current-run deletion is disabled:
+use **Clear logs** to delete its captured entries.
 
 Common secret flag names (password, secret, token, API key, authorization, credential) are redacted
 in the saved parameter list. This is best-effort: positional secrets and log text are not
@@ -163,7 +166,8 @@ JSONL must use Log Studio's entry schema: positive `id`, ISO timestamp, `stream`
 Each import gets a fresh session ID and a locally rebuilt disk index. Entry IDs are normalized
 to `1..N`, so filtered JSONL exports with gaps can be imported reliably. Timestamps, messages,
 stream, severity, category, and partial-line flags are preserved. Plain JSONL has no run
-parameters; its dates derive from its records and its default name is **Imported logs**.
+parameters; its dates derive from its records and it receives a unique random name by default.
+Bundle imports preserve the exported name unless you supply a replacement.
 Empty JSONL is rejected, while a bundle for a cleared/zero-entry session remains valid.
 
 ### Transfer limits and privacy
@@ -356,7 +360,7 @@ $viewer = "C:\dev\LogStudio"
 | `--port <number>` | `0` | Bind only `127.0.0.1`; zero chooses an available port |
 | `--capacity <count>` | `0` (unlimited) | Zero keeps all entries; a positive integer opts into bounded history |
 | `--flush-every <count>` | `1000` | Flush fixed-size journal buffers every N entries; reads and completion also flush |
-| `--name <name>` | Command filename | Browser display name |
+| `--name <name>` | Unique random name | Session display name; editable in **Sessions → Rename** |
 | `--no-wait` | Off | Do not keep the viewer alive after child exit |
 | `--help` / `-h` | | Usage |
 
@@ -512,6 +516,10 @@ deleted; snapshots obtained before disposal remain owned by the caller.
 `ClearLogs()` flushes partial console text, deletes captured history from disk, and returns the
 deleted entry count. Capture continues afterward. Readers opened before a clear are invalidated
 instead of returning stale buffered data.
+
+`ApplicationName` chooses the session name at startup; leaving it unset generates a unique
+random name for each viewer. `RenameSession("My investigation")` changes the current name,
+including its saved metadata when `SaveSession=true`, without interrupting capture.
 
 Only one instance can own `Console.Out` / `Console.Error`. Server-only instances are independent.
 Disposal restores writers only if they are still owned by the viewer; it does not overwrite

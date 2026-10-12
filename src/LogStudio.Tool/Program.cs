@@ -104,7 +104,7 @@ internal static class Program
             Port = options.Port,
             Capacity = options.Capacity,
             FlushEveryEntries = options.FlushEveryEntries,
-            ApplicationName = options.Name ?? Path.GetFileName(options.Command),
+            ApplicationName = options.Name,
             OpenBrowser = options.OpenBrowser,
             SaveSession = true,
             SessionsDirectory = Environment.GetEnvironmentVariable(ToolOptions.SessionsDirectoryEnvironmentVariable),
@@ -233,7 +233,7 @@ internal static class Program
               --port <number>    Localhost port; 0 selects an available port (default).
               --capacity <count> Optional retention limit; 0 keeps all entries (default).
               --flush-every <n>  Flush journal buffers every n entries (default: 1000).
-              --name <name>      Display name for this run.
+              --name <name>      Display name for this run (default: unique random name).
               --no-wait          Exit with the child's exit code when it finishes.
               --help, -h         Show this help.
 

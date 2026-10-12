@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.IO;
 
 namespace LogStudio;
@@ -29,7 +28,7 @@ public sealed class ConsoleLogViewerOptions
     /// <summary>Gets or sets whether to open the browser automatically.</summary>
     public bool OpenBrowser { get; set; }
 
-    /// <summary>Gets or sets the display name. Defaults to the entry assembly's name.</summary>
+    /// <summary>Gets or sets the session display name. Null generates a unique random name at startup.</summary>
     public string? ApplicationName { get; set; }
 
     /// <summary>Gets or sets whether the wrapper should retain this run for the session manager.</summary>
@@ -70,9 +69,7 @@ public sealed class ConsoleLogViewerOptions
             throw new ArgumentOutOfRangeException(nameof(this.MaxLineLength), "MaxLineLength must be between 64 and 65536.");
         }
 
-        string name = this.ApplicationName ??
-            Assembly.GetEntryAssembly()?.GetName().Name ??
-            ViewerConstants.DefaultApplicationName;
+        string name = this.ApplicationName ?? SessionCatalog.GenerateName();
         if (string.IsNullOrWhiteSpace(name) || name.Length > ViewerConstants.MaximumApplicationNameLength)
         {
             throw new ArgumentException("ApplicationName must contain between 1 and 128 characters.", nameof(this.ApplicationName));
