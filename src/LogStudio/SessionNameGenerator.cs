@@ -14,11 +14,15 @@ internal static class SessionNameGenerator
 
     internal static string Generate(string sessionsDirectory)
     {
+        lock (Gate) return ReserveName(
+            NameGenerator.Identifiers.Get(IdentifierComponents.Adjective | IdentifierComponents.Animal,
+                separator: " ", lengthRestriction: 96).ToLowerInvariant(), sessionsDirectory);
+    }
+
+    internal static string ReserveName(string name, string sessionsDirectory)
+    {
         lock (Gate)
         {
-            string name = NameGenerator.Identifiers.Get(
-                IdentifierComponents.Adjective | IdentifierComponents.Animal,
-                separator: " ", lengthRestriction: 96).ToLowerInvariant();
             HashSet<string> existingNames = new(GeneratedNames, StringComparer.OrdinalIgnoreCase);
             if (Directory.Exists(sessionsDirectory))
             {

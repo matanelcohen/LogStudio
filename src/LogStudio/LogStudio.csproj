@@ -20,6 +20,8 @@
     <PackageReference Include="RandomFriendlyNameGenerator" Version="1.0.9" GeneratePathProperty="true" />
     <EmbeddedResource Include="$(PkgRandomFriendlyNameGenerator)/lib/net8.0/RandomFriendlyNameGenerator.dll"
                       LogicalName="LogStudio.Dependencies.RandomFriendlyNameGenerator.dll" />
+    <EmbeddedResource Include="dependency-notices.txt" LogicalName="LogStudio.Dependencies.notices.txt" />
+    <None Update="dependency-notices.txt" Pack="true" PackagePath="/" />
   </ItemGroup>
   <Target Name="ValidateFrontendAssets" BeforeTargets="PrepareForBuild">
     <Error Condition="!Exists('$(MSBuildThisFileDirectory)../../frontend/dist/index.html') or !Exists('$(MSBuildThisFileDirectory)../../frontend/dist/styles.css') or !Exists('$(MSBuildThisFileDirectory)../../frontend/dist/viewer.js') or !Exists('$(MSBuildThisFileDirectory)../../frontend/dist/third-party-notices.txt')"

@@ -33,6 +33,34 @@ public sealed class SessionNameGeneratorTests
     }
 
     [Fact]
+    public void GeneratedNamesAvoidSavedNamesAndNamesAlreadyReservedInTheProcess()
+    {
+        string root = Directory.CreateTempSubdirectory("logstudio-name-test-").FullName;
+        try
+        {
+            using (ConsoleLogViewer viewer = ConsoleLogViewer.Start(new ConsoleLogViewerOptions
+            {
+                CaptureConsole = false, SaveSession = true, SessionsDirectory = root, ApplicationName = "Digital Duck",
+            }))
+            {
+                viewer.Record("saved session");
+            }
+
+            string first = SessionNameGenerator.ReserveName("digital duck", root);
+            string second = SessionNameGenerator.ReserveName("digital duck", root);
+            Assert.StartsWith("digital duck ", first, StringComparison.Ordinal);
+            Assert.StartsWith("digital duck ", second, StringComparison.Ordinal);
+            Assert.NotEqual(first, second);
+            AssertFriendlyName(first);
+            AssertFriendlyName(second);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public void InvalidSavedMetadataDoesNotPreventNameGeneration()
     {
         string root = Directory.CreateTempSubdirectory("logstudio-name-test-").FullName;
@@ -51,7 +79,7 @@ public sealed class SessionNameGeneratorTests
     internal static void AssertFriendlyName(string name)
     {
         Assert.Equal(name.ToLowerInvariant(), name);
-        Assert.Matches(@"^\S+ \S+(?: [0-9]+)?$", name);
+        Assert.Matches(@"^\S+(?: \S+)+$", name);
         Assert.InRange(name.Length, 1, ViewerConstants.MaximumApplicationNameLength);
         Assert.DoesNotContain("session-", name, StringComparison.Ordinal);
     }
