@@ -102,6 +102,28 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
             Assert.False(process.HasExited);
             Assert.Equal(7, status.GetProperty("exitCode").GetInt32());
             Assert.True(status.GetProperty("retainedCount").GetInt32() > 0);
+            string name = status.GetProperty("applicationName").GetString()!;
+            Assert.StartsWith("session-", name, StringComparison.Ordinal);
+            Assert.True(Guid.TryParseExact(name["session-".Length..], "N", out _));
+        }
+        finally
+        {
+            await KillAsync(process);
+        }
+    }
+
+    [Theory]
+    [InlineData("My investigation")]
+    [InlineData("session-custom-name")]
+    public async Task WrapperPreservesExplicitSessionNames(string name)
+    {
+        using Process process = StartProcess(WrapperArguments("--name", name, "--", DotnetCommand, DemoPath, "--count", "0"));
+        try
+        {
+            Uri url = await ReadUrlAsync(process);
+            using HttpClient client = new();
+            using JsonDocument snapshot = JsonDocument.Parse(await client.GetStringAsync(new Uri(url, ViewerConstants.SnapshotRoute)));
+            Assert.Equal(name, snapshot.RootElement.GetProperty("status").GetProperty("applicationName").GetString());
         }
         finally
         {

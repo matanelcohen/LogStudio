@@ -61,7 +61,7 @@ export function SessionImportDialog({ open, onClose, onImported, returnFocus }: 
           </button>
           <label className="import-name">Session name <span className="muted">(optional)</span>
             <input aria-label="Imported session name" maxLength={MaximumSessionNameLength} value={name} disabled={busy}
-              placeholder="Use the bundle name, or Imported logs for JSONL" onChange={event => setName(event.target.value)} /></label>
+              placeholder="Use the bundle name, or a unique random name for JSONL" onChange={event => setName(event.target.value)} /></label>
           <p className="import-assurance"><ShieldCheck size={16} />A fresh session ID is created. Existing histories are never overwritten. The disk index is rebuilt from validated records.</p>
           {busy && <div className="import-progress" role="status"><progress max={100} value={progress} /><span>{progress < 100 ? `Uploading ${progress}%` : "Validating records and rebuilding the disk index…"}</span></div>}
           {error && <p className="notice danger" role="alert">{error}</p>}

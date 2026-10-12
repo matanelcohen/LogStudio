@@ -37,6 +37,15 @@ internal sealed class SessionCatalog
 
     internal string Id { get; }
 
+    internal static string GenerateName() => $"session-{Guid.NewGuid():N}";
+
+    internal static string ValidateName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.Length > ViewerConstants.MaximumApplicationNameLength)
+            throw new ArgumentException("Session names must contain 1–128 characters.", nameof(name));
+        return name.Trim();
+    }
+
     internal SessionInfo Information(string? id, ViewerStatus current)
     {
         lock (this.gate) return string.IsNullOrEmpty(id) || id == this.Id ? this.Describe(current) : this.Read(id).Session;
@@ -72,19 +81,21 @@ internal sealed class SessionCatalog
 
     internal SessionInfo Rename(string id, string name)
     {
-        if (string.IsNullOrWhiteSpace(name) || name.Length > ViewerConstants.MaximumApplicationNameLength)
-            throw new ArgumentException("Session names must contain 1–128 characters.");
+        name = ValidateName(name);
         lock (this.gate)
         {
-            if (id == this.Id) throw new ArgumentException("Name the current run with --name; only saved sessions can be renamed.");
-            SavedSession saved = this.Read(id);
-            SavedSession renamed = saved with
-            {
-                Session = saved.Session with { Name = name.Trim() },
-                Status = saved.Status with { ApplicationName = name.Trim(), Revision = saved.Status.Revision + 1 },
-            };
-            this.Write(this.DirectoryFor(id), renamed);
-            return renamed.Session;
+            if (id == this.Id) throw new ArgumentException("Rename the current session through its viewer.");
+            return this.RenameSaved(id, name);
+        }
+    }
+
+    internal void UpdateCurrentName(string name)
+    {
+        if (!this.settings.SaveSession) return;
+        lock (this.gate)
+        {
+            if (File.Exists(Path.Combine(this.DirectoryFor(this.Id), MetadataFile)))
+                this.RenameSaved(this.Id, name);
         }
     }
 
@@ -231,6 +242,18 @@ internal sealed class SessionCatalog
             throw new InvalidDataException("The saved session metadata is invalid.");
         if (saved.Session.Id != id) throw new InvalidDataException("The saved session ID does not match its directory.");
         return saved;
+    }
+
+    private SessionInfo RenameSaved(string id, string name)
+    {
+        SavedSession saved = this.Read(id);
+        SavedSession renamed = saved with
+        {
+            Session = saved.Session with { Name = name },
+            Status = saved.Status with { ApplicationName = name, Revision = saved.Status.Revision + 1 },
+        };
+        this.Write(this.DirectoryFor(id), renamed);
+        return renamed.Session;
     }
 
     private void Write(string directory, SavedSession saved)

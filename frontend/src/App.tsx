@@ -249,6 +249,13 @@ export default function App() {
           onClose={() => setClearOpen(false)} onConfirm={clearHistory}
           returnFocus={() => clearOpener.current?.focus()} />
         <SessionsDialog open={sessionsOpen} selected={query.sessionId} onClose={() => setSessionsOpen(false)}
+          onRenamed={session => {
+            if (session.isCurrent) {
+              live.rename(session.name);
+              setPause(pause => pause?.status ? { ...pause, status: { ...pause.status, applicationName: session.name } } : pause);
+            }
+            if (session.isCurrent ? !query.sessionId : query.sessionId === session.id) history.refresh();
+          }}
           onDeleted={id => {
             if (query.sessionId === id) {
               setQuery({ ...defaultQuery(), pageSize: query.pageSize }); setSelected(null); setCursor({ before: null, after: null }); setPause(null); setFollow(true);

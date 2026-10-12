@@ -64,7 +64,11 @@ export function useLiveStatus(paused: boolean) {
     latest.current = next;
     setStatus(next);
   }, []);
-  return { status, connection, error, gap, reconnect, applyStatus };
+  const rename = useCallback((applicationName: string) => {
+    if (latest.current) latest.current = { ...latest.current, applicationName };
+    setStatus(status => status ? { ...status, applicationName } : status);
+  }, []);
+  return { status, connection, error, gap, reconnect, applyStatus, rename };
 }
 
 export function useLogPage(query: QueryState, cursor: PageCursor, maximumId: number | null, revision: number, paused: boolean, clearedThroughId = 0) {

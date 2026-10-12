@@ -1,14 +1,16 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { useLogPage } from "./useLogExplorer";
+
+const liveRename = vi.hoisted(() => vi.fn());
 
 vi.mock("./useLogExplorer", async () => {
   const { Status, fixturePage } = await import("./test-fixtures");
   return {
     useLiveStatus: () => ({
       status: Status, connection: "live", error: null, gap: null,
-      reconnect: vi.fn(), applyStatus: vi.fn()
+      reconnect: vi.fn(), applyStatus: vi.fn(), rename: liveRename
     }),
     useLogPage: vi.fn(() => ({ page: fixturePage(), loading: false, error: null, refresh: vi.fn() }))
   };
@@ -51,5 +53,30 @@ describe("log-first workspace", () => {
     expect(vi.mocked(useLogPage).mock.calls.at(-1)?.[0].levels).toEqual(["warning"]);
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     expect(screen.getByRole("heading", { name: "Import a session" })).toBeDefined();
+  });
+
+  it("updates the session name while paused without resetting the frozen log cursor", async () => {
+    const current = {
+      id: "current", name: "Current run", startedAt: "2026-10-12T08:00:00Z",
+      completedAt: null, exitCode: null, entryCount: 10, command: "dotnet",
+      arguments: [], workingDirectory: "/current", isCurrent: true
+    };
+    const renamed = { ...current, name: "Paused investigation" };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify([current])))
+      .mockResolvedValueOnce(new Response(JSON.stringify(renamed)))
+      .mockResolvedValueOnce(new Response(JSON.stringify([renamed]))));
+    const { container } = render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    const maximumId = vi.mocked(useLogPage).mock.calls.at(-1)?.[2];
+    fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+    await screen.findByRole("button", { name: "Rename Current run" });
+    fireEvent.click(screen.getByLabelText("Rename Current run"));
+    fireEvent.change(screen.getByLabelText("New session name"), { target: { value: renamed.name } });
+    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+    await waitFor(() => expect(container.querySelector("#applicationName")?.textContent).toBe(renamed.name));
+    expect(liveRename).toHaveBeenCalledWith(renamed.name);
+    expect(vi.mocked(useLogPage).mock.calls.at(-1)?.[2]).toBe(maximumId);
+    fireEvent.click(screen.getByRole("button", { name: "Close sessions" }));
+    expect(screen.getByRole("button", { name: "Resume" })).toBeDefined();
   });
 });

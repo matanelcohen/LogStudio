@@ -91,6 +91,24 @@ describe("bounded single-page requests", () => {
       expect(hook.result.current.status?.retainedCount).toBe(0);
     });
 
+    it("applies a rename while paused without changing the log snapshot or losing pending updates", async () => {
+      vi.useFakeTimers();
+      EventSourceFixture.instances = [];
+      vi.stubGlobal("EventSource", EventSourceFixture);
+      const hook = renderHook(({ paused }) => useLiveStatus(paused), { initialProps: { paused: false } });
+      act(() => EventSourceFixture.instances[0]?.emit(Status));
+      act(() => hook.result.current.rename("Renamed run"));
+      await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+      expect(hook.result.current.status).toEqual({ ...Status, applicationName: "Renamed run" });
+      hook.rerender({ paused: true });
+      act(() => hook.result.current.rename("Paused investigation"));
+      expect(hook.result.current.status).toEqual({ ...Status, applicationName: "Paused investigation" });
+      act(() => EventSourceFixture.instances[1]?.emit({ ...Status, applicationName: "Paused investigation", lastId: 30000, revision: 30001 }));
+      await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+      expect(hook.result.current.status?.lastId).toBe(Status.lastId);
+      expect(hook.result.current.status?.applicationName).toBe("Paused investigation");
+    });
+
     it("reports invalid live payloads instead of applying silent defaults", () => {
       EventSourceFixture.instances = [];
       vi.stubGlobal("EventSource", EventSourceFixture);
