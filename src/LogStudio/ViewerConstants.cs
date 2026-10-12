@@ -44,6 +44,10 @@ internal static class ViewerConstants
     internal const string SessionsRoute = "api/sessions";
     internal const string ImportRoute = "api/import";
     internal const string BundleExportRoute = "api/export-session";
+    internal const string CopilotConnectRoute = "api/copilot/connect";
+    internal const string CopilotChatRoute = "api/copilot/chat";
+    internal const string CopilotConnectAction = "copilot-connect";
+    internal const string CopilotChatAction = "copilot-chat";
     internal const string ImportFormatQuery = "format";
     internal const string ImportNameQuery = "name";
     internal const string ImportAction = "import";

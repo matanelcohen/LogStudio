@@ -5,6 +5,11 @@ export const ClearActionValue = "clear";
 export const ImportActionValue = "import";
 export const RenameActionValue = "rename";
 export const DeleteSessionActionValue = "delete";
+export const CopilotConnectActionValue = "copilot-connect";
+export const CopilotChatActionValue = "copilot-chat";
+export const MaximumChatEntries = 100;
+export const MaximumChatQuestionLength = 2000;
+export const MaximumChatAnswerLength = 16000;
 export const MaximumImportBytes = 256 * 1024 * 1024;
 export const MaximumSessionNameLength = 128;
 export const UploadContentType = "application/octet-stream";
@@ -14,7 +19,7 @@ export const MaximumConditionValueLength = 256;
 export const MaximumConditionsJsonLength = 4096;
 export const MaximumCategorySuggestions = 1024;
 export const MaximumHighlights = 80;
-export const ApiRoutes = { Search: "api/search", Updates: "api/updates", Export: "api/export", Clear: "api/clear", Sessions: "api/sessions", Import: "api/import", SessionExport: "api/export-session" } as const;
+export const ApiRoutes = { Search: "api/search", Updates: "api/updates", Export: "api/export", Clear: "api/clear", Sessions: "api/sessions", Import: "api/import", SessionExport: "api/export-session", CopilotConnect: "api/copilot/connect", CopilotChat: "api/copilot/chat" } as const;
 export const LiveStatusEvent = "status";
 export const QueryKeys = {
   Search: "q", MatchCase: "matchCase", Severity: "severity", Stream: "stream", Category: "category",
@@ -84,6 +89,17 @@ export interface LogPage {
 export interface ClearResult {
   deletedCount: number;
   status: ViewerStatus;
+}
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface ChatResponse {
+  answer: string;
+  contextEntryCount: number;
+  contextTruncated: boolean;
 }
 
 export interface SessionInfo {

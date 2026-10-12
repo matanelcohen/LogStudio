@@ -1,12 +1,13 @@
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import * as Popover from "@radix-ui/react-popover";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { AlertCircle, Check, ChevronDown, ChevronRight, Clock3, Compass, Database, FileUp, HardDrive, History, Logs, Monitor, Moon, Pause, Play, Sun, X } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, ChevronRight, Clock3, Compass, Database, FileUp, HardDrive, History, Logs, MessageSquare, Monitor, Moon, Pause, Play, Sun, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ConditionDialog } from "./ConditionDialog";
 import { ClearHistoryDialog } from "./ClearHistoryDialog";
 import { SessionsDialog } from "./SessionsDialog";
 import { SessionImportDialog } from "./SessionImportDialog";
+import { CopilotChatDialog } from "./CopilotChatDialog";
 import { DiscoverSidebar } from "./DiscoverSidebar";
 import { clearSessionLogs } from "./api";
 import { Inspector } from "./Inspector";
@@ -38,12 +39,14 @@ export default function App() {
   const [clearError, setClearError] = useState<string | null>(null);
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
   const searchRef = useRef<HTMLInputElement>(null);
   const editorOpener = useRef<HTMLElement | null>(null);
   const clearOpener = useRef<HTMLButtonElement>(null);
   const sessionsOpener = useRef<HTMLButtonElement>(null);
   const importOpener = useRef<HTMLButtonElement>(null);
+  const chatOpener = useRef<HTMLButtonElement>(null);
   const seenClear = useRef(0);
   const appearance = useAppearance();
   const live = useLiveStatus(pause !== null);
@@ -166,6 +169,8 @@ export default function App() {
           <div className="header-actions">
             <span id="connection" className={`connection ${live.connection}`} role="status">{archived ? "Saved session" : connectionLabel}</span>
             <button id="importLogs" ref={importOpener} className="ghost-button" onClick={() => setImportOpen(true)}><FileUp size={14} /> Import</button>
+            <button ref={chatOpener} className="ghost-button" disabled={!activePage?.entries.length || history.loading || !!history.error}
+              onClick={() => setChatOpen(true)}><MessageSquare size={14} /> Ask Copilot</button>
             <Popover.Root>
               <Popover.Trigger asChild><button id="storageInfo" className="icon-button ghost-button" aria-label="Storage details"><HardDrive size={15} /></button></Popover.Trigger>
               <Popover.Portal><Popover.Content className="popover storage-popover" sideOffset={8} align="end">
@@ -258,6 +263,8 @@ export default function App() {
           returnFocus={() => sessionsOpener.current?.focus()} onSelect={selectSession} />
         <SessionImportDialog open={importOpen} onClose={() => setImportOpen(false)} onImported={selectSession}
           returnFocus={() => importOpener.current?.focus()} />
+        {chatOpen && activePage && <CopilotChatDialog key={query.sessionId} page={activePage} sessionId={query.sessionId}
+          onClose={() => setChatOpen(false)} returnFocus={() => chatOpener.current?.focus()} />}
       </div>
       </div>
     </Tooltip.Provider>

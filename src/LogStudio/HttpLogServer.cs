@@ -44,15 +44,18 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private readonly CancellationTokenSource shutdown = new();
     private readonly SemaphoreSlim streamSlots = new(ViewerConstants.MaximumLiveClients);
     private readonly SemaphoreSlim historySlots = new(MaximumHistoryRequests);
+    private readonly SemaphoreSlim copilotSlot = new(1);
+    private readonly CopilotCliClient copilot;
     private readonly ConcurrentDictionary<Task, byte> requests = new();
     private readonly Task acceptTask;
 
-    internal HttpLogServer(ViewerSettings settings, LogBuffer logs, TextWriter diagnostics, Func<LogClearResult> clearLogs, SessionCatalog sessions)
+    internal HttpLogServer(ViewerSettings settings, LogBuffer logs, TextWriter diagnostics, Func<LogClearResult> clearLogs, SessionCatalog sessions, CopilotCliClient? copilot = null)
     {
         this.logs = logs;
         this.diagnostics = diagnostics;
         this.clearLogs = clearLogs;
         this.sessions = sessions;
+        this.copilot = copilot ?? new CopilotCliClient();
         this.pathPrefix = $"/{Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant()}/";
         string nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(24));
         this.contentSecurityPolicy = string.Format(CultureInfo.InvariantCulture, ContentSecurityPolicy, nonce);
@@ -73,6 +76,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
         await Task.WhenAll(this.requests.Keys).ConfigureAwait(false);
         this.streamSlots.Dispose();
         this.historySlots.Dispose();
+        this.copilotSlot.Dispose();
         this.shutdown.Dispose();
     }
 
@@ -202,6 +206,14 @@ internal sealed class HttpLogServer : IAsyncDisposable
             }
 
             string route = request.Url.AbsolutePath[this.pathPrefix.Length..];
+            if (route is ViewerConstants.CopilotConnectRoute or ViewerConstants.CopilotChatRoute)
+            {
+                if (request.HttpMethod != ViewerConstants.PostMethod)
+                    await WriteErrorAsync(response, HttpStatusCode.MethodNotAllowed, "Copilot requires an explicit POST action.", cancellationToken).ConfigureAwait(false);
+                else
+                    await this.ChatAsync(context, route == ViewerConstants.CopilotConnectRoute, cancellationToken).ConfigureAwait(false);
+                return;
+            }
             if (route == ViewerConstants.ImportRoute && request.HttpMethod == ViewerConstants.PostMethod)
             {
                 if (request.Headers[ViewerConstants.ClearRequestHeader] != ViewerConstants.ImportAction)
@@ -383,6 +395,67 @@ internal sealed class HttpLogServer : IAsyncDisposable
         finally
         {
             response.Close();
+        }
+    }
+
+    private async Task ChatAsync(HttpListenerContext context, bool connect, CancellationToken cancellationToken)
+    {
+        HttpListenerRequest request = context.Request;
+        HttpListenerResponse response = context.Response;
+        if (request.Headers[ViewerConstants.ClearRequestHeader] != (connect ? ViewerConstants.CopilotConnectAction : ViewerConstants.CopilotChatAction))
+        {
+            await WriteErrorAsync(response, HttpStatusCode.Forbidden, "An explicit Copilot action header is required.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (!connect && (request.ContentLength64 < 1 || request.ContentLength64 > CopilotChat.MaximumRequestBytes))
+        {
+            await WriteErrorAsync(response, HttpStatusCode.RequestEntityTooLarge, "Chat requests must contain 1–32768 bytes with a known content length.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (!this.copilotSlot.Wait(0))
+        {
+            await WriteErrorAsync(response, HttpStatusCode.TooManyRequests, "A Copilot request is already running. Wait for it to finish.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        try
+        {
+            if (connect)
+            {
+                string version = await this.copilot.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(new { version }, ViewerConstants.JsonOptions),
+                    ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            ChatRequest chat;
+            try
+            {
+                chat = await JsonSerializer.DeserializeAsync<ChatRequest>(request.InputStream, ViewerConstants.JsonOptions, cancellationToken).ConfigureAwait(false) ??
+                    throw new ArgumentException("A chat request is required.");
+            }
+            catch (JsonException exception)
+            {
+                throw new ArgumentException("The chat request must contain valid JSON.", exception);
+            }
+            CopilotChat.Validate(chat);
+            ChatContext snapshot;
+            string? selected = request.QueryString[ViewerConstants.SessionIdQuery];
+            using (LogHistoryReader history = string.IsNullOrEmpty(selected) || selected == this.sessions.Id ? this.logs.OpenHistory() : this.sessions.Open(selected))
+                snapshot = CopilotChat.BuildContext(chat, history, cancellationToken);
+            ChatResponse result = await this.copilot.AskAsync(snapshot, cancellationToken).ConfigureAwait(false);
+            await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(result, ViewerConstants.JsonOptions),
+                ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+        }
+        catch (CopilotException exception)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.ServiceUnavailable, exception.Message, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HistoryClearedException exception)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.Conflict, exception.Message, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            this.copilotSlot.Release();
         }
     }
 
