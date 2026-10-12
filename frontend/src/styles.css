@@ -533,6 +533,13 @@ mark { background: var(--cp-highlight); color: var(--cp-text); border-radius: 2p
 @media (prefers-reduced-motion: reduce) {
   button { transition: none; }
 }
+@media (max-height: 600px) and (min-width: 761px) {
+  body { height: auto; overflow: auto; }
+  .discover-shell { height: auto; min-height: 100dvh; }
+  .app { height: auto; min-height: 100dvh; }
+  .logs-scroll { height: 50dvh; min-height: 240px; }
+  .details-panel { max-height: 480px; }
+}
 @media (max-width: 1080px) {
   .workspace[data-inspector="true"] { grid-template-columns: minmax(0, 1fr) 300px; }
   .workspace[data-fields="true"] { grid-template-columns: 160px minmax(0, 1fr); }
