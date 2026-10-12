@@ -19,9 +19,6 @@ Same command. No app changes. One local browser tab.
 **From noise to the exact entry.** Search and filter a session, then inspect a log without leaving the results.
 The optional timeline shows the **visible page only**, not the full session.
 
-<details>
-<summary>More views: metrics, traces, light mode, filters, and mobile</summary>
-
 ### Metrics
 
 ![Log Studio's Metrics page with tagged raw measurement charts in dark mode](docs/design/metrics-dark.png)
@@ -35,6 +32,24 @@ Shown with synthetic demo telemetry, not production data.
 
 **Follow the request.** Inspect completed spans, parent relationships, and error details.
 Shown with synthetic demo telemetry, not production data.
+
+### Configure telemetry sources
+
+![Log Studio's source configuration dialog with independent meter and activity filters and discovered runtime sources](docs/design/telemetry-config-dark.png)
+
+**Choose what to capture.** Configure metric and trace sources independently, including sources
+discovered outside the current filters. Shown with synthetic demo data.
+
+### AI-assisted configuration
+
+![Log Studio's consent-based source suggestion preview with recommended metric and trace filters, runtime evidence, and warnings](docs/design/telemetry-suggestions-dark.png)
+
+**Discover, suggest, review.** Optional Copilot suggestions explain recommended sources.
+Choose **Use suggestion**, then **Apply**—configuration is never applied automatically.
+Shown with a synthetic suggestion fixture, not a live Copilot response.
+
+<details>
+<summary>More views: light mode, filters, and mobile</summary>
 
 ### Light mode
 
