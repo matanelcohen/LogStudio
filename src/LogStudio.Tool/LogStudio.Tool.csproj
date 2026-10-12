@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>logstudio</ToolCommandName>
+    <PackageId>LogStudio.Tool</PackageId>
+    <Description>Wrap any console command with a disk-backed localhost log explorer, conditional filters and streaming exports.</Description>
+    <PackageTags>console;logging;log-viewer;dotnet-tool;local-development</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RollForward>Major</RollForward>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../LogStudio/LogStudio.csproj" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <None Include="../../frontend/dist/third-party-notices.txt" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>

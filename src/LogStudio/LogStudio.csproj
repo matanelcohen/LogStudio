@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>LogStudio</PackageId>
+    <Description>Localhost console log explorer with temporary disk history, bounded memory, paged search and include/exclude query conditions.</Description>
+    <PackageTags>console;logging;log-viewer;local-development</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="../../frontend/dist/index.html" LogicalName="LogStudio.Web.index.html" />
+    <EmbeddedResource Include="../../frontend/dist/styles.css" LogicalName="LogStudio.Web.styles.css" />
+    <EmbeddedResource Include="../../frontend/dist/viewer.js" LogicalName="LogStudio.Web.viewer.js" />
+    <EmbeddedResource Include="../../frontend/dist/third-party-notices.txt" LogicalName="LogStudio.Web.third-party-notices.txt" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <None Include="../../frontend/dist/third-party-notices.txt" Pack="true" PackagePath="/" />
+    <InternalsVisibleTo Include="LogStudio.Tests" />
+  </ItemGroup>
+  <Target Name="ValidateFrontendAssets" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)../../frontend/dist/index.html') or !Exists('$(MSBuildThisFileDirectory)../../frontend/dist/styles.css') or !Exists('$(MSBuildThisFileDirectory)../../frontend/dist/viewer.js') or !Exists('$(MSBuildThisFileDirectory)../../frontend/dist/third-party-notices.txt')"
+           Text="Build the frontend first: cd frontend &amp;&amp; npm ci &amp;&amp; npm run build. Or use ./install.sh from the LogStudio root." />
+  </Target>
+</Project>

@@ -1,0 +1,290 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using Xunit;
+
+namespace LogStudio.Tests;
+
+public sealed class CaptureTests
+{
+    private const string LoggerCategory = "LogStudio.Tests.ConsoleHost";
+    private const string LoggerMessage = "skill-runner-warning";
+    private const string SyntheticScope = "EvaluationId:demo-001";
+    private const int UnlimitedWriterCount = 8;
+    private const int EntriesPerUnlimitedWriter = 15_000;
+    private const int CapacityAbovePreviousMaximum = 100_001;
+
+    [Fact]
+    public void TeePreservesOriginalOutputAndNormalizesLineEndings()
+    {
+        using ConsoleLogViewer viewer = StartServer();
+        using StringWriter original = new() { NewLine = "\r\n" };
+        using TextWriter writer = viewer.CreateCaptureWriter(original, LogStream.Stdout);
+        writer.Write("first\r");
+        writer.Write("\nsecond\nprogress\rfinal");
+        writer.Flush();
+
+        Assert.Equal("first\r\nsecond\nprogress\rfinal", original.ToString());
+        Assert.Equal(new[] { "first", "second", "progress", "final" }, viewer.GetLogs().Select(entry => entry.Message));
+        Assert.True(viewer.GetLogs()[^1].IsPartial);
+    }
+
+    [Fact]
+    public async Task PartialPromptsAppearWithoutNewlineAndAreNotDuplicated()
+    {
+        await using ConsoleLogViewer viewer = StartServer();
+        using StringWriter original = new();
+        using TextWriter writer = viewer.CreateCaptureWriter(original, LogStream.Stdout);
+        writer.Write("Input> ");
+        await WaitUntilAsync(() => viewer.GetLogs().Count > 0);
+        Assert.Equal("Input> ", Assert.Single(viewer.GetLogs()).Message);
+        writer.Write("\nnext\n");
+        Assert.Equal(new[] { "Input> ", "next" }, viewer.GetLogs().Select(entry => entry.Message));
+        Assert.Equal("Input> \nnext\n", original.ToString());
+    }
+
+    [Fact]
+    public void LongLinesAreBoundedWithoutDiscardingTextOrBreakingSurrogatePairs()
+    {
+        using ConsoleLogViewer viewer = StartServer(maxLineLength: 64);
+        using StringWriter original = new();
+        using TextWriter writer = viewer.CreateCaptureWriter(original, LogStream.Stdout);
+        string text = new string('x', 63) + "\U0001F642" + new string('y', 200);
+        writer.WriteLine(text);
+        Assert.Equal(text, string.Concat(viewer.GetLogs().Select(entry => entry.Message)));
+        Assert.All(viewer.GetLogs(), entry =>
+        {
+            Assert.InRange(entry.Message.Length, 1, 64);
+            Assert.False(char.IsHighSurrogate(entry.Message[^1]));
+        });
+        Assert.Equal(text + Environment.NewLine, original.ToString());
+    }
+
+    [Fact]
+    public void TerminalColorsAndHyperlinksAreRemovedOnlyFromBrowserText()
+    {
+        using ConsoleLogViewer viewer = StartServer();
+        using StringWriter original = new();
+        using TextWriter writer = viewer.CreateCaptureWriter(original, LogStream.Stdout);
+        const string text = "\u001b[31mred\u001b[0m \u001b]8;;https://example.invalid\u0007link\u001b]8;;\u001b\\";
+        writer.Write(text[..5]);
+        writer.WriteLine(text[5..]);
+        Assert.Equal("red link", Assert.Single(viewer.GetLogs()).Message);
+        Assert.Equal(text + Environment.NewLine, original.ToString());
+    }
+
+    [Fact]
+    public async Task CapturesRealDotnetConsoleLoggerCategoriesScopesAndSeverity()
+    {
+        TextWriter previousOut = Console.Out;
+        TextWriter previousError = Console.Error;
+        using StringWriter stdout = new();
+        using StringWriter stderr = new();
+        Console.SetOut(stdout);
+        Console.SetError(stderr);
+        try
+        {
+            await using ConsoleLogViewer viewer = ConsoleLogViewer.Start();
+            using ILoggerFactory factory = LoggerFactory.Create(logging => logging.AddSimpleConsole(options =>
+            {
+                options.TimestampFormat = "HH:mm:ss.fff ";
+                options.IncludeScopes = true;
+            }));
+            ILogger logger = factory.CreateLogger(LoggerCategory);
+            using IDisposable? scope = logger.BeginScope(SyntheticScope);
+            logger.LogWarning(LoggerMessage);
+            await WaitUntilAsync(() => viewer.GetLogs().Any(entry => entry.Message.Contains(LoggerMessage, StringComparison.Ordinal)));
+            LogEntry entry = Assert.Single(viewer.GetLogs(), entry => entry.Message.Contains(LoggerMessage, StringComparison.Ordinal));
+            Assert.Equal(LogSeverity.Warning, entry.Severity);
+            Assert.Equal(LoggerCategory, entry.Category);
+            Assert.Contains(SyntheticScope, stdout.ToString(), StringComparison.Ordinal);
+            Assert.Throws<InvalidOperationException>(() => ConsoleLogViewer.Start());
+        }
+        finally
+        {
+            Console.SetOut(previousOut);
+            Console.SetError(previousError);
+        }
+    }
+
+    [Fact]
+    public void DisposalRestoresOwnedWritersButDoesNotOverwriteAReplacement()
+    {
+        TextWriter previousOut = Console.Out;
+        TextWriter previousError = Console.Error;
+        using StringWriter replacement = new();
+        ConsoleLogViewer viewer = ConsoleLogViewer.Start();
+        TextWriter captured = Console.Out;
+        Console.SetOut(replacement);
+        TextWriter installedReplacement = Console.Out;
+        viewer.Dispose();
+        try
+        {
+            Assert.Same(installedReplacement, Console.Out);
+            Assert.Same(previousError, Console.Error);
+            captured.WriteLine("cached writer still mirrors after disposal");
+            Assert.Throws<ObjectDisposedException>(() => viewer.GetLogs());
+        }
+        finally
+        {
+            Console.SetOut(previousOut);
+            Console.SetError(previousError);
+        }
+    }
+
+    [Fact]
+    public async Task AsyncWritesCaptureBothStreamsAndFinalPartialOutput()
+    {
+        await using ConsoleLogViewer viewer = StartServer();
+        using StringWriter original = new();
+        using TextWriter writer = viewer.CreateCaptureWriter(original, LogStream.Stderr);
+        await writer.WriteAsync("Error: async stderr".AsMemory());
+        await writer.WriteLineAsync();
+        await writer.WriteAsync("tail");
+        writer.Dispose();
+        Assert.Equal(new[] { "Error: async stderr", "tail" }, viewer.GetLogs().Select(entry => entry.Message));
+        Assert.All(viewer.GetLogs(), entry => Assert.Equal(LogStream.Stderr, entry.Stream));
+        Assert.All(viewer.GetLogs(), entry => Assert.Equal(LogSeverity.Error, entry.Severity));
+    }
+
+    [Fact]
+    public void RetentionAndConcurrentWritersPreserveMonotonicIds()
+    {
+        ViewerSettings settings = new ConsoleLogViewerOptions { Capacity = 128 }.Validate();
+        using LogBuffer buffer = new(settings);
+        Parallel.For(0, 8, writer =>
+        {
+            for (int index = 0; index < 1000; index++)
+            {
+                buffer.Append($"{writer}:{index}", LogStream.Stdout);
+            }
+        });
+        LogSnapshot snapshot = buffer.Snapshot();
+        Assert.Equal(128, snapshot.Entries.Length);
+        Assert.Equal(8000, snapshot.Status.LastId);
+        Assert.Equal(7872, snapshot.Status.EvictedCount);
+        Assert.Equal(Enumerable.Range(7873, 128).Select(value => (long)value), snapshot.Entries.Select(entry => entry.Id));
+    }
+
+    [Fact]
+    public void DefaultHistoryKeepsConcurrentWritesBeyondOneHundredThousandEntries()
+    {
+        using LogBuffer buffer = new(new ConsoleLogViewerOptions().Validate());
+        Parallel.For(0, UnlimitedWriterCount, writer =>
+        {
+            for (int index = 0; index < EntriesPerUnlimitedWriter; index++)
+            {
+                buffer.Append($"{writer}:{index}", LogStream.Stdout);
+            }
+        });
+
+        int expectedCount = UnlimitedWriterCount * EntriesPerUnlimitedWriter;
+        LogSnapshot snapshot = buffer.Snapshot();
+        Assert.Equal(expectedCount, snapshot.Entries.Length);
+        Assert.Equal(0, snapshot.Status.Capacity);
+        Assert.Equal(expectedCount, snapshot.Status.RetainedCount);
+        Assert.Equal(expectedCount, snapshot.Status.LastId);
+        Assert.Equal(1, snapshot.Status.FirstId);
+        Assert.Equal(0, snapshot.Status.EvictedCount);
+        Assert.Equal(Enumerable.Range(1, expectedCount).Select(value => (long)value), snapshot.Entries.Select(entry => entry.Id));
+        Assert.Equal(snapshot.Status, buffer.GetStatus());
+
+        long cursor = 0;
+        do
+        {
+            LogBatch batch = buffer.ReadAfter(cursor);
+            Assert.Equal(0, batch.MissedCount);
+            Assert.InRange(batch.Entries.Length, 1, ViewerConstants.StreamBatchSize);
+            Assert.Equal(cursor + 1, batch.Entries[0].Id);
+            cursor = batch.Entries[^1].Id;
+            Assert.Equal(cursor < expectedCount, batch.HasMore);
+        }
+        while (cursor < expectedCount);
+    }
+
+    [Fact]
+    public void ExplicitCapacityCanExceedThePreviousMaximum()
+    {
+        using ConsoleLogViewer viewer = StartServer(capacity: CapacityAbovePreviousMaximum);
+        viewer.Record("retained-entry");
+        Assert.Equal("retained-entry", Assert.Single(viewer.GetLogs()).Message);
+    }
+
+    [Theory]
+    [InlineData("info: My.Category[42]", LogSeverity.Information, "My.Category")]
+    [InlineData("12:20:33.123 warn: My.Category[0]", LogSeverity.Warning, "My.Category")]
+    [InlineData("[ERR] an error", LogSeverity.Error, null)]
+    [InlineData("Error: skill failed", LogSeverity.Error, null)]
+    [InlineData("!! System.InvalidOperationException", LogSeverity.Error, null)]
+    [InlineData("{\"LogLevel\":\"Critical\",\"Category\":\"Json.Category\",\"Message\":\"failure\"}", LogSeverity.Critical, "Json.Category")]
+    [InlineData("ordinary text containing info: inside a sentence", LogSeverity.Output, null)]
+    [InlineData("{not-json", LogSeverity.Output, null)]
+    public void SeverityInferenceIsPrefixBased(string message, LogSeverity severity, string? category)
+    {
+        using ConsoleLogViewer viewer = StartServer();
+        viewer.Record(message);
+        LogEntry entry = Assert.Single(viewer.GetLogs());
+        Assert.Equal(severity, entry.Severity);
+        Assert.Equal(category, entry.Category);
+    }
+
+    [Fact]
+    public void OptionValidationIsExplicitAndSettingsAreCopiedAtStart()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => ConsoleLogViewer.Start(new ConsoleLogViewerOptions { Capacity = -1 }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ConsoleLogViewer.Start(new ConsoleLogViewerOptions { FlushEveryEntries = 0 }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ConsoleLogViewer.Start(new ConsoleLogViewerOptions { Port = 65536 }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ConsoleLogViewer.Start(new ConsoleLogViewerOptions { MaxLineLength = 1 }));
+        ConsoleLogViewerOptions options = new() { CaptureConsole = false, Capacity = 2 };
+        using ConsoleLogViewer viewer = ConsoleLogViewer.Start(options);
+        options.Capacity = 100;
+        viewer.Record("one");
+        viewer.Record("two");
+        viewer.Record("three");
+        Assert.Equal(new[] { "two", "three" }, viewer.GetLogs().Select(entry => entry.Message));
+    }
+
+#if MEDEINA_COLOR_CONSOLE
+    [Fact]
+    public void CapturesExistingMedeinaColorConsoleWithoutChangingItsCode()
+    {
+        TextWriter previousOut = Console.Out;
+        using StringWriter original = new();
+        Console.SetOut(original);
+        try
+        {
+            using ConsoleLogViewer viewer = ConsoleLogViewer.Start();
+            Microsoft.Medeina.Test.Console.Color.ColorConsole.WriteLine(ConsoleColor.Cyan, "SessionId: demo-session\nEvaluation log");
+            Microsoft.Medeina.Test.Console.Color.ColorConsole.Write(ConsoleColor.White, "Prompt> ");
+            Console.Out.Flush();
+            Assert.Equal(new[] { "SessionId: demo-session", "Evaluation log", "Prompt> " }, viewer.GetLogs().Select(entry => entry.Message));
+            Assert.Equal($"SessionId: demo-session{Environment.NewLine}Evaluation log{Environment.NewLine}Prompt> ", original.ToString());
+        }
+        finally
+        {
+            Console.SetOut(previousOut);
+        }
+    }
+#endif
+
+    internal static ConsoleLogViewer StartServer(int capacity = 0, int maxLineLength = 16384) =>
+        ConsoleLogViewer.Start(new ConsoleLogViewerOptions
+        {
+            CaptureConsole = false,
+            Capacity = capacity,
+            MaxLineLength = maxLineLength,
+            ApplicationName = "Viewer tests",
+        });
+
+    internal static async Task WaitUntilAsync(Func<bool> predicate)
+    {
+        using System.Threading.CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
+        while (!predicate())
+        {
+            await Task.Delay(20, timeout.Token);
+        }
+    }
+}
