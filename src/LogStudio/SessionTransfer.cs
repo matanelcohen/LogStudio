@@ -109,7 +109,7 @@ internal static class SessionTransfer
             }
             else
             {
-                imported = RebuildJournal(source, staging, name?.Trim() ?? SessionCatalog.GenerateName(), null, cancellationToken);
+                imported = RebuildJournal(source, staging, name?.Trim() ?? catalog.GenerateName(), null, cancellationToken);
             }
             source.Dispose();
             File.Delete(uploadPath);

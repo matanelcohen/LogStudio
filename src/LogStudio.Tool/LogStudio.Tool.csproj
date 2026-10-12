@@ -14,5 +14,6 @@
     <ProjectReference Include="../LogStudio/LogStudio.csproj" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />
     <None Include="../../frontend/dist/third-party-notices.txt" Pack="true" PackagePath="/" />
+    <None Include="../LogStudio/dependency-notices.txt" Pack="true" PackagePath="/" />
   </ItemGroup>
 </Project>

@@ -23,9 +23,11 @@ public sealed class SessionCatalogTests
         using ConsoleLogViewer second = ConsoleLogViewer.Start(options);
         SessionInfo firstSession = await CurrentSession(client, first);
         SessionInfo secondSession = await CurrentSession(client, second);
-        Assert.StartsWith("session-", firstSession.Name, StringComparison.Ordinal);
-        Assert.True(Guid.TryParseExact(firstSession.Name["session-".Length..], "N", out _));
+        SessionNameGeneratorTests.AssertFriendlyName(firstSession.Name);
+        SessionNameGeneratorTests.AssertFriendlyName(secondSession.Name);
         Assert.NotEqual(firstSession.Name, secondSession.Name);
+        using JsonDocument status = JsonDocument.Parse(await client.GetStringAsync(new Uri(first.Url, ViewerConstants.SnapshotRoute)));
+        Assert.Equal(firstSession.Name, status.RootElement.GetProperty("status").GetProperty("applicationName").GetString());
         Assert.Equal(firstSession.Name, (await CurrentSession(client, first)).Name);
         Assert.Null(options.ApplicationName);
         options.ApplicationName = "My investigation";

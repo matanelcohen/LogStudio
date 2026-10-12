@@ -152,7 +152,9 @@ The wrapper now saves named run histories for reopening. Click **Sessions** (or 
 in the application rail) to choose the current run or a previous run. Each entry shows its name,
 date/time, entry count and exit state. **Run parameters** expands the command, arguments, working
 directory and session ID. The search box matches names, dates, command names and argument values.
-New runs get a unique random name such as `session-<guid>` by default.
+New runs get a lowercase adjective–animal name such as `digital duck` by default,
+using the offline .NET package RandomFriendlyNameGenerator. If a name is already used
+in the process or saved catalog, a numeric suffix is added (for example, `digital duck 2`).
 Use `--name "My investigation"` to choose a name at startup, or **Sessions → Rename** to change it later.
 
 Histories are saved under the current user's local application-data folder at `LogStudio/sessions`
@@ -219,7 +221,8 @@ JSONL must use Log Studio's entry schema: positive `id`, ISO timestamp, `stream`
 Each import gets a fresh session ID and a locally rebuilt disk index. Entry IDs are normalized
 to `1..N`, so filtered JSONL exports with gaps can be imported reliably. Timestamps, messages,
 stream, severity, category, and partial-line flags are preserved. Plain JSONL has no run
-parameters; its dates derive from its records and it receives a unique random name by default.
+parameters; its dates derive from its records and it receives an adjective–animal name by default,
+with the same collision handling as new runs.
 Bundle imports preserve the exported name unless you supply a replacement.
 Empty JSONL is rejected, while a bundle for a cleared/zero-entry session remains valid.
 

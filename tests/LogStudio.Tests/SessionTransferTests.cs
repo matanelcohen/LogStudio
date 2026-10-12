@@ -268,9 +268,11 @@ public sealed class SessionTransferTests
         byte[] records = Encoding.UTF8.GetBytes(Record());
         SessionInfo first = await fixture.Import(records, SessionTransfer.JsonLinesFormat);
         SessionInfo second = await fixture.Import(records, SessionTransfer.JsonLinesFormat);
-        Assert.StartsWith("session-", first.Name, StringComparison.Ordinal);
-        Assert.True(Guid.TryParseExact(first.Name["session-".Length..], "N", out _));
+        SessionNameGeneratorTests.AssertFriendlyName(first.Name);
+        SessionNameGeneratorTests.AssertFriendlyName(second.Name);
         Assert.NotEqual(first.Name, second.Name);
+        using LogHistoryReader history = fixture.Catalog.Open(first.Id);
+        Assert.Equal(first.Name, history.Status.ApplicationName);
     }
 
     [Fact]

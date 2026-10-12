@@ -28,7 +28,7 @@ public sealed class ConsoleLogViewerOptions
     /// <summary>Gets or sets whether to open the browser automatically.</summary>
     public bool OpenBrowser { get; set; }
 
-    /// <summary>Gets or sets the session display name. Null generates a unique random name at startup.</summary>
+    /// <summary>Gets or sets the session display name. Null generates a unique adjective–animal name at startup.</summary>
     public string? ApplicationName { get; set; }
 
     /// <summary>Gets or sets whether the wrapper should retain this run for the session manager.</summary>
@@ -69,17 +69,18 @@ public sealed class ConsoleLogViewerOptions
             throw new ArgumentOutOfRangeException(nameof(this.MaxLineLength), "MaxLineLength must be between 64 and 65536.");
         }
 
-        string name = this.ApplicationName ?? SessionCatalog.GenerateName();
+        string sessions = this.SessionsDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), ApplicationDirectoryName, SessionsDirectoryName);
+        if (string.IsNullOrWhiteSpace(sessions)) throw new ArgumentException("SessionsDirectory must not be empty.");
+        sessions = Path.GetFullPath(sessions);
+        string name = this.ApplicationName ?? SessionCatalog.GenerateName(sessions);
         if (string.IsNullOrWhiteSpace(name) || name.Length > ViewerConstants.MaximumApplicationNameLength)
         {
             throw new ArgumentException("ApplicationName must contain between 1 and 128 characters.", nameof(this.ApplicationName));
         }
 
         ArgumentNullException.ThrowIfNull(this.RunArguments);
-        string sessions = this.SessionsDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), ApplicationDirectoryName, SessionsDirectoryName);
-        if (string.IsNullOrWhiteSpace(sessions)) throw new ArgumentException("SessionsDirectory must not be empty.");
         return new ViewerSettings(this.Port, this.Capacity, this.FlushEveryEntries, this.MaxLineLength, this.CaptureConsole, this.OpenBrowser, name,
-            this.SaveSession, Path.GetFullPath(sessions), this.RunCommand, (string[])this.RunArguments.Clone(), this.RunWorkingDirectory ?? Environment.CurrentDirectory);
+            this.SaveSession, sessions, this.RunCommand, (string[])this.RunArguments.Clone(), this.RunWorkingDirectory ?? Environment.CurrentDirectory);
     }
 }
 
