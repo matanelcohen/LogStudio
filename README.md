@@ -133,11 +133,16 @@ Answers cite sequence IDs but can be wrong—verify them against the original re
 The bridge launches the CLI directly without a shell, passes context over standard input, uses a
 fresh owner-private temporary working/configuration directories, and limits available tools to the
 file-view tool for reading the session file. All other model tools are unavailable.
+Reads use the CLI's default working-directory path restrictions in an isolated directory containing
+only `session.jsonl`. Automatic access to the system temporary directory is disabled; CLI
+authentication/configuration lives outside the log working directory. No all-paths or all-tools
+permission is granted.
 Custom instructions, hooks, built-in MCP servers, and inherited permission/provider opt-ins are disabled;
 user plugins, extensions, and MCP configuration are not copied into the isolated configuration.
 Remote session/export features are disabled (inference still uses Copilot's service).
 Browser requests cannot choose an executable or a file path. Current CLI support for these read-only
 flags is required; unsupported versions fail closed.
+These are Copilot CLI permission controls, not an operating-system sandbox.
 Only one Copilot request runs at a time. Connection checks time out after 10 seconds; questions after
 two minutes. Closing is disabled while a request runs; stopping Log Studio cancels its owned CLI process.
 

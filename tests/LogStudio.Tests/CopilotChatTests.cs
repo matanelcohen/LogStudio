@@ -103,7 +103,7 @@ public sealed class CopilotChatTests
     }
 
     [Fact]
-    public async Task ConnectUsesOnlyVersionAndChatPipesPromptWithToolsDenied()
+    public async Task ConnectUsesOnlyVersionAndChatPipesPromptWithScopedReadPermission()
     {
         string? received = null;
         CopilotCliClient client = new((start, input, _) =>
@@ -119,15 +119,24 @@ public sealed class CopilotChatTests
             }
             received = input;
             Assert.Contains("--available-tools=view", start.ArgumentList);
-            Assert.Contains("--deny-tool=read", start.ArgumentList);
+            Assert.Contains("--allow-tool=read", start.ArgumentList);
+            Assert.Contains("--disallow-temp-dir", start.ArgumentList);
+            Assert.Contains("--no-auto-update", start.ArgumentList);
             Assert.Contains("--disable-builtin-mcps", start.ArgumentList);
             Assert.Contains("--no-custom-instructions", start.ArgumentList);
             Assert.Contains("--no-ask-user", start.ArgumentList);
+            Assert.DoesNotContain("--allow-all-paths", start.ArgumentList);
+            Assert.DoesNotContain("--allow-all-tools", start.ArgumentList);
+            Assert.Single(Directory.GetFiles(start.WorkingDirectory));
             Assert.DoesNotContain(input, start.ArgumentList);
             return Task.FromResult("\u001b[32mAnswer #2\u001b[0m");
         }, executable: "/trusted/copilot");
         Assert.Equal("Copilot version test", await client.ConnectAsync(default));
-        ChatResponse answer = await client.AskAsync(new ChatContext("quoted question; $(unsafe)", 1, true), default);
+        using LogBuffer logs = new(new ConsoleLogViewerOptions().Validate());
+        logs.Append("record", LogStream.Stdout);
+        using LogHistoryReader history = logs.OpenHistory();
+        using ChatContext context = CopilotChat.BuildContext(Request(), history, default) with { Prompt = "quoted question; $(unsafe)", Truncated = true };
+        ChatResponse answer = await client.AskAsync(context, default);
         Assert.Equal("quoted question; $(unsafe)", received);
         Assert.Equal("Answer #2", answer.Answer);
         Assert.True(answer.ContextTruncated);
@@ -182,10 +191,21 @@ public sealed class CopilotChatTests
             Assert.False(start.Environment.ContainsKey("COPILOT_PROVIDERS_CONFIG"));
             Assert.False(start.Environment.ContainsKey("COPILOT_PROVIDER_BASE_URL"));
             Assert.Equal(2, Directory.GetFiles(home).Length);
+            Assert.DoesNotContain("--allow-all-paths", start.ArgumentList);
+            Assert.Contains("--disallow-temp-dir", start.ArgumentList);
             if (!OperatingSystem.IsWindows())
                 Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(home, "config.json")));
         }
+
         finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void CliWithoutASuppliedSessionFileDoesNotGrantReadPermission()
+    {
+        ProcessStartInfo start = new CopilotCliClient().StartInfo(true);
+        Assert.Contains("--deny-tool=read", start.ArgumentList);
+        Assert.DoesNotContain("--allow-tool=read", start.ArgumentList);
     }
 
     [Fact]

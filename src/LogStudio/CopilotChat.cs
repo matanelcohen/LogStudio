@@ -120,7 +120,7 @@ internal sealed class CopilotCliClient
         return new ChatResponse(answer, context.EntryCount, context.Truncated);
     }
 
-    internal ProcessStartInfo StartInfo(bool chat)
+    internal ProcessStartInfo StartInfo(bool chat, bool sessionFile = false)
     {
         ProcessStartInfo start = new(this.executable)
         {
@@ -138,8 +138,9 @@ internal sealed class CopilotCliClient
             foreach (string argument in new[]
             {
                 "--silent", "--stream=off", "--no-ask-user", "--no-custom-instructions",
-                "--available-tools=view", "--deny-tool=read", "--disable-builtin-mcps",
-                "--no-remote", "--no-remote-export",
+                "--available-tools=view", sessionFile ? "--allow-tool=read" : "--deny-tool=read",
+                "--disallow-temp-dir", "--disable-builtin-mcps",
+                "--no-remote", "--no-remote-export", "--no-auto-update",
             })
                 start.ArgumentList.Add(argument);
         }
@@ -153,7 +154,7 @@ internal sealed class CopilotCliClient
         deadline.CancelAfter(timeout);
         try
         {
-            ProcessStartInfo start = this.StartInfo(prompt is not null);
+            ProcessStartInfo start = this.StartInfo(prompt is not null, workingDirectory is not null);
             if (workingDirectory is not null) start.WorkingDirectory = workingDirectory;
             string output = await this.run(start, prompt, deadline.Token).ConfigureAwait(false);
             string clean = LogParser.StripTerminalEscapes(output).Trim();
