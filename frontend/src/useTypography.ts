@@ -62,14 +62,14 @@ export function useTypography() {
       "--log-font-size": `${settings.logFontSize}px`,
       "--log-line-height": String(settings.logLineHeight)
     };
-    const previous = Object.keys(properties).map(name => [name, style.getPropertyValue(name), style.getPropertyPriority(name)]);
+    const previous = Object.keys(properties).map(name => ({
+      name, value: style.getPropertyValue(name), priority: style.getPropertyPriority(name)
+    }));
     for (const [name, value] of Object.entries(properties)) style.setProperty(name, value);
     return () => {
-      for (const [name, value, priority] of previous) {
-        if (name) {
-          if (value) style.setProperty(name, value, priority);
-          else style.removeProperty(name);
-        }
+      for (const { name, value, priority } of previous) {
+        if (value) style.setProperty(name, value, priority);
+        else style.removeProperty(name);
       }
     };
   }, [settings]);
