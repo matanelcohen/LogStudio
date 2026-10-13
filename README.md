@@ -383,11 +383,11 @@ dotnet tool install LogStudio.Tool \
   --tool-path ./artifacts/tool --configfile ./NuGet.Local.Config --version 0.1.0
 ```
 
-The tool needs a .NET 8 or newer runtime; it can roll forward to .NET 10.
+The tool needs a .NET 10 or newer runtime.
 Building this workspace and running its tests / host demo needs the .NET 10 SDK.
+All C# projects target .NET 10 and use C# 14. The library and startup hook require a
+.NET 10 or newer host; the wrapper can still capture commands running older runtimes.
 The library has **no NuGet dependencies and no ASP.NET framework dependency**.
-The .NET 8 reference and apphost packs are pinned to 8.0.27 for reproducible builds;
-this does not pin or downgrade the runtime used to execute the tool.
 
 For a quick demonstration:
 
@@ -704,10 +704,10 @@ replacement writers. Cached tee writers continue mirroring after disposal withou
 
 ### Zero-code .NET startup hook
 
-For an existing .NET 8+ application, attach the library DLL before application startup:
+For an existing .NET 10+ application, attach the library DLL before application startup:
 
 ```bash
-DOTNET_STARTUP_HOOKS="<viewer>/src/LogStudio/bin/Release/net8.0/LogStudio.dll" \
+DOTNET_STARTUP_HOOKS="<viewer>/src/LogStudio/bin/Release/net10.0/LogStudio.dll" \
   dotnet /path/to/SkillRunner.dll --skill-name=MySkill
 ```
 
@@ -726,13 +726,13 @@ native writes and subprocess output bypassing these writers require wrapper mode
 
 ### Native metrics and traces
 
-Opt into telemetry collection for an existing .NET 8+ process:
+Opt into telemetry collection for an existing .NET 10+ process:
 
 ```bash
 LOG_STUDIO_TELEMETRY=true \
 LOG_STUDIO_METER_SOURCES="System.Runtime,MyApp.*" \
 LOG_STUDIO_ACTIVITY_SOURCES="MyApp.*,System.Net.Http" \
-DOTNET_STARTUP_HOOKS="<viewer>/src/LogStudio/bin/Release/net8.0/LogStudio.dll" \
+DOTNET_STARTUP_HOOKS="<viewer>/src/LogStudio/bin/Release/net10.0/LogStudio.dll" \
   dotnet /path/to/App.dll
 ```
 
