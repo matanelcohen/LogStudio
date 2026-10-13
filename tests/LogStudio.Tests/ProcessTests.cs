@@ -126,6 +126,46 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
     }
 
     [Fact]
+    public async Task ShowcaseStopsOnInterruptWhileWaitingForInput()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using Process process = StartProcess(new[] { DemoPath, "--showcase" });
+        Task<string>? error = null;
+        try
+        {
+            await ReadUrlAsync(process);
+            error = process.StandardError.ReadToEndAsync();
+            using CancellationTokenSource timeout = new(ProcessTimeout);
+            while (true)
+            {
+                string? line = await process.StandardOutput.ReadLineAsync(timeout.Token);
+                Assert.NotNull(line);
+                if (line.StartsWith("Commands: success", StringComparison.Ordinal)) break;
+            }
+            char[] prompt = new char[6];
+            Assert.Equal(prompt.Length, await process.StandardOutput.ReadBlockAsync(prompt.AsMemory(), timeout.Token));
+            Assert.Equal("Demo> ", new string(prompt));
+            Task<string> output = process.StandardOutput.ReadToEndAsync();
+            ProcessStartInfo signalInfo = new("kill") { UseShellExecute = false };
+            signalInfo.ArgumentList.Add("-s");
+            signalInfo.ArgumentList.Add("INT");
+            signalInfo.ArgumentList.Add(process.Id.ToString(CultureInfo.InvariantCulture));
+            using Process signal = Process.Start(signalInfo)!;
+            await signal.WaitForExitAsync().WaitAsync(ProcessTimeout);
+            Assert.Equal(0, signal.ExitCode);
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(0, process.ExitCode);
+            await output;
+            await error;
+        }
+        finally
+        {
+            await KillAsync(process);
+            if (error is not null) await error;
+        }
+    }
+
+    [Fact]
     public async Task WrapperPreservesWorkingDirectoryAndRelativeChildPaths()
     {
         string directory = Path.GetDirectoryName(DemoPath) ??

@@ -206,7 +206,7 @@ internal sealed class DemoRunner : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             Console.Write("Demo> ");
-            string? input = await Console.In.ReadLineAsync(stoppingToken).ConfigureAwait(false);
+            string? input = await Task.Run(() => Console.In.ReadLine(), stoppingToken).WaitAsync(stoppingToken).ConfigureAwait(false);
             string? command = input?.Trim().ToLowerInvariant();
             if (command is null or "quit" or "exit") break;
             if (command is "success" or "slow" or "error")
