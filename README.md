@@ -226,6 +226,8 @@ In default cache-first mode only, a failed configured restore then tries NuGet's
 HTTPS v2 feed. This supports a fresh dependency cache when the v3 service index is unreachable.
 The fallback does not offer vulnerability auditing and is reported explicitly. Strict
 `--online` / `-Online` never automatically falls back or suppresses audit errors.
+The frontend lockfile keeps exact versions and integrity hashes without mirror-specific
+download URLs, so npm uses your configured registry on a clean checkout.
 The React build requires Node.js **22.12+** and npm. The installed `logstudio` tool and NuGets
 require only .NET; Node is never needed to view logs or run a wrapped command.
 

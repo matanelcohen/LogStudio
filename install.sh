@@ -175,6 +175,7 @@ else
   ToolScope=(--tool-path "$ToolDirectory")
 fi
 
+mkdir -p -- "$ToolDirectory"
 InstallCache="$(mktemp -d "$Artifacts/.install-cache.XXXXXX")"
 InstalledTools="$(dotnet tool list "${ToolScope[@]}")"
 if printf '%s\n' "$InstalledTools" | awk -v package="$PackageId" 'tolower($1) == tolower(package) { found = 1 } END { exit !found }'; then
