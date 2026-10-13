@@ -21,7 +21,7 @@
     </AssemblyAttribute>
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>ToolPath</_Parameter1>
-      <_Parameter2>$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '../../src/LogStudio.Tool/bin/$(Configuration)/net8.0/LogStudio.Tool.dll'))</_Parameter2>
+      <_Parameter2>$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '../../src/LogStudio.Tool/bin/$(Configuration)/net10.0/LogStudio.Tool.dll'))</_Parameter2>
     </AssemblyAttribute>
     <Compile Include="$(MedeinaRepositoryRoot)/test/shared/Medeina.Console.Color/ColorConsole.cs"
              Link="ExistingMedeina/ColorConsole.cs" Condition="'$(MedeinaRepositoryRoot)' != ''" />

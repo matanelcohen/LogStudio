@@ -1,8 +1,0 @@
-<Project>
-  <!-- Pin reference/apphost packs, not the runtime, independently of the SDK's servicing defaults. -->
-  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
-    <KnownFrameworkReference Update="Microsoft.NETCore.App;Microsoft.AspNetCore.App"
-                             TargetingPackVersion="8.0.27" />
-    <KnownAppHostPack Update="Microsoft.NETCore.App" AppHostPackVersion="8.0.27" />
-  </ItemGroup>
-</Project>
