@@ -149,7 +149,7 @@ PATH, use the command printed by the installer. No sudo or shell-profile edits a
 ```bash
 # Pin a release or choose user-writable directories:
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.sh \
-  | bash -s -- --version v0.1.0 --install-dir "$HOME/.local/share/logstudio" --bin-dir "$HOME/.local/bin"
+  | bash -s -- --version v1.0.0 --install-dir "$HOME/.local/share/logstudio" --bin-dir "$HOME/.local/bin"
 logstudio --open -- dotnet run --project ./path/to/App.csproj
 ```
 
@@ -162,7 +162,7 @@ Invoke-WebRequest -UseBasicParsing https://github.com/matanelcohen/LogStudio/rel
 logstudio --open -- dotnet run --project .\path\to\App.csproj
 ```
 
-Use `& $installer -Version v0.1.0 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
+Use `& $installer -Version v1.0.0 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
 version or choose a directory. If execution policy blocks the script, use the process-only
 override described below; when launching a separate PowerShell process, add the printed
 `bin` directory to PATH in your current terminal yourself. The installer otherwise updates
@@ -270,7 +270,7 @@ does not verify Windows-specific execution.
 ### Publishing compiled releases
 
 Set the package version in `Directory.Build.props`, then push a matching tag such as
-`v0.1.0` (or `v0.1.0-rc.1` for a prerelease). The
+`v1.0.0` (or `v1.0.0-rc.1` for a prerelease). The
 [compiled-release workflow](.github/workflows/release.yml) validates the tag, restores,
 builds, tests the frontend/backend and installer contracts, and verifies a source install.
 Release jobs use the latest .NET 10 SDK servicing release compatible with `global.json`.
@@ -451,7 +451,7 @@ cd ..
 dotnet build LogStudio.sln -c Release
 dotnet pack LogStudio.sln -c Release --no-build -o artifacts
 dotnet tool install LogStudio.Tool \
-  --tool-path ./artifacts/tool --configfile ./NuGet.Local.Config --version 0.1.0
+  --tool-path ./artifacts/tool --configfile ./NuGet.Local.Config --version 1.0.0
 ```
 
 The tool needs a .NET 10 or newer runtime.
@@ -477,7 +477,7 @@ local feed (replace the configuration path with your clone's absolute path to in
 from any directory):
 
 ```bash
-dotnet tool install --global LogStudio.Tool --version 0.1.0 \
+dotnet tool install --global LogStudio.Tool --version 1.0.0 \
   --configfile /absolute/path/to/LogStudio/NuGet.Local.Config
 
 logstudio --help
@@ -733,7 +733,7 @@ can be reassembled by concatenating their message text, but line grouping is not
 
 ## Optional NuGet library attachment
 
-Use `LogStudio.0.1.0.nupkg` if you prefer in-process capture.
+Use `LogStudio.1.0.0.nupkg` if you prefer in-process capture.
 Add a reference to `LogStudio` from the local `artifacts` package source.
 For Medeina's central package management, the version belongs in `Directory.Packages.props`;
 the host's `PackageReference` should have `PrivateAssets="all"` for this development-only utility.
