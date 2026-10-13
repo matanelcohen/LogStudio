@@ -75,7 +75,7 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
         <h2 id="copilotTitle">Ask Copilot about logs</h2>
         <p title={status?.applicationName}>{status?.applicationName ?? "Selected session"}</p>
       </div>
-      <button className="icon-button ghost-button" disabled={busy || !messages.length} aria-label="New chat" title="New chat"
+      <button className="icon-button ghost-button" disabled={busy || (!messages.length && !question && !error)} aria-label="New chat" title="New chat"
         onClick={() => { setMessages([]); setQuestion(""); setError(null); followMessages.current = true; questionInput.current?.focus(); }}>
         <SquarePen size={17} />
       </button>

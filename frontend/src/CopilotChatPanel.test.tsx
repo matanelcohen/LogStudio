@@ -103,6 +103,20 @@ describe("full-session log chat panel", () => {
     expect(chat.mock.calls[1]?.[2][1]?.content.length).toBe(2000);
   });
 
+  it("can start a new chat from an unsent draft", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue("test CLI");
+    const chat = vi.spyOn(api, "askCopilot");
+    render(<CopilotChatPanel status={Status} sessionId="" onClose={vi.fn()} returnFocus={vi.fn()} />);
+    await connectCli();
+    const input = screen.getByLabelText("Message Copilot") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "Unsent draft" } });
+    expect(screen.getByRole("button", { name: "New chat" }).hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    expect(input.value).toBe("");
+    expect(document.activeElement).toBe(input);
+    expect(chat).not.toHaveBeenCalled();
+  });
+
   it("prevents duplicate requests and closing while the owned process is running", async () => {
     vi.spyOn(api, "connectCopilot").mockResolvedValue("test CLI");
     let finish: ((value: ChatResponse) => void) | undefined;
