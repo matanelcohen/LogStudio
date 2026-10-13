@@ -23,14 +23,17 @@ The optional timeline shows the **visible page only**, not the full session.
 
 ![Log Studio's Metrics page with tagged raw measurement charts in dark mode](docs/design/metrics-dark.png)
 
-**See the measurements.** Inspect separate tagged series and recent raw values.
+**See the measurements.** Explore compact metric panels with latest values, tag chips,
+and locally bundled uPlot charts. Hover or use arrow keys to inspect raw points, drag to
+zoom, or expand the exact measurement table.
 Shown with synthetic demo telemetry, not production data.
 
 ### Traces
 
 ![Log Studio's Traces page with selected span details, parent relationships, status, tags, and links in dark mode](docs/design/traces-dark.png)
 
-**Follow the request.** Inspect completed spans, parent relationships, and error details.
+**Follow the request.** Search recent traces, explore a nested span waterfall, and inspect
+timing, parent relationships, tags, links, and errors alongside the selected span.
 Shown with synthetic demo telemetry, not production data.
 
 ### Configure telemetry sources
@@ -149,7 +152,7 @@ PATH, use the command printed by the installer. No sudo or shell-profile edits a
 ```bash
 # Pin a release or choose user-writable directories:
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.sh \
-  | bash -s -- --version v0.1.0 --install-dir "$HOME/.local/share/logstudio" --bin-dir "$HOME/.local/bin"
+  | bash -s -- --version v1.0.0 --install-dir "$HOME/.local/share/logstudio" --bin-dir "$HOME/.local/bin"
 logstudio --open -- dotnet run --project ./path/to/App.csproj
 ```
 
@@ -162,7 +165,7 @@ Invoke-WebRequest -UseBasicParsing https://github.com/matanelcohen/LogStudio/rel
 logstudio --open -- dotnet run --project .\path\to\App.csproj
 ```
 
-Use `& $installer -Version v0.1.0 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
+Use `& $installer -Version v1.0.0 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
 version or choose a directory. If execution policy blocks the script, use the process-only
 override described below; when launching a separate PowerShell process, add the printed
 `bin` directory to PATH in your current terminal yourself. The installer otherwise updates
@@ -457,14 +460,14 @@ cd ..
 dotnet build LogStudio.sln -c Release
 dotnet pack LogStudio.sln -c Release --no-build -o artifacts
 dotnet tool install LogStudio.Tool \
-  --tool-path ./artifacts/tool --configfile ./NuGet.Local.Config --version 0.1.0
+  --tool-path ./artifacts/tool --configfile ./NuGet.Local.Config --version 1.0.0
 ```
 
-The tool needs a .NET 8 or newer runtime; it can roll forward to .NET 10.
+The tool needs a .NET 10 or newer runtime.
 Building this workspace and running its tests / host demo needs the .NET 10 SDK.
+All C# projects target .NET 10 and use C# 14. The library and startup hook require a
+.NET 10 or newer host; the wrapper can still capture commands running older runtimes.
 The library has **no NuGet dependencies and no ASP.NET framework dependency**.
-The .NET 8 reference and apphost packs are pinned to 8.0.27 for reproducible builds;
-this does not pin or downgrade the runtime used to execute the tool.
 
 For a quick demonstration:
 
@@ -483,7 +486,7 @@ local feed (replace the configuration path with your clone's absolute path to in
 from any directory):
 
 ```bash
-dotnet tool install --global LogStudio.Tool --version 0.1.0 \
+dotnet tool install --global LogStudio.Tool --version 1.0.0 \
   --configfile /absolute/path/to/LogStudio/NuGet.Local.Config
 
 logstudio --help
@@ -739,7 +742,7 @@ can be reassembled by concatenating their message text, but line grouping is not
 
 ## Optional NuGet library attachment
 
-Use `LogStudio.0.1.0.nupkg` if you prefer in-process capture.
+Use `LogStudio.1.0.0.nupkg` if you prefer in-process capture.
 Add a reference to `LogStudio` from the local `artifacts` package source.
 For Medeina's central package management, the version belongs in `Directory.Packages.props`;
 the host's `PackageReference` should have `PrivateAssets="all"` for this development-only utility.
@@ -781,10 +784,10 @@ replacement writers. Cached tee writers continue mirroring after disposal withou
 
 ### Zero-code .NET startup hook
 
-For an existing .NET 8+ application, attach the library DLL before application startup:
+For an existing .NET 10+ application, attach the library DLL before application startup:
 
 ```bash
-DOTNET_STARTUP_HOOKS="<viewer>/src/LogStudio/bin/Release/net8.0/LogStudio.dll" \
+DOTNET_STARTUP_HOOKS="<viewer>/src/LogStudio/bin/Release/net10.0/LogStudio.dll" \
   dotnet /path/to/SkillRunner.dll --skill-name=MySkill
 ```
 
@@ -803,13 +806,13 @@ native writes and subprocess output bypassing these writers require wrapper mode
 
 ### Native metrics and traces
 
-Opt into telemetry collection for an existing .NET 8+ process:
+Opt into telemetry collection for an existing .NET 10+ process:
 
 ```bash
 LOG_STUDIO_TELEMETRY=true \
 LOG_STUDIO_METER_SOURCES="System.Runtime,MyApp.*" \
 LOG_STUDIO_ACTIVITY_SOURCES="MyApp.*,System.Net.Http" \
-DOTNET_STARTUP_HOOKS="<viewer>/src/LogStudio/bin/Release/net8.0/LogStudio.dll" \
+DOTNET_STARTUP_HOOKS="<viewer>/src/LogStudio/bin/Release/net10.0/LogStudio.dll" \
   dotnet /path/to/App.dll
 ```
 
@@ -898,8 +901,15 @@ POST `<session-url>api/telemetry/suggest` requires
 contains the approved file names and contents. Suggestions are current-run-only and are
 unavailable for disabled or completed capture.
 
-Open **Metrics** for tagged measurement series and charts, or **Traces** for completed spans
-and their trace/parent relationships, timing, status, tags, and links. Metric values are
+Open **Metrics** for tagged measurement panels with latest values, legends, and interactive
+uPlot charts. Hover a chart or focus it and use arrow keys to inspect points; drag to zoom
+and choose **Reset zoom** to return to the recent window. Exact timestamps and values remain
+available in each panel's raw measurement table. Each tag set remains a separate series.
+Open **Traces** to search by trace ID, operation, source, status, or tag. Select a trace to
+view its nested waterfall; collapse parent rows to hide descendants and select a span for
+the adjacent timing/status/tag/link inspector. Narrow screens stack these panes.
+Waterfall durations cover only retained spans, not a guaranteed complete request.
+Both views remain fully bundled and offline; no Grafana server or CDN is required. Metric values are
 raw measurements: counter additions and histogram samples are not automatically converted
 into rates, totals, or percentile estimates. Observable instruments are polled periodically.
 Spans appear after they stop; a parent may be outside the capture window or filtered out.
