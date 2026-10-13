@@ -129,7 +129,14 @@ Browsers without backdrop-filter support use opaque surfaces.
 
 ## Quick start: wrapper (recommended)
 
-Build and install from source with the [installer](install.sh):
+Build and install from source with the native installer for your operating system.
+Prerequisites: the **.NET 10 SDK** selected by `global.json` (10.0.301 or a compatible later
+10.0 feature band), **Node.js 22.12+**, and npm. Use the x64 or ARM64 installers matching
+your computer from [.NET downloads](https://dotnet.microsoft.com/download/dotnet/10.0)
+and [Node.js downloads](https://nodejs.org/en/download). Missing prerequisites produce setup
+instructions; Log Studio does not silently install system software or change your shell.
+
+**macOS / Linux — Bash:**
 
 ```bash
 git clone https://github.com/matanelcohen/LogStudio.git
@@ -138,6 +145,26 @@ cd LogStudio
 logstudio --open -- dotnet run --project ./path/to/App.csproj
 ```
 
+**Windows — PowerShell (no Bash, WSL, or administrator shell required):**
+
+```powershell
+git clone https://github.com/matanelcohen/LogStudio.git
+cd LogStudio
+.\install.ps1
+logstudio --open -- dotnet run --project .\path\to\App.csproj
+```
+
+If your Windows execution policy blocks scripts, use a process-only override rather than
+changing the machine policy:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+PowerShell 7 is also supported, including on macOS / Linux (`pwsh -NoProfile -File ./install.ps1`).
+Both entry points resolve paths relative to the script, so they can be invoked from another
+directory or a clone path containing spaces.
+
 The installer restores, builds, runs frontend and backend tests, packs both NuGets, and installs the fresh tool
 **globally for your user**. It can be invoked from any directory. It does not modify shell profiles,
 application source, or unrelated global tools. Re-running it replaces the existing Log Studio
@@ -145,6 +172,10 @@ installation even when the package version is unchanged, using a fresh temporary
 By default it tries cached dependencies first, so a fully cached build does not fail because
 NuGet.org's vulnerability endpoint is unavailable. Cache-only verification is explicitly reported;
 if cached restore fails, the configured online source is tried without suppressing its errors.
+In default cache-first mode only, a failed configured restore then tries NuGet's official
+HTTPS v2 feed. This supports a fresh dependency cache when the v3 service index is unreachable.
+The fallback does not offer vulnerability auditing and is reported explicitly. Strict
+`--online` / `-Online` never automatically falls back or suppresses audit errors.
 The React build requires Node.js **22.12+** and npm. The installed `logstudio` tool and NuGets
 require only .NET; Node is never needed to view logs or run a wrapped command.
 
@@ -158,10 +189,28 @@ require only .NET; Node is never needed to view logs or run a wrapped command.
 
 # Require online restore and NuGet's vulnerability lookup instead:
 ./install.sh --online
+
+# Choose a specific feed when required by your network:
+./install.sh --nuget-source https://www.nuget.org/api/v2/
+```
+
+```powershell
+.\install.ps1 -Local
+.\install.ps1 -Offline
+.\install.ps1 -Local -Offline
+.\install.ps1 -Online
+.\install.ps1 -NuGetSource https://www.nuget.org/api/v2/
 ```
 
 The temporary install cache is removed on exit. Offline restore requires the existing test
-dependencies and targeting packs; it does not perform an online package-vulnerability check.
+dependencies and targeting packs; it cannot download a missing dependency and does not perform
+an online package-vulnerability check. New computers normally need internet access for their
+first install. Neither script disables TLS certificate validation or removes dependencies to
+make a restore succeed.
+
+The [installer CI](.github/workflows/install.yml) exercises clean Windows and macOS installs.
+Use its Windows job as the native Windows validation result; running PowerShell on macOS alone
+does not verify Windows-specific execution.
 
 ## Optional Copilot log chat
 

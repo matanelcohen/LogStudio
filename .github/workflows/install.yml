@@ -1,0 +1,43 @@
+name: Cross-platform installation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.301"
+      - name: Check installer contracts
+        shell: pwsh
+        run: node --test tests/installers/installers.test.mjs
+      - name: Install on Windows PowerShell
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\install.ps1 -Local
+      - name: Install on macOS Bash
+        if: runner.os == 'macOS'
+        shell: bash
+        run: ./install.sh --local
+      - name: Verify installed tool
+        shell: pwsh
+        run: |
+          $tool = if ($IsWindows) { "./artifacts/tool/logstudio.exe" } else { "./artifacts/tool/logstudio" }
+          & $tool --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -9,6 +9,8 @@ namespace LogStudio;
 
 internal static class SessionNameGenerator
 {
+    private const string WordSeparator = " ";
+    private const int MaximumGeneratedNameLength = 96;
     private static readonly object Gate = new();
     private static readonly HashSet<string> GeneratedNames = new(StringComparer.OrdinalIgnoreCase);
 
@@ -16,11 +18,13 @@ internal static class SessionNameGenerator
     {
         lock (Gate) return ReserveName(
             NameGenerator.Identifiers.Get(IdentifierComponents.Adjective | IdentifierComponents.Animal,
-                separator: " ", lengthRestriction: 96).ToLowerInvariant(), sessionsDirectory);
+                separator: WordSeparator, lengthRestriction: MaximumGeneratedNameLength).ToLowerInvariant(), sessionsDirectory);
     }
 
     internal static string ReserveName(string name, string sessionsDirectory)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        name = string.Join(WordSeparator, name.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         lock (Gate)
         {
             HashSet<string> existingNames = new(GeneratedNames, StringComparer.OrdinalIgnoreCase);
@@ -59,7 +63,7 @@ internal static class SessionNameGenerator
     {
         string candidate = name;
         for (int suffix = 2; existingNames.Contains(candidate); suffix++)
-            candidate = name + " " + suffix.ToString(CultureInfo.InvariantCulture);
+            candidate = name + WordSeparator + suffix.ToString(CultureInfo.InvariantCulture);
         return candidate;
     }
 }

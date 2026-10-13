@@ -10,25 +10,29 @@ readonly PackageId="LogStudio.Tool"
 readonly ToolCommand="logstudio"
 readonly Configuration="Release"
 readonly DotnetHome="${DOTNET_CLI_HOME:-$HOME}"
+readonly NuGetFallback="https://www.nuget.org/api/v2/"
 
 Scope="global"
 RestoreMode="cache-first"
 InstallCache=""
+NuGetSource=""
 
 usage() {
   printf '%s\n' \
     "Build, test, pack, and install Log Studio from local source." \
     "" \
-    "Usage: ./install.sh [--global | --local] [--offline | --online]" \
+    "Usage: ./install.sh [--global | --local] [--offline | --online] [--nuget-source <source>]" \
     "" \
     "  --global   Install for the current user; run logstudio from anywhere (default)." \
     "  --local    Install into artifacts/tool without changing the global tool." \
     "  --offline  Require cached dependencies; never try the network." \
     "  --online   Require the configured online restore and vulnerability lookup." \
+    "  --nuget-source <source>  Use an explicit NuGet feed instead of NuGet.Config." \
     "  --help     Show this help." \
     "" \
     "By default, restore tries cached dependencies first and reports offline verification." \
-    "If cached restore fails, it retries the configured online source without suppressing errors." \
+    "If cached restore fails, it tries the configured source, then official NuGet v2." \
+    "The v2 fallback is cache-first mode only and does not provide vulnerability auditing." \
     "The install always uses the newly built local NuGet package, not NuGet.org." \
     "Building the frontend needs Node.js 22.12+ and npm; running the installed tool does not." \
     "No sudo, application edits, shell-profile edits, or package publication."
@@ -50,6 +54,9 @@ while [[ $# -gt 0 ]]; do
     --local) Scope="local" ;;
     --offline) RestoreMode="offline" ;;
     --online) RestoreMode="online" ;;
+    --nuget-source)
+      if [[ $# -lt 2 || -z "$2" ]]; then printf '%s\n' '--nuget-source requires a feed URL or directory.' >&2; exit 2; fi
+      NuGetSource="$2"; shift ;;
     --help|-h) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
@@ -57,15 +64,20 @@ while [[ $# -gt 0 ]]; do
 done
 
 if ! command -v dotnet >/dev/null 2>&1; then
-  printf 'The .NET 10 SDK is required to build Log Studio. Install it, then rerun this script.\n' >&2
+  printf 'The .NET 10 SDK is required: https://dotnet.microsoft.com/download/dotnet/10.0\nChoose the installer matching your operating system and CPU, then rerun this script.\n' >&2
   exit 1
 fi
 
 if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-  printf 'Node.js 22.12+ and npm are required to build the React frontend. The installed tool remains .NET-only.\n' >&2
+  printf 'Node.js 22.12+ and npm are required: https://nodejs.org/en/download\nThe installed tool remains .NET-only; this installer does not modify system software.\n' >&2
   exit 1
 fi
 node -e 'const [major,minor]=process.versions.node.split(".").map(Number); if(major<22||(major===22&&minor<12)){console.error("Node.js 22.12 or newer is required.");process.exit(1);}'
+cd "$ProjectRoot"
+if ! dotnet --version; then
+  printf 'The SDK selected by global.json is unavailable. Install .NET 10 SDK 10.0.301 or a compatible later 10.0 feature band.\n' >&2
+  exit 1
+fi
 
 printf '\nRestoring frontend libraries...\n'
 cd "$Frontend"
@@ -98,6 +110,7 @@ fi
 
 printf '\nRestoring Log Studio %s...\n' "$Version"
 Restored=false
+PackageCache=""
 if [[ "$RestoreMode" != "online" ]]; then
   CacheLocation="$(dotnet nuget locals global-packages --list)"
   PackageCache="${CacheLocation#*: }"
@@ -121,8 +134,24 @@ if [[ "$RestoreMode" != "online" ]]; then
   fi
 fi
 if [[ "$Restored" != true ]]; then
-  if ! dotnet restore "$Solution" --configfile "$ProjectRoot/NuGet.Config"; then
-    printf '\nRestore failed. If all dependencies are cached, retry with --offline.\n' >&2
+  if [[ -n "$NuGetSource" ]]; then
+    RestoreArguments=(--source "$NuGetSource")
+  else
+    RestoreArguments=(--configfile "$ProjectRoot/NuGet.Config")
+  fi
+  if dotnet restore "$Solution" "${RestoreArguments[@]}"; then
+    Restored=true
+  elif [[ "$RestoreMode" == "cache-first" && -z "$NuGetSource" ]]; then
+    printf '\nConfigured restore failed. Trying the official NuGet v2 feed over verified TLS.\n'
+    FallbackArguments=(--source "$NuGetFallback")
+    if [[ -n "$PackageCache" && -d "$PackageCache" ]]; then FallbackArguments+=(--source "$PackageCache"); fi
+    if dotnet restore "$Solution" "${FallbackArguments[@]}"; then
+      Restored=true
+      printf 'NuGet v2 restore succeeded. Online vulnerability checks were NOT performed; --online never uses this fallback.\n'
+    fi
+  fi
+  if [[ "$Restored" != true ]]; then
+    printf '\nRestore failed. Check network/proxy/certificate settings or supply --nuget-source <feed>.\nOffline mode cannot download dependencies missing from the cache.\n' >&2
     exit 1
   fi
 fi

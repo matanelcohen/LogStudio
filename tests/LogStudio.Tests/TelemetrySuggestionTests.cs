@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -15,9 +16,23 @@ namespace LogStudio.Tests;
 
 public sealed class TelemetrySuggestionTests
 {
+    private const string SuggestionRoute = "api/telemetry/suggest";
+    private const string SuggestionAction = "telemetry-suggest";
+    private const string ContentLengthHeader = "Content-Length";
+    private const string ContentTypeHeader = "Content-Type";
+    private const string HostHeader = "Host";
+    private const string ExpectHeader = "Expect";
+    private const string ContinueExpectation = "100-continue";
+    private const string ConnectionHeader = "Connection";
+    private const string CloseConnection = "close";
+    private const string HttpVersion = "HTTP/1.1";
+    private const string HeaderEnding = "\r\n";
     private static ViewerSettings Settings(bool enabled = true) => new ConsoleLogViewerOptions
     {
-        CaptureConsole = false, CaptureTelemetry = enabled, MeterSources = "", ActivitySources = "",
+        CaptureConsole = false,
+        CaptureTelemetry = enabled,
+        MeterSources = "",
+        ActivitySources = "",
         TelemetryIntervalMilliseconds = 60000,
     }.Validate();
 
@@ -336,11 +351,11 @@ public sealed class TelemetrySuggestionTests
         Assert.Equal(HttpStatusCode.MethodNotAllowed, sourcesMethod.StatusCode);
         using HttpRequestMessage unknown = Post(server.Url, """{"consent":true}""");
         unknown.Headers.TransferEncodingChunked = true;
+        unknown.Headers.ExpectContinue = true;
         using HttpResponseMessage unknownResponse = await client.SendAsync(unknown);
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, unknownResponse.StatusCode);
-        using HttpRequestMessage oversized = Post(server.Url, new string(' ', TelemetrySuggestions.MaximumRequestBytes + 1));
-        using HttpResponseMessage oversizedResponse = await client.SendAsync(oversized);
-        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, oversizedResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge,
+            await SendOversizedHeadersAsync(server.Url).WaitAsync(TimeSpan.FromSeconds(5)));
         recorder.Dispose();
         using HttpRequestMessage completed = Post(server.Url, """{"consent":true}""");
         using HttpResponseMessage completedResponse = await client.SendAsync(completed);
@@ -350,6 +365,33 @@ public sealed class TelemetrySuggestionTests
         using HttpResponseMessage afterCompletedResponse = await client.SendAsync(afterCompleted);
         Assert.Equal(HttpStatusCode.OK, afterCompletedResponse.StatusCode);
         Assert.Equal(1, calls);
+    }
+
+    private static async Task<HttpStatusCode> SendOversizedHeadersAsync(Uri url)
+    {
+        // Size rejection is a header contract, not a race between a large upload and socket closure.
+        using TcpClient client = new();
+        await client.ConnectAsync(url.Host, url.Port);
+        using NetworkStream stream = client.GetStream();
+        Uri target = new(url, SuggestionRoute);
+        string headers = $"{ViewerConstants.PostMethod} {target.PathAndQuery} {HttpVersion}{HeaderEnding}" +
+            $"{HostHeader}: {url.Authority}{HeaderEnding}" +
+            $"{ViewerConstants.ClearRequestHeader}: {SuggestionAction}{HeaderEnding}" +
+            $"{ContentTypeHeader}: {ViewerConstants.JsonContentType}{HeaderEnding}" +
+            $"{ContentLengthHeader}: {TelemetrySuggestions.MaximumRequestBytes + 1}{HeaderEnding}" +
+            $"{ExpectHeader}: {ContinueExpectation}{HeaderEnding}" +
+            $"{ConnectionHeader}: {CloseConnection}{HeaderEnding}{HeaderEnding}";
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(headers));
+        using StreamReader reader = new(stream, Encoding.ASCII);
+        while (true)
+        {
+            string status = await reader.ReadLineAsync() ?? throw new IOException("Server closed before returning a status.");
+            string[] parts = status.Split(' ');
+            if (parts.Length < 2 || !int.TryParse(parts[1], out int code)) throw new IOException("Server returned an invalid status.");
+            string? line;
+            while ((line = await reader.ReadLineAsync()) is not null && line.Length > 0) { }
+            if (code != (int)HttpStatusCode.Continue) return (HttpStatusCode)code;
+        }
     }
 
     [Fact]

@@ -32,6 +32,26 @@ public sealed class SessionNameGeneratorTests
         Assert.Equal("yellow bear", SessionNameGenerator.AvailableName("yellow bear", names));
     }
 
+    [Theory]
+    [InlineData("gratuitous\tgrave greyfox", "gratuitous grave greyfox")]
+    [InlineData("  quiet\r\n  turtle  ", "quiet turtle")]
+    [InlineData("gentle\u00a0fox", "gentle fox")]
+    public void ReservedNamesNormalizeAllWhitespace(string raw, string expected)
+    {
+        string directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        string name = SessionNameGenerator.ReserveName(raw, directory);
+        Assert.StartsWith(expected, name, StringComparison.Ordinal);
+        AssertFriendlyName(name);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" \t\r\n")]
+    public void EmptyReservedNamesAreRejected(string name)
+    {
+        Assert.Throws<ArgumentException>(() => SessionNameGenerator.ReserveName(name, Path.GetTempPath()));
+    }
+
     [Fact]
     public void GeneratedNamesAvoidSavedNamesAndNamesAlreadyReservedInTheProcess()
     {
@@ -40,7 +60,10 @@ public sealed class SessionNameGeneratorTests
         {
             using (ConsoleLogViewer viewer = ConsoleLogViewer.Start(new ConsoleLogViewerOptions
             {
-                CaptureConsole = false, SaveSession = true, SessionsDirectory = root, ApplicationName = "Digital Duck",
+                CaptureConsole = false,
+                SaveSession = true,
+                SessionsDirectory = root,
+                ApplicationName = "Digital Duck",
             }))
             {
                 viewer.Record("saved session");
@@ -86,7 +109,8 @@ public sealed class SessionNameGeneratorTests
             File.SetUnixFileMode(root, UnixFileMode.UserExecute);
             using ConsoleLogViewer viewer = ConsoleLogViewer.Start(new ConsoleLogViewerOptions
             {
-                CaptureConsole = false, SessionsDirectory = root,
+                CaptureConsole = false,
+                SessionsDirectory = root,
             });
             viewer.Record("captured without catalog access");
             Assert.Equal("captured without catalog access", Assert.Single(viewer.GetLogs()).Message);
