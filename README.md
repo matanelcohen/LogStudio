@@ -23,14 +23,17 @@ The optional timeline shows the **visible page only**, not the full session.
 
 ![Log Studio's Metrics page with tagged raw measurement charts in dark mode](docs/design/metrics-dark.png)
 
-**See the measurements.** Inspect separate tagged series and recent raw values.
+**See the measurements.** Explore compact metric panels with latest values, tag chips,
+and locally bundled uPlot charts. Hover or use arrow keys to inspect raw points, drag to
+zoom, or expand the exact measurement table.
 Shown with synthetic demo telemetry, not production data.
 
 ### Traces
 
 ![Log Studio's Traces page with selected span details, parent relationships, status, tags, and links in dark mode](docs/design/traces-dark.png)
 
-**Follow the request.** Inspect completed spans, parent relationships, and error details.
+**Follow the request.** Search recent traces, explore a nested span waterfall, and inspect
+timing, parent relationships, tags, links, and errors alongside the selected span.
 Shown with synthetic demo telemetry, not production data.
 
 ### Configure telemetry sources
@@ -269,9 +272,8 @@ does not verify Windows-specific execution.
 
 ### Publishing compiled releases
 
-Use `./bump-version.sh <version> --tag` (or `.\bump-version.ps1 -Version <version> -Tag`) to align the
-package version across `Directory.Build.props`, `frontend/package.json`, samples, and `README.md`,
-and create or update the matching tag such as `v1.0.0` (or `v1.0.0-rc.1` for a prerelease). The
+Set and commit the package version in `Directory.Build.props`, then push a matching tag
+on that commit, such as `v1.0.1` (or `v1.0.1-rc.1` for a prerelease). The
 [compiled-release workflow](.github/workflows/release.yml) validates the tag, restores,
 builds, tests the frontend/backend and installer contracts, and verifies a source install.
 Release jobs use the latest .NET 10 SDK servicing release compatible with `global.json`.
@@ -283,6 +285,12 @@ Prereleases do not replace GitHub's latest stable release used by the default in
 
 The workflow can also be run manually with an existing version tag; reruns replace that
 tag's assets. It publishes GitHub release assets, not packages to NuGet.org.
+
+If validation reports a tag/package-version mismatch, the tag points to a commit with
+the wrong version. Updating the default branch or rerunning the failed workflow does
+not change that tagged commit. For an unpublished release, recreate the tag on the
+corrected commit before running the workflow again; for an already published release,
+commit a new package version and create a new matching tag instead.
 
 ## Optional Copilot log chat
 
@@ -893,8 +901,15 @@ POST `<session-url>api/telemetry/suggest` requires
 contains the approved file names and contents. Suggestions are current-run-only and are
 unavailable for disabled or completed capture.
 
-Open **Metrics** for tagged measurement series and charts, or **Traces** for completed spans
-and their trace/parent relationships, timing, status, tags, and links. Metric values are
+Open **Metrics** for tagged measurement panels with latest values, legends, and interactive
+uPlot charts. Hover a chart or focus it and use arrow keys to inspect points; drag to zoom
+and choose **Reset zoom** to return to the recent window. Exact timestamps and values remain
+available in each panel's raw measurement table. Each tag set remains a separate series.
+Open **Traces** to search by trace ID, operation, source, status, or tag. Select a trace to
+view its nested waterfall; collapse parent rows to hide descendants and select a span for
+the adjacent timing/status/tag/link inspector. Narrow screens stack these panes.
+Waterfall durations cover only retained spans, not a guaranteed complete request.
+Both views remain fully bundled and offline; no Grafana server or CDN is required. Metric values are
 raw measurements: counter additions and histogram samples are not automatically converted
 into rates, totals, or percentile estimates. Observable instruments are polled periodically.
 Spans appear after they stop; a parent may be outside the capture window or filtered out.

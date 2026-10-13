@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { TelemetryWorkspace } from "./TelemetryWorkspace";
 import { fetchTelemetry, readTelemetry, type MetricMeasurement, type TelemetrySnapshot, type TelemetrySpan } from "./telemetry-api";
-import { chartPoints, MaximumDisplayedPoints, metricSeries, metricSeriesKey, spanRelation, traceGroups } from "./telemetry-model";
+import { chartPoints, MaximumDisplayedPoints, measurementScale, metricSeries, metricSeriesKey, recentMeasurements, spanRelation, traceGroups, traceWaterfall } from "./telemetry-model";
 
 const metric: MetricMeasurement = {
   id: 1, timestamp: "2026-10-12T08:00:00Z", meter: "sample", name: "requests", unit: null,
@@ -89,6 +89,34 @@ describe("native measurement series and trace relations", () => {
     expect(spanRelation(missing, [span, missing])).toContain("Missing parent");
     expect(spanRelation(child, [{ ...span, traceId: "other" }, child])).toContain("Missing parent");
   });
+  it("retains duplicate timestamps and orders the bounded raw chart window without aggregating", () => {
+    const points = recentMeasurements([metric, { ...metric, id: 2, value: 5 },
+      { ...metric, id: 3, timestamp: "2026-10-12T07:00:00Z", value: -2 }]);
+    expect(points.map(point => point.value)).toEqual([-2, 2, 5]);
+    expect(recentMeasurements(Array.from({ length: 500 }, (_, id) => ({ ...metric, id })))).toHaveLength(100);
+    for (const values of [[-Number.MAX_VALUE, Number.MAX_VALUE], [Number.MIN_VALUE], [0], [-5, -5]]) {
+      const metrics = values.map(value => ({ ...metric, value }));
+      const scale = measurementScale(metrics);
+      expect(scale).toBeGreaterThan(0);
+      expect(metrics.every(point => Number.isFinite(point.value / scale))).toBe(true);
+    }
+  });
+  it("builds nested waterfalls by actual start/end times, retaining orphans and cycles once", () => {
+    const child = { ...span, id: 2, spanId: "child", parentSpanId: span.spanId,
+      startTime: "2026-10-12T08:00:00.002Z", durationMilliseconds: 1 };
+    const root = { ...span, durationMilliseconds: 10 };
+    const orphan = { ...span, id: 3, spanId: "orphan", parentSpanId: "not-retained", durationMilliseconds: 0 };
+    const result = traceWaterfall([child, orphan, root]);
+    expect(result.duration).toBe(10);
+    expect(result.rows.map(row => [row.span.id, row.depth])).toEqual([[1, 0], [2, 1], [3, 0]]);
+    expect(result.rows[1]).toMatchObject({ startPercent: 20, widthPercent: 10 });
+    const cycle = traceWaterfall([{ ...span, parentSpanId: "child" }, child]);
+    expect(cycle.rows).toHaveLength(2);
+    expect(traceWaterfall([])).toEqual({ rows: [], duration: 0 });
+    const extreme = traceWaterfall([{ ...span, durationMilliseconds: Number.MAX_VALUE }, child]);
+    expect(Number.isFinite(extreme.duration)).toBe(true);
+    expect(extreme.rows.every(row => Number.isFinite(row.startPercent) && Number.isFinite(row.widthPercent))).toBe(true);
+  });
 });
 
 describe("telemetry workspace lifecycle", () => {
@@ -123,7 +151,7 @@ describe("telemetry workspace lifecycle", () => {
     expect(screen.getByRole("status").textContent).toContain("not saved with sessions");
     expect(fetch).not.toHaveBeenCalled();
     rerender(<TelemetryWorkspace view="metrics" archived={false} />);
-    await screen.findByText("Latest raw measurement: 2");
+    await screen.findByText("2", { selector: ".metric-latest strong" });
     const signal = fetch.mock.calls[0]?.[1].signal as AbortSignal;
     rerender(<TelemetryWorkspace view="metrics" archived />);
     expect(signal.aborted).toBe(true);
@@ -164,7 +192,7 @@ describe("telemetry workspace lifecycle", () => {
       metrics: Array.from({ length: 20 }, (_, index) => ({ ...metric, id: index, value: -index, tags: [{ key: "route", value: `/${index}` }] }))
     })));
     render(<TelemetryWorkspace view="metrics" archived={false} />);
-    await screen.findByText("Latest raw measurement: -19");
+    await screen.findByText("-19", { selector: ".metric-latest strong" });
     expect(screen.getAllByRole("img")).toHaveLength(12);
     expect(screen.getByText(/Showing 12 of 20 series/)).toBeDefined();
     expect(screen.getByText(/Older retained records not shown: 20 measurements · 10 spans/).textContent).toContain("Dropped/expired: 3 measurements");
