@@ -269,8 +269,9 @@ does not verify Windows-specific execution.
 
 ### Publishing compiled releases
 
-Set the package version in `Directory.Build.props`, then push a matching tag such as
-`v1.0.0` (or `v1.0.0-rc.1` for a prerelease). The
+Use `./bump-version.sh <version> --tag` (or `.\bump-version.ps1 -Version <version> -Tag`) to align the
+package version across `Directory.Build.props`, `frontend/package.json`, samples, and `README.md`,
+and create or update the matching tag such as `v1.0.0` (or `v1.0.0-rc.1` for a prerelease). The
 [compiled-release workflow](.github/workflows/release.yml) validates the tag, restores,
 builds, tests the frontend/backend and installer contracts, and verifies a source install.
 Release jobs use the latest .NET 10 SDK servicing release compatible with `global.json`.
