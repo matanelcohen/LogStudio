@@ -11,12 +11,13 @@ const bashInstaller = fileURLToPath(new URL("../../install-release.sh", import.m
 const powershellInstaller = fileURLToPath(new URL("../../install-release.ps1", import.meta.url));
 const windows = process.platform === "win32";
 
-function run(command, args, env = {}) {
+function run(command, args, env = {}, options = {}) {
   const result = spawnSync(command, args, {
     cwd: tmpdir(),
     env: { ...process.env, ...env },
     encoding: "utf8",
-    timeout: 60000
+    timeout: 60000,
+    ...options
   });
   assert.equal(result.error, undefined, result.error?.message);
   return result;
@@ -113,6 +114,16 @@ test("Bash validates options before downloads", { skip: windows }, (t) => {
   assert.equal(existsSync(f.env.MOCK_LOG), false);
 });
 
+test("Bash installer also works when piped to bash -s", { skip: windows }, (t) => {
+  const f = fixture(t);
+  unixArchive(f);
+  const result = run("bash", ["-s", "--", "--install-dir", f.install, "--bin-dir", f.bin], {
+    ...f.env, PATH: `${join(f.directory, "tools")}:${process.env.PATH}`
+  }, { input: readFileSync(bashInstaller, "utf8") });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(run(join(f.bin, "logstudio"), ["--help"]).status, 0);
+});
+
 for (const [os, arch, rid] of [
   ["Linux", "x86_64", "linux-x64"], ["Linux", "aarch64", "linux-arm64"],
   ["Darwin", "x86_64", "osx-x64"], ["Darwin", "arm64", "osx-arm64"]
@@ -170,6 +181,21 @@ test("Bash refuses unrelated executables and incomplete archives", { skip: windo
   assert.equal(readFileSync(join(f.bin, "logstudio"), "utf8"), "unrelated");
 });
 
+test("Bash rejects absolute archive paths before extraction", { skip: windows }, (t) => {
+  const f = fixture(t);
+  const outside = join(f.directory, "outside.txt");
+  writeFileSync(outside, "unchanged");
+  const asset = "logstudio-linux-x64.tar.gz";
+  const archive = run("tar", ["-czPf", join(f.downloads, asset), outside]);
+  assert.equal(archive.status, 0, archive.stderr);
+  checksum(f, asset);
+  const result = f.bash();
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /unsafe paths/);
+  assert.equal(existsSync(f.install), false);
+  assert.equal(readFileSync(outside, "utf8"), "unchanged");
+});
+
 test("Windows checksum failure installs nothing", { skip: !windows }, (t) => {
   const f = fixture(t);
   const cpu = process.env.PROCESSOR_ARCHITEW6432 || process.env.PROCESSOR_ARCHITECTURE;
@@ -221,9 +247,13 @@ test("compiled archive installs and runs without an installed .NET runtime", { s
   const update = windows ? f.powershell("-Version", "v0.1.0") : f.bash("--version", "v0.1.0");
   assert.equal(update.status, 0, update.stderr);
   if (windows) {
-    const launcher = join(f.install, "bin", "logstudio.cmd");
-    assert.match(readFileSync(launcher, "utf8"), /%~dp0/);
-    const launched = run(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `""${launcher}" --help"`]);
+    const bin = join(f.install, "bin");
+    assert.equal(run(join(bin, "logstudio.exe"), ["--help"]).status, 0);
+    const launched = run("pwsh", ["-NoProfile", "-Command", `
+      $env:PATH = "$env:MOCK_BIN;$env:PATH"
+      logstudio --no-wait -- $env:MOCK_NODE -e 'process.exit(process.argv[1] === ''literal"quote'' && process.argv[2] === '''' ? 0 : 17)' 'literal"quote' ''
+      exit $LASTEXITCODE
+    `], { MOCK_BIN: bin, MOCK_NODE: process.execPath });
     assert.equal(launched.status, 0, launched.stderr);
   }
 });

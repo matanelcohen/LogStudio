@@ -169,10 +169,13 @@ override described below; when launching a separate PowerShell process, add the 
 PATH for the current PowerShell session only, never the persistent user or system PATH.
 
 Windows releases support x64 and ARM64 and default to `%LOCALAPPDATA%\LogStudio`.
-Each installation uses a fresh `release.*` directory; an update switches the link/launcher
+The Windows `bin` directory is a junction to the verified release, so `logstudio.exe`
+runs directly without a batch wrapper altering command arguments.
+Each installation uses a fresh `release.*` directory; an update switches the link/junction
 only after verification, preserving older releases and any running process.
-To uninstall, remove the `logstudio` link (Windows: `bin/logstudio.cmd`) and the installation
-directory. Unused older `release.*` directories can be removed once no process is using them.
+To uninstall, remove the Unix `logstudio` link and installation directory; on Windows,
+remove the `bin` junction first (`cmd /c rmdir "%LOCALAPPDATA%\LogStudio\bin"`), then the
+installation directory. Unused older `release.*` directories can be removed once no process is using them.
 Checksums detect corrupt downloads; they are not independent signatures. Download scripts
 to a file and inspect them first if you do not want to pipe a remote script into Bash.
 The quick-install URLs become available after the first successful release workflow.
@@ -270,6 +273,7 @@ Set the package version in `Directory.Build.props`, then push a matching tag suc
 `v0.1.0` (or `v0.1.0-rc.1` for a prerelease). The
 [compiled-release workflow](.github/workflows/release.yml) validates the tag, restores,
 builds, tests the frontend/backend and installer contracts, and verifies a source install.
+Release jobs use the latest .NET 10 SDK servicing release compatible with `global.json`.
 Only after those checks pass does it publish self-contained x64 and ARM64 archives for
 Linux, macOS, and Windows, per-archive SHA-256 checksums, both NuGet packages, and the
 quick-install scripts to a GitHub Release. The archives retain `LogStudio.dll`, the embedded

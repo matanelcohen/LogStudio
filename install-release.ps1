@@ -20,6 +20,8 @@ No administrator access or persistent PATH changes. -Help downloads nothing.
 
 $TemporaryDir = $null
 $ReleaseDir = $null
+$PendingBin = $null
+$PreviousBin = $null
 $Installed = $false
 $PreviousSecurityProtocol = [Net.ServicePointManager]::SecurityProtocol
 try {
@@ -74,18 +76,26 @@ try {
     & $Executable --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Installed tool verification failed." }
     $BinDir = Join-Path $InstallDir "bin"
-    [void][IO.Directory]::CreateDirectory($BinDir)
-    $Launcher = Join-Path $BinDir "logstudio.cmd"
-    if (Test-Path -LiteralPath $Launcher) {
-        if ((Get-Content -LiteralPath $Launcher -TotalCount 1) -cne "@rem LogStudio release launcher") {
-            throw "Refusing to replace an unrelated launcher: $Launcher"
+    $ExistingBin = Get-Item -LiteralPath $BinDir -Force -ErrorAction SilentlyContinue
+    if ($ExistingBin) {
+        if ($ExistingBin.LinkType -ne "Junction") {
+            throw "Refusing to replace an unrelated directory or file: $BinDir"
+        }
+        $Target = [IO.Path]::GetFullPath(@($ExistingBin.Target)[0])
+        $TargetParent = Split-Path -Parent $Target
+        if ($TargetParent.TrimEnd("\") -ne $InstallDir.TrimEnd("\") -or (Split-Path -Leaf $Target) -notlike "release.*") {
+            throw "Refusing to replace an unrelated junction: $BinDir"
         }
     }
-    $PendingLauncher = Join-Path $TemporaryDir "logstudio.cmd"
-    $ReleaseName = Split-Path -Leaf $ReleaseDir
-    [IO.File]::WriteAllText($PendingLauncher, "@rem LogStudio release launcher`r`n@echo off`r`n@setlocal DisableDelayedExpansion`r`n`"%~dp0..\$ReleaseName\logstudio.exe`" %*`r`n", [Text.Encoding]::ASCII)
-    Move-Item -LiteralPath $PendingLauncher -Destination $Launcher -Force
+    $PendingBin = Join-Path $InstallDir (".bin.pending." + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Junction -Path $PendingBin -Target $ReleaseDir | Out-Null
+    if ($ExistingBin) {
+        $PreviousBin = Join-Path $InstallDir (".bin.previous." + [Guid]::NewGuid().ToString("N"))
+        Move-Item -LiteralPath $BinDir -Destination $PreviousBin
+    }
+    Move-Item -LiteralPath $PendingBin -Destination $BinDir
     $Installed = $true
+    if ($PreviousBin) { [IO.Directory]::Delete($PreviousBin) }
     if (($env:PATH -split ";") -notcontains $BinDir) { $env:PATH = "$BinDir;$env:PATH" }
     Write-Host "`nInstalled Log Studio at $Executable"
     Write-Host "Added $BinDir to PATH for this session only; add it to your user PATH for future terminals."
@@ -95,6 +105,10 @@ try {
     exit 1
 } finally {
     [Net.ServicePointManager]::SecurityProtocol = $PreviousSecurityProtocol
+    if (-not $Installed -and $PreviousBin -and (Test-Path -LiteralPath $PreviousBin)) {
+        Move-Item -LiteralPath $PreviousBin -Destination $BinDir
+    }
+    if ($PendingBin -and (Test-Path -LiteralPath $PendingBin)) { [IO.Directory]::Delete($PendingBin) }
     if ($TemporaryDir -and (Test-Path -LiteralPath $TemporaryDir)) { Remove-Item -LiteralPath $TemporaryDir -Recurse -Force }
     if (-not $Installed -and $ReleaseDir -and (Test-Path -LiteralPath $ReleaseDir)) { Remove-Item -LiteralPath $ReleaseDir -Recurse -Force }
 }
