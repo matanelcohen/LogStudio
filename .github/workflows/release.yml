@@ -44,7 +44,7 @@ jobs:
           [[ "$RELEASE_TAG" == "v$version" ]] || { echo "Tag must match Directory.Build.props package version ($version)"; exit 1; }
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
       - name: Test installer contracts
-        run: node --test tests/installers/installers.test.mjs tests/installers/releases.test.mjs
+        run: node --test tests/installers/installers.test.mjs tests/installers/releases.test.mjs tests/installers/bump.test.mjs
       - name: Restore, build, test, pack, and verify source installation
         run: ./install.sh --local --online
       - uses: actions/upload-artifact@v4.6.2
