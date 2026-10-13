@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,6 +25,16 @@ internal static class Program
             return 2;
         }
 
+        using ConsoleLogViewer? viewer = options.Showcase
+            ? ConsoleLogViewer.Start(new ConsoleLogViewerOptions
+            {
+                ApplicationName = "Telemetry showcase",
+                CaptureTelemetry = true,
+                MeterSources = "LogStudio.Demo.*",
+                ActivitySources = "LogStudio.Demo.*",
+                TelemetryIntervalMilliseconds = 250,
+            })
+            : null;
         using IHost host = Host.CreateDefaultBuilder(Array.Empty<string>())
             .ConfigureLogging(logging =>
             {
@@ -45,13 +57,14 @@ internal static class Program
     }
 }
 
-internal sealed record DemoOptions(int Count, int Delay, int ExitCode, bool Interactive)
+internal sealed record DemoOptions(int Count, int Delay, int ExitCode, bool Interactive, bool Showcase)
 {
     internal const string TimestampFormat = "HH:mm:ss.fff ";
     internal const string CountSwitch = "--count";
     internal const string DelaySwitch = "--delay";
     internal const string ExitCodeSwitch = "--exit-code";
     internal const string InteractiveSwitch = "--interactive";
+    internal const string ShowcaseSwitch = "--showcase";
 
     internal static DemoOptions Parse(string[] args)
     {
@@ -59,6 +72,7 @@ internal sealed record DemoOptions(int Count, int Delay, int ExitCode, bool Inte
         int delay = 150;
         int exitCode = 0;
         bool interactive = false;
+        bool showcase = false;
         for (int index = 0; index < args.Length; index++)
         {
             string option = args[index];
@@ -67,12 +81,17 @@ internal sealed record DemoOptions(int Count, int Delay, int ExitCode, bool Inte
                 interactive = true;
                 continue;
             }
+            if (option == ShowcaseSwitch)
+            {
+                showcase = true;
+                continue;
+            }
 
             if (option is not (CountSwitch or DelaySwitch or ExitCodeSwitch) ||
                 ++index >= args.Length ||
                 !int.TryParse(args[index], NumberStyles.Integer, CultureInfo.InvariantCulture, out int value))
             {
-                throw new ArgumentException($"Invalid demo option '{option}'. Use --count, --delay, --exit-code, or --interactive.");
+                throw new ArgumentException($"Invalid demo option '{option}'. Use --count, --delay, --exit-code, --interactive, or --showcase.");
             }
 
             switch (option)
@@ -94,7 +113,7 @@ internal sealed record DemoOptions(int Count, int Delay, int ExitCode, bool Inte
             throw new ArgumentOutOfRangeException(nameof(args), "Count and delay must be non-negative.");
         }
 
-        return new DemoOptions(count, delay, exitCode, interactive);
+        return new DemoOptions(count, delay, exitCode, interactive, showcase);
     }
 }
 
@@ -131,6 +150,12 @@ internal sealed class DemoRunner : BackgroundService
             this.logger.LogWarning(SeedWarning);
             this.logger.LogError(new InvalidOperationException(SeedError), "Evaluation {EvaluationId} reported a synthetic error", EvaluationId);
 
+            if (this.options.Showcase)
+            {
+                await this.RunShowcaseAsync(stoppingToken).ConfigureAwait(false);
+                return;
+            }
+
             for (int index = 1; index <= this.options.Count; index++)
             {
                 this.logger.LogInformation("Running DemoSkill step {Step}; EvaluationId={EvaluationId}", index, EvaluationId);
@@ -148,6 +173,7 @@ internal sealed class DemoRunner : BackgroundService
                 {
                     await Task.Delay(this.options.Delay, stoppingToken).ConfigureAwait(false);
                 }
+
             }
 
             if (this.options.Interactive)
@@ -163,6 +189,98 @@ internal sealed class DemoRunner : BackgroundService
         finally
         {
             this.lifetime.StopApplication();
+        }
+    }
+
+    private async Task RunShowcaseAsync(CancellationToken stoppingToken)
+    {
+        using DemoTelemetry telemetry = new();
+        int orderId = 0;
+        foreach (string scenario in new[] { "success", "slow", "error" })
+        {
+            await this.RunOrderAsync(telemetry, ++orderId, scenario, stoppingToken).ConfigureAwait(false);
+        }
+
+        Console.WriteLine("Synthetic telemetry only. Open the printed Log Studio URL and select Logs, Metrics, or Traces.");
+        Console.WriteLine("Commands: success, slow, error, burst (10 mixed orders), help, quit. Ctrl+C also stops the demo.");
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            Console.Write("Demo> ");
+            string? input = await Console.In.ReadLineAsync(stoppingToken).ConfigureAwait(false);
+            string? command = input?.Trim().ToLowerInvariant();
+            if (command is null or "quit" or "exit") break;
+            if (command is "success" or "slow" or "error")
+            {
+                await this.RunOrderAsync(telemetry, ++orderId, command, stoppingToken).ConfigureAwait(false);
+            }
+            else if (command == "burst")
+            {
+                for (int index = 0; index < 10; index++)
+                {
+                    string scenario = index % 5 == 4 ? "error" : index % 3 == 2 ? "slow" : "success";
+                    await this.RunOrderAsync(telemetry, ++orderId, scenario, stoppingToken).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                Console.WriteLine("Commands: success, slow, error, burst, help, quit.");
+            }
+        }
+    }
+
+    private async Task RunOrderAsync(DemoTelemetry telemetry, int orderId, string scenario, CancellationToken stoppingToken)
+    {
+        using Activity? order = telemetry.Orders.StartActivity("checkout", ActivityKind.Server);
+        order?.SetTag("order.id", orderId);
+        order?.SetTag("demo.scenario", scenario);
+        using IDisposable? scope = this.logger.BeginScope("OrderId:{OrderId} TraceId:{TraceId}", orderId, order?.TraceId.ToString());
+        Stopwatch duration = Stopwatch.StartNew();
+        telemetry.InFlight.Add(1);
+        try
+        {
+            this.logger.LogInformation("Checkout {OrderId} started; scenario={Scenario}", orderId, scenario);
+            using (Activity? inventory = telemetry.Inventory.StartActivity("reserve-stock", ActivityKind.Internal))
+            {
+                inventory?.SetTag("product.id", "demo-widget");
+                this.logger.LogDebug("Reserving synthetic inventory for order {OrderId}", orderId);
+                await Task.Delay(30, stoppingToken).ConfigureAwait(false);
+                inventory?.SetStatus(ActivityStatusCode.Ok);
+            }
+
+            using (Activity? payment = telemetry.Payments.StartActivity("charge-payment", ActivityKind.Client))
+            {
+                payment?.SetTag("payment.provider", "synthetic");
+                if (scenario == "slow")
+                {
+                    this.logger.LogWarning("Synthetic slow payment for order {OrderId}", orderId);
+                    payment?.AddEvent(new ActivityEvent("simulated-delay"));
+                }
+
+                await Task.Delay(scenario == "slow" ? 600 : 60, stoppingToken).ConfigureAwait(false);
+                if (scenario == "error")
+                {
+                    payment?.SetStatus(ActivityStatusCode.Error, "Synthetic payment declined");
+                    payment?.SetTag("error.type", "DemoPaymentDeclined");
+                    order?.SetStatus(ActivityStatusCode.Error, "Synthetic checkout failure");
+                    this.logger.LogError(new InvalidOperationException("Synthetic payment declined; no real payment was attempted."),
+                        "Checkout {OrderId} failed; TraceId={TraceId}", orderId, order?.TraceId.ToString());
+                }
+                else
+                {
+                    payment?.SetStatus(ActivityStatusCode.Ok);
+                    order?.SetStatus(ActivityStatusCode.Ok);
+                    this.logger.LogInformation("Checkout {OrderId} completed; TraceId={TraceId}", orderId, order?.TraceId.ToString());
+                }
+            }
+
+            telemetry.Requests.Add(1, new KeyValuePair<string, object?>("scenario", scenario));
+            telemetry.Duration.Record(duration.Elapsed.TotalMilliseconds, new KeyValuePair<string, object?>("scenario", scenario));
+            if (scenario == "error") telemetry.Errors.Add(1);
+            telemetry.CompleteOrder();
+        }
+        finally
+        {
+            telemetry.InFlight.Add(-1);
         }
     }
 }

@@ -480,6 +480,54 @@ For a quick demonstration:
 The terminal prints `Log Studio: http://127.0.0.1:<port>/<session-secret>/`.
 Open that URL if you omit `--open`. Each invocation gets its own port and session URL.
 
+### Interactive logs, traces, and metrics demo (source checkout only)
+
+Requires the .NET 10 SDK and Node.js 22.12+ to build the bundled viewer.
+From the repository root:
+
+```bash
+# Once per checkout, or after changing frontend sources:
+(cd "$PWD/frontend" && npm ci && npm run build)
+
+dotnet run --project "$PWD/samples/LogStudio.Demo/LogStudio.Demo.csproj" -c Release -- --showcase
+```
+
+Open the printed `Log Studio: http://127.0.0.1:<port>/<session-secret>/` URL.
+The demo attaches the viewer **inside its own process**, with telemetry enabled;
+do not wrap this command with `logstudio` or set `DOTNET_STARTUP_HOOKS`.
+It automatically seeds one successful, one slow, and one failed synthetic checkout,
+then stays alive at the `Demo>` terminal prompt. Type a command and press Enter:
+
+| Command | What it triggers |
+| --- | --- |
+| `success` | A successful checkout with informational/debug logs and nested inventory/payment spans. |
+| `slow` | A warning and a simulated 600 ms payment delay, visible in the duration chart and trace waterfall. |
+| `error` | An exception log and error-status checkout/payment spans; no real payment or network request occurs. |
+| `burst` | Ten mixed checkouts to populate charts and exercise log/trace filtering. Repeat as needed. |
+| `help` | Print the command list. |
+| `quit` | Stop the app and viewer. Ctrl+C or end-of-input also stops it. |
+
+In **Logs**, search `Checkout`, `OrderId`, or a trace ID from a log scope.
+In **Metrics**, look for `demo.orders`, `demo.errors`, `demo.order.duration`,
+`demo.orders.in_flight`, and the periodically sampled `demo.orders.completed` gauge.
+Scenario tags separate successful, slow, and failed order/duration series.
+Counter and up/down-counter values are **raw additions**, not computed totals;
+the completed gauge explicitly reports a running total, including failed checkouts.
+In **Traces**, select a `checkout` to inspect its nested `reserve-stock` and
+`charge-payment` spans, source colors, tags, durations, and errors.
+**Configure sources** can filter `LogStudio.Demo.Orders`, `LogStudio.Demo.Inventory`,
+and `LogStudio.Demo.Payments`; trigger more commands after applying a filter.
+
+All data is synthetic and local. The viewer closes when this demo exits; inspect it
+before quitting. Showcase mode replaces the normal `--count`/`--delay` loop and
+single-line `--interactive` behavior; running without `--showcase` keeps those existing
+options unchanged.
+
+The sample is non-packable and is not referenced by either shipping project.
+It is **not included in NuGet packages or compiled release archives**, even when
+the solution is built in Release configuration. There is no demo command in the
+distributed `logstudio` executable.
+
 ### Install globally and run from anywhere
 
 The package is built locally, not published to NuGet.org. Install it from this workspace's
