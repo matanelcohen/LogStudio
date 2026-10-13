@@ -47,6 +47,125 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
     }
 
     [Fact]
+    public async Task ShowcaseCapturesLogsNestedTracesAndMetricsUntilQuit()
+    {
+        using Process process = StartProcess(new[] { DemoPath, "--showcase" });
+        Task<string>? output = null;
+        Task<string>? error = null;
+        try
+        {
+            Uri url = await ReadUrlAsync(process);
+            output = process.StandardOutput.ReadToEndAsync();
+            error = process.StandardError.ReadToEndAsync();
+            using HttpClient client = new();
+            using CancellationTokenSource timeout = new(ProcessTimeout);
+            await process.StandardInput.WriteLineAsync("success");
+            await process.StandardInput.WriteLineAsync("slow");
+            await process.StandardInput.WriteLineAsync("error");
+            await process.StandardInput.WriteLineAsync("burst");
+            JsonElement telemetry;
+            do
+            {
+                using JsonDocument snapshot = JsonDocument.Parse(await client.GetStringAsync(new Uri(url, "api/telemetry"), timeout.Token));
+                telemetry = snapshot.RootElement.Clone();
+                if (telemetry.GetProperty("spans").GetArrayLength() >= 48 &&
+                    telemetry.GetProperty("metrics").EnumerateArray().Any(metric =>
+                        metric.GetProperty("name").GetString() == "demo.orders.completed" &&
+                        metric.GetProperty("value").GetDouble() == 16)) break;
+                await Task.Delay(20, timeout.Token);
+            }
+            while (true);
+
+            Assert.False(process.HasExited);
+            Assert.True(telemetry.GetProperty("enabled").GetBoolean());
+            JsonElement[] spans = telemetry.GetProperty("spans").EnumerateArray().ToArray();
+            Assert.Equal(16, spans.Count(span => span.GetProperty("name").GetString() == "checkout"));
+            JsonElement failedOrder = spans.First(span => span.GetProperty("name").GetString() == "checkout" &&
+                span.GetProperty("status").GetString() == "Error");
+            Assert.Contains(spans, span => span.GetProperty("name").GetString() == "charge-payment" &&
+                span.GetProperty("status").GetString() == "Error" &&
+                span.GetProperty("traceId").GetString() == failedOrder.GetProperty("traceId").GetString() &&
+                span.GetProperty("parentSpanId").GetString() == failedOrder.GetProperty("spanId").GetString());
+            Assert.Contains(spans, span => span.GetProperty("name").GetString() == "reserve-stock" &&
+                span.GetProperty("parentSpanId").GetString() == failedOrder.GetProperty("spanId").GetString());
+
+            JsonElement[] metrics = telemetry.GetProperty("metrics").EnumerateArray().ToArray();
+            foreach (string name in new[] { "demo.orders", "demo.errors", "demo.order.duration", "demo.orders.in_flight", "demo.orders.completed" })
+            {
+                Assert.Contains(metrics, metric => metric.GetProperty("name").GetString() == name);
+            }
+            Assert.Contains(metrics, metric => metric.GetProperty("name").GetString() == "demo.order.duration" &&
+                metric.GetProperty("value").GetDouble() >= 600 &&
+                metric.GetProperty("tags").EnumerateArray().Any(tag =>
+                    tag.GetProperty("key").GetString() == "scenario" && tag.GetProperty("value").GetString() == "slow"));
+            using JsonDocument logs = JsonDocument.Parse(await client.GetStringAsync(new Uri(url, ViewerConstants.SnapshotRoute), timeout.Token));
+            Assert.Contains(logs.RootElement.GetProperty("entries").EnumerateArray(), entry =>
+                entry.GetProperty("message").GetString()?.Contains(failedOrder.GetProperty("traceId").GetString()!, StringComparison.Ordinal) == true);
+
+            await process.StandardInput.WriteLineAsync("quit");
+            await process.WaitForExitAsync().WaitAsync(ProcessTimeout);
+            Assert.Equal(0, process.ExitCode);
+            Assert.Contains("Commands: success, slow, error, burst", await output, StringComparison.Ordinal);
+            await error;
+        }
+        finally
+        {
+            await KillAsync(process);
+            if (output is not null) await output;
+            if (error is not null) await error;
+        }
+    }
+
+    [Fact]
+    public async Task ShowcaseStopsOnEndOfInput()
+    {
+        ProcessResult result = await RunProcessAsync(new[] { DemoPath, "--showcase" });
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains(UrlPrefix, result.Error, StringComparison.Ordinal);
+        Assert.Contains("Synthetic telemetry only", result.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ShowcaseStopsOnInterruptWhileWaitingForInput()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using Process process = StartProcess(new[] { DemoPath, "--showcase" });
+        Task<string>? error = null;
+        try
+        {
+            await ReadUrlAsync(process);
+            error = process.StandardError.ReadToEndAsync();
+            using CancellationTokenSource timeout = new(ProcessTimeout);
+            while (true)
+            {
+                string? line = await process.StandardOutput.ReadLineAsync(timeout.Token);
+                Assert.NotNull(line);
+                if (line.StartsWith("Commands: success", StringComparison.Ordinal)) break;
+            }
+            char[] prompt = new char[6];
+            Assert.Equal(prompt.Length, await process.StandardOutput.ReadBlockAsync(prompt.AsMemory(), timeout.Token));
+            Assert.Equal("Demo> ", new string(prompt));
+            Task<string> output = process.StandardOutput.ReadToEndAsync();
+            ProcessStartInfo signalInfo = new("kill") { UseShellExecute = false };
+            signalInfo.ArgumentList.Add("-s");
+            signalInfo.ArgumentList.Add("INT");
+            signalInfo.ArgumentList.Add(process.Id.ToString(CultureInfo.InvariantCulture));
+            using Process signal = Process.Start(signalInfo)!;
+            await signal.WaitForExitAsync().WaitAsync(ProcessTimeout);
+            Assert.Equal(0, signal.ExitCode);
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(0, process.ExitCode);
+            await output;
+            await error;
+        }
+        finally
+        {
+            await KillAsync(process);
+            if (error is not null) await error;
+        }
+    }
+
+    [Fact]
     public async Task WrapperPreservesWorkingDirectoryAndRelativeChildPaths()
     {
         string directory = Path.GetDirectoryName(DemoPath) ??
