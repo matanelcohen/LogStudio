@@ -270,7 +270,7 @@ does not verify Windows-specific execution.
 ### Publishing compiled releases
 
 Set and commit the package version in `Directory.Build.props`, then push a matching tag
-on that commit, such as `v1.0.0` (or `v1.0.0-rc.1` for a prerelease). The
+on that commit, such as `v1.0.1` (or `v1.0.1-rc.1` for a prerelease). The
 [compiled-release workflow](.github/workflows/release.yml) validates the tag, restores,
 builds, tests the frontend/backend and installer contracts, and verifies a source install.
 Release jobs use the latest .NET 10 SDK servicing release compatible with `global.json`.
