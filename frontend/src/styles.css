@@ -336,8 +336,8 @@ kbd { font-size: calc(10px * var(--ui-font-scale, 1)); white-space: nowrap; colo
 .regex-guidance { display: flex; gap: 8px; align-items: center; color: var(--cp-secondary-text); font-size: calc(11px * var(--ui-font-scale, 1)); margin: 16px 0; padding: 10px; background: var(--cp-surface-soft); border-radius: 6px; }
 .regex-guidance svg { flex-shrink: 0; }
 .dialog-footer { justify-content: flex-end; padding-top: 16px; border-top: 1px solid var(--cp-separator); }
-.copilot-panel { flex: 0 0 360px; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--cp-border); border-radius: 8px; background: var(--cp-surface); }
-.copilot-header { display: flex; align-items: center; gap: 8px; padding: 12px; border-bottom: 1px solid var(--cp-separator); }
+.copilot-panel { flex: 0 0 360px; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: auto; border: 1px solid var(--cp-border); border-radius: 8px; background: var(--cp-surface); }
+.copilot-header { flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 12px; border-bottom: 1px solid var(--cp-separator); }
 .copilot-header > svg { flex-shrink: 0; color: var(--cp-native-accent); }
 .copilot-heading { flex: 1; min-width: 0; }
 .copilot-heading h2 { font-size: calc(14px * var(--ui-font-scale, 1)); }
@@ -602,12 +602,12 @@ mark { background: var(--cp-highlight); color: var(--cp-text); border-radius: 2p
 }
 @media (max-width: 1360px) {
   .workspace-region:has(.copilot-panel:not([hidden])):has(.workspace[data-fields="true"][data-inspector="true"]) { flex-direction: column; overflow: auto; }
-  .workspace-region:has(.workspace[data-fields="true"][data-inspector="true"]) .copilot-panel { flex: none; height: 40dvh; }
+  .workspace-region:has(.workspace[data-fields="true"][data-inspector="true"]) .copilot-panel { flex: none; height: 40dvh; min-height: 260px; }
   .workspace-region:has(.copilot-panel:not([hidden])) .workspace[data-fields="true"][data-inspector="true"] { flex: none; height: max(420px, 60dvh); min-height: 420px; }
 }
 @media (max-width: 1080px) {
   .workspace-region:has(.copilot-panel:not([hidden])) { flex-direction: column; overflow: auto; }
-  .workspace-region:has(.copilot-panel:not([hidden])) .copilot-panel { flex: none; height: 40dvh; }
+  .workspace-region:has(.copilot-panel:not([hidden])) .copilot-panel { flex: none; height: 40dvh; min-height: 260px; }
   .workspace-region:has(.copilot-panel:not([hidden])) .workspace { flex: none; height: max(420px, 60dvh); min-height: 420px; }
   .copilot-panel { flex-basis: 300px; }
   .workspace[data-inspector="true"] { grid-template-columns: minmax(0, 1fr) 300px; }

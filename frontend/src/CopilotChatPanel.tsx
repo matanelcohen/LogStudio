@@ -15,6 +15,8 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const panel = useRef<HTMLElement>(null);
+  const focusOnOpen = useRef(true);
   const connectButton = useRef<HTMLButtonElement>(null);
   const questionInput = useRef<HTMLTextAreaElement>(null);
   const conversation = useRef<HTMLDivElement>(null);
@@ -23,6 +25,9 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
 
   useEffect(() => {
     if (hidden || busy) return;
+    const opening = focusOnOpen.current;
+    focusOnOpen.current = false;
+    if (!opening && document.activeElement !== document.body && !panel.current?.contains(document.activeElement)) return;
     if (version) questionInput.current?.focus();
     else connectButton.current?.focus();
   }, [version, busy, hidden]);
@@ -66,7 +71,7 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
     finally { setBusy(false); }
   }
 
-  return <aside className="copilot-panel" hidden={hidden} aria-labelledby="copilotTitle" onKeyDown={event => {
+  return <aside ref={panel} className="copilot-panel" hidden={hidden} aria-labelledby="copilotTitle" onKeyDown={event => {
     if (event.key === "Escape" && !busy) { event.stopPropagation(); close(); }
   }}>
     <header className="copilot-header">
@@ -101,7 +106,7 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
         <textarea ref={questionInput} id="copilotQuestion" value={question} maxLength={MaximumChatQuestionLength} disabled={busy || !version}
           rows={2} placeholder="Ask about this session…" onChange={event => setQuestion(event.target.value)}
           onKeyDown={event => {
-            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
               event.preventDefault();
               void submit();
             }

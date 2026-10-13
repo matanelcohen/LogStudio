@@ -162,11 +162,28 @@ describe("full-session log chat panel", () => {
     fireEvent.change(input, { target: { value: "First line\nSecond line" } });
     expect(fireEvent.keyDown(input, { key: "Enter", shiftKey: true })).toBe(true);
     expect(fireEvent.keyDown(input, { key: "Enter", isComposing: true })).toBe(true);
+    expect(fireEvent.keyDown(input, { key: "Enter", keyCode: 229 })).toBe(true);
     expect(chat).not.toHaveBeenCalled();
     expect(fireEvent.keyDown(input, { key: "Enter" })).toBe(false);
     await screen.findByText("Keyboard answer");
     expect(chat).toHaveBeenCalledWith("saved", "First line\nSecond line", []);
     expect(document.activeElement).toBe(input);
+  });
+
+  it("does not steal focus from log exploration when a request finishes", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue("test CLI");
+    let finish!: (value: ChatResponse) => void;
+    vi.spyOn(api, "askCopilot").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    render(<>
+      <input aria-label="Search logs" />
+      <CopilotChatPanel status={Status} sessionId="" onClose={vi.fn()} returnFocus={vi.fn()} />
+    </>);
+    await connectCli();
+    ask();
+    const search = screen.getByLabelText("Search logs");
+    search.focus();
+    await act(async () => finish({ answer: "Answer while exploring", contextEntryCount: 1, contextTruncated: false }));
+    expect(document.activeElement).toBe(search);
   });
 
   it("keeps the entire displayed conversation while limiting outbound history to three pairs", async () => {
