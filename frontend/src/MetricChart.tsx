@@ -39,6 +39,7 @@ export function MetricChart({ metrics }: { metrics: MetricMeasurement[] }) {
       if (width <= 0) return;
       const style = getComputedStyle(element);
       const color = (name: string) => style.getPropertyValue(name).trim();
+      const seriesColor = color("--telemetry-series-color") || color("--cp-accent");
       const font = `${style.fontSize} ${style.fontFamily}`;
       plot.current = new uPlot({
         mode: 2, width: Math.floor(width), height: 210,
@@ -53,8 +54,8 @@ export function MetricChart({ metrics }: { metrics: MetricMeasurement[] }) {
         series: [{}, {
           label: displayText(latest.name),
           facets: [{ scale: "x", sorted: 1 }, { scale: "y" }],
-          paths: uPlot.paths.linear!(), stroke: color("--cp-accent"), width: 2,
-          points: { show: true, size: 5, fill: color("--cp-surface"), stroke: color("--cp-accent") }
+          paths: uPlot.paths.linear!(), stroke: seriesColor, width: 2,
+          points: { show: true, size: 5, fill: color("--cp-surface"), stroke: seriesColor }
         }],
         axes: [
           { stroke: color("--cp-text-muted"), font, size: 38, space: 90,

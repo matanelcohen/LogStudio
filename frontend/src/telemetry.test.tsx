@@ -1,8 +1,8 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { TelemetryWorkspace } from "./TelemetryWorkspace";
 import { fetchTelemetry, readTelemetry, type MetricMeasurement, type TelemetrySnapshot, type TelemetrySpan } from "./telemetry-api";
-import { chartPoints, MaximumDisplayedPoints, measurementScale, metricSeries, metricSeriesKey, recentMeasurements, spanRelation, traceGroups, traceWaterfall } from "./telemetry-model";
+import { chartPoints, MaximumDisplayedPoints, measurementScale, metricSeries, metricSeriesKey, recentMeasurements, spanRelation, telemetrySourceColor, traceGroups, traceWaterfall } from "./telemetry-model";
 
 const metric: MetricMeasurement = {
   id: 1, timestamp: "2026-10-12T08:00:00Z", meter: "sample", name: "requests", unit: null,
@@ -70,6 +70,12 @@ describe("native measurement series and trace relations", () => {
     expect(metricSeries(variants)).toHaveLength(6);
     const tags = [{ key: "a", value: "1" }, { key: "b", value: "2" }];
     expect(metricSeriesKey({ ...metric, tags })).toBe(metricSeriesKey({ ...metric, tags: [...tags].reverse() }));
+  });
+  it("assigns stable, bounded source colors without interpolating telemetry into CSS", () => {
+    for (const source of ["Orders.Api", "", "<script>unsafe</script>", "a".repeat(256)]) {
+      expect(telemetrySourceColor(source)).toMatch(/^var\(--telemetry-series-[1-5]\)$/);
+      expect(telemetrySourceColor(source)).toBe(telemetrySourceColor(source));
+    }
   });
   it("bounds chart points, handles constants and negative/extreme values without invented aggregates", () => {
     const constant = chartPoints([{ ...metric, value: -5 }]);
@@ -182,9 +188,11 @@ describe("telemetry workspace lifecycle", () => {
     render(<TelemetryWorkspace view="metrics" archived={false} />);
     await flush();
     expect(screen.getByRole("alert").textContent).toContain("Offline");
+    expect(screen.getByText("Reconnecting")).toBeDefined();
     await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByRole("status").textContent).toContain("capture is disabled");
+    expect(screen.getByText("Capture disabled")).toBeDefined();
   });
   it("provides native charts and exact raw table values with bounded series", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({
@@ -200,6 +208,42 @@ describe("telemetry workspace lifecycle", () => {
     fireEvent.click(screen.getAllByText(/Raw measurement table/)[0]!);
     expect(screen.getAllByRole("table")).toHaveLength(12);
     expect(screen.getByRole("cell", { name: "-19" })).toBeDefined();
+  });
+  it("searches every metric series before the panel limit and combines search with source filtering", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ ...empty, metrics: [
+      { ...metric, name: "cache.duration", meter: "Cache", instrumentType: "Histogram", unit: "ms",
+        tags: [{ key: "region", value: "eu-west" }] },
+      ...Array.from({ length: 20 }, (_, index) => ({ ...metric, id: index + 2, name: `requests.${index}` }))
+    ] })));
+    render(<TelemetryWorkspace view="metrics" archived={false} />);
+    await screen.findByText("requests.19", { selector: "h3" });
+    expect(screen.getAllByRole("img")).toHaveLength(12);
+    expect(screen.queryByRole("heading", { name: "cache.duration" })).toBeNull();
+    const search = screen.getByRole("searchbox", { name: "Search metrics" });
+    for (const query of ["CACHE.DURATION", "cache", "histogram", "ms", "region", "EU-WEST"]) {
+      fireEvent.change(search, { target: { value: query } });
+      expect(screen.getAllByRole("img")).toHaveLength(1);
+      expect(screen.getByRole("heading", { name: "cache.duration" })).toBeDefined();
+    }
+    fireEvent.change(screen.getByRole("combobox", { name: "Metric source" }), { target: { value: "sample" } });
+    expect(screen.getByRole("status").textContent).toContain("No metrics match these filters");
+    fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+    expect(screen.getAllByRole("img")).toHaveLength(12);
+    const summary = screen.getByLabelText("Metric snapshot summary");
+    expect(within(summary).getAllByText("21", { selector: "strong" })).toHaveLength(2);
+    expect(within(summary).getByText("2", { selector: "strong" })).toBeDefined();
+  });
+  it("shows trace-specific snapshot counts instead of unrelated metric totals", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ ...empty, metrics: [metric], spans: [
+      span, { ...span, id: 2, spanId: "child", parentSpanId: span.spanId, status: "Error", source: "Database" }
+    ] })));
+    render(<TelemetryWorkspace view="traces" archived={false} />);
+    const summary = await screen.findByLabelText("Trace snapshot summary");
+    expect(within(summary).getByText("Recent traces")).toBeDefined();
+    expect(within(summary).getByText("Error spans")).toBeDefined();
+    expect(within(summary).getAllByText("1", { selector: "strong" })).toHaveLength(2);
+    expect(within(summary).getAllByText("2", { selector: "strong" })).toHaveLength(2);
+    expect(within(summary).queryByText("Measurements")).toBeNull();
   });
   it("selects span details safely and includes parent relationships, duration, status, tags and links", async () => {
     const child = { ...span, id: 2, name: "<script>unsafe</script>", spanId: "span-2", parentSpanId: span.spanId,

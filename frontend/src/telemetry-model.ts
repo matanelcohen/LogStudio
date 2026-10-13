@@ -4,6 +4,11 @@ export const MaximumDisplayedSeries = 12;
 export const MaximumDisplayedTraces = 50;
 export const MaximumDisplayedPoints = 100;
 export function displayText(value: string): string { return value.length > 512 ? `${value.slice(0, 512)}…` : value; }
+export function telemetrySourceColor(source: string): string {
+  let hash = 0;
+  for (let index = 0; index < source.length; index++) hash = (hash * 31 + source.charCodeAt(index)) | 0;
+  return `var(--telemetry-series-${(hash >>> 0) % 5 + 1})`;
+}
 export function metricSeriesKey(metric: MetricMeasurement): string {
   const tags = metric.tags.map(tag => [tag.key, tag.value]).sort((a, b) =>
     JSON.stringify(a).localeCompare(JSON.stringify(b)));

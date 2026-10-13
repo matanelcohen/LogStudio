@@ -23,7 +23,7 @@ The optional timeline shows the **visible page only**, not the full session.
 
 ![Log Studio's Metrics page with tagged raw measurement charts in dark mode](docs/design/metrics-dark.png)
 
-**See the measurements.** Explore compact metric panels with latest values, tag chips,
+**See the measurements.** Search instruments, filter meter sources, and explore metric panels with latest values, tag chips,
 and locally bundled uPlot charts. Hover or use arrow keys to inspect raw points, drag to
 zoom, or expand the exact measurement table.
 Shown with synthetic demo telemetry, not production data.
@@ -32,7 +32,7 @@ Shown with synthetic demo telemetry, not production data.
 
 ![Log Studio's Traces page with selected span details, parent relationships, status, tags, and links in dark mode](docs/design/traces-dark.png)
 
-**Follow the request.** Search recent traces, explore a nested span waterfall, and inspect
+**Follow the request.** Search recent traces, filter errors, sort by duration, explore a source-colored span waterfall, and inspect
 timing, parent relationships, tags, links, and errors alongside the selected span.
 Shown with synthetic demo telemetry, not production data.
 
@@ -902,12 +902,17 @@ contains the approved file names and contents. Suggestions are current-run-only 
 unavailable for disabled or completed capture.
 
 Open **Metrics** for tagged measurement panels with latest values, legends, and interactive
-uPlot charts. Hover a chart or focus it and use arrow keys to inspect points; drag to zoom
+uPlot charts. Search by instrument, source, type, unit, or tag and filter by meter source;
+filters search all snapshot series before the 12-panel display limit.
+Hover a chart or focus it and use arrow keys to inspect points; drag to zoom
 and choose **Reset zoom** to return to the recent window. Exact timestamps and values remain
 available in each panel's raw measurement table. Each tag set remains a separate series.
 Open **Traces** to search by trace ID, operation, source, status, or tag. Select a trace to
-view its nested waterfall; collapse parent rows to hide descendants and select a span for
-the adjacent timing/status/tag/link inspector. Narrow screens stack these panes.
+view its nested, source-colored waterfall; filter traces with errors or no retained errors,
+and sort by newest capture or longest retained duration. Collapse parent rows to hide
+descendants and select a span for the timing/status/tag/link inspector.
+Narrow screens stack these panes. Snapshot summaries and capture-health details make the
+retained-data limits explicit; display filters do not change the configured capture sources.
 Waterfall durations cover only retained spans, not a guaranteed complete request.
 Both views remain fully bundled and offline; no Grafana server or CDN is required. Metric values are
 raw measurements: counter additions and histogram samples are not automatically converted
