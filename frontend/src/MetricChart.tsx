@@ -29,6 +29,7 @@ export function MetricChart({ metrics }: { metrics: MetricMeasurement[] }) {
     keyboardIndex.current = null;
     setHovered(null);
     plot.current?.setData(current.current.data, !zoomed.current);
+    if (zoomed.current) plot.current?.redraw(true, true);
   }, [points, scale]);
 
   useEffect(() => {

@@ -11,13 +11,14 @@ const { instances, constructor } = vi.hoisted(() => {
     scales: { x: { min: number; max: number } };
     setData: ReturnType<typeof vi.fn>; setSize: ReturnType<typeof vi.fn>;
     setScale: ReturnType<typeof vi.fn>; setCursor: ReturnType<typeof vi.fn>;
+    redraw: ReturnType<typeof vi.fn>;
     destroy: ReturnType<typeof vi.fn>; posToVal: ReturnType<typeof vi.fn>; valToPos: ReturnType<typeof vi.fn>;
   }[] = [];
   const constructor = vi.fn(function(options: uPlot.Options, data: uPlot.AlignedData) {
     const chart = {
       options, data, cursor: { left: 0, top: 0, idxs: [null, null] as (number | null)[] }, select: { width: 0 },
       scales: { x: { min: 0, max: 1 } },
-      setData: vi.fn(), setSize: vi.fn(), setScale: vi.fn(), setCursor: vi.fn(), destroy: vi.fn(),
+      setData: vi.fn(), setSize: vi.fn(), setScale: vi.fn(), setCursor: vi.fn(), redraw: vi.fn(), destroy: vi.fn(),
       posToVal: vi.fn(), valToPos: vi.fn((value: number) => value)
     };
     instances.push(chart);
@@ -58,6 +59,7 @@ describe("metric chart lifecycle and interaction", () => {
     rerender(<MetricChart metrics={[metric, { ...metric, id: 2, value: 10 }]} />);
     expect(constructor).toHaveBeenCalledTimes(1);
     expect(chart.setData.mock.calls.at(-1)?.[1]).toBe(false);
+    expect(chart.redraw).toHaveBeenCalledWith(true, true);
     fireEvent.click(screen.getByRole("button", { name: "Reset zoom" }));
     expect(chart.setData.mock.calls.at(-1)).toHaveLength(1);
     unmount();
