@@ -63,4 +63,34 @@ describe("trace explorer", () => {
     expect(within(list).getByRole("button", { name: /POST \/orders/ }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("region", { name: "Selected span details" }).textContent).toContain("SELECT orders");
   });
+  it("filters errors and sorts by retained duration before limiting the trace list", () => {
+    const newer = Array.from({ length: 60 }, (_, index) => ({ ...other, id: index + 3, traceId: `health-${index}`,
+      durationMilliseconds: index + 1 }));
+    render(<TraceExplorer spans={[root, child, ...newer]} />);
+    const status = screen.getByRole("combobox", { name: "Trace status" });
+    const list = () => screen.getByRole("region", { name: "Trace list" });
+    expect(within(list()).queryByText("trace-one")).toBeNull();
+    fireEvent.change(screen.getByRole("combobox", { name: "Sort traces" }), { target: { value: "duration" } });
+    expect(within(list()).getAllByRole("button")[0]?.textContent).toContain("POST /orders");
+    fireEvent.change(status, { target: { value: "errors" } });
+    expect(within(list()).getAllByRole("button")).toHaveLength(1);
+    expect(within(list()).getByText("trace-one")).toBeDefined();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search traces" }), { target: { value: "health" } });
+    expect(screen.getByRole("status").textContent).toContain("No traces match");
+    fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+    expect(within(list()).getAllByRole("button")[0]?.textContent).toContain("health-59");
+    fireEvent.change(status, { target: { value: "no-errors" } });
+    expect(within(list()).queryByText("trace-one")).toBeNull();
+    expect(screen.getByText("Showing 50 of 60 matching traces.")).toBeDefined();
+  });
+  it("uses consistent source colors in the waterfall and names error states explicitly", () => {
+    render(<TraceExplorer spans={[root, { ...child, source: "Orders.Database" }]} />);
+    const legend = screen.getByLabelText("Span sources");
+    expect(within(legend).getByText("Orders.Api")).toBeDefined();
+    expect(within(legend).getByText("Orders.Database")).toBeDefined();
+    expect(within(legend).getByText("1 error spans")).toBeDefined();
+    const selected = screen.getByRole("button", { name: "Inspect span child" }).closest("li")!;
+    expect(selected.classList.contains("error")).toBe(true);
+    expect((selected as HTMLElement).style.getPropertyValue("--telemetry-series-color")).toMatch(/var\(--telemetry-series-/);
+  });
 });
