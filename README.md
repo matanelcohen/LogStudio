@@ -215,6 +215,9 @@ does not verify Windows-specific execution.
 ## Optional Copilot log chat
 
 Click **Ask Copilot** in the header to open a chat panel on the left, alongside the log results.
+The panel focuses on the conversation: your messages, Copilot's replies, and a composer fixed
+at the bottom, without introductory or context-report paragraphs. Press **Enter** to send,
+or **Shift+Enter** for a new line.
 Chat uses the **full selected session**, including saved/imported sessions, regardless of visible
 filters or paging. The feature is off until you explicitly connect and send a question.
 
@@ -226,8 +229,8 @@ filters or paging. The feature is off until you explicitly connect and send a qu
    Windows requires the native executable, not a `.cmd`/PowerShell shim. Restart Log Studio after changing it.
 3. Select the session you want to discuss, open **Ask Copilot**, and click
    **Connect local Copilot**. Connecting only checks the CLI version; it does not send logs.
-4. Review the privacy notice and ask your question—there is no approval checkbox. Follow-up questions include
-   up to three recent question/answer pairs. **Clear chat** discards the browser conversation;
+4. Ask your question—there is no approval checkbox. The full conversation stays visible; follow-up
+   questions include up to three recent question/answer pairs. **New chat** clears the conversation and draft;
    closing and reopening chat starts over. Switching sessions resets the conversation.
 
 **Local CLI does not mean local inference.** Questions, session log text read by Copilot, and recent conversation are
@@ -244,7 +247,6 @@ that Copilot can read. There is no 100-record limit or message/context truncatio
 This includes records hidden by the viewer's capacity setting, but records deleted with **Clear logs**
 are unavailable. Each question gets a fresh file containing newly captured logs; its contents stay
 stable while Copilot answers. Files are deleted after the request, including on failures.
-The panel reports how many records are **available**, not how many the model actually read.
 Copilot may read relevant portions of large files rather than load every record into its context window.
 Questions are limited to 2,000 characters; answers to 16,000.
 Answers cite sequence IDs but can be wrong—verify them against the original records.

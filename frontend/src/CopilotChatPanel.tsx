@@ -1,7 +1,7 @@
-import { MessageSquare, X } from "lucide-react";
+import { ArrowUp, MessageSquare, SquarePen, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { askCopilot, connectCopilot } from "./api";
-import { errorMessage, MaximumChatQuestionLength, NumberFormatter, type ChatMessage, type ViewerStatus } from "./model";
+import { errorMessage, MaximumChatQuestionLength, type ChatMessage, type ViewerStatus } from "./model";
 
 export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, returnFocus }: {
   status: ViewerStatus | null;
@@ -15,15 +15,22 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [contextNote, setContextNote] = useState<string | null>(null);
   const connectButton = useRef<HTMLButtonElement>(null);
   const questionInput = useRef<HTMLTextAreaElement>(null);
+  const conversation = useRef<HTMLDivElement>(null);
+  const followMessages = useRef(true);
   const entryCount = Math.max(0, (status?.lastId ?? 0) - (status?.clearedThroughId ?? 0));
 
   useEffect(() => {
+    if (hidden || busy) return;
     if (version) questionInput.current?.focus();
     else connectButton.current?.focus();
-  }, [version]);
+  }, [version, busy, hidden]);
+
+  useEffect(() => {
+    const log = conversation.current;
+    if (!hidden && log && followMessages.current) log.scrollTop = log.scrollHeight;
+  }, [messages, busy, hidden]);
 
   function close() {
     if (busy) return;
@@ -42,52 +49,66 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
   async function submit() {
     const text = question.trim();
     if (!text || !version || busy || !entryCount) return;
+    const nextMessages: ChatMessage[] = [...messages, { role: "user", content: text }];
+    followMessages.current = true;
+    setMessages(nextMessages);
+    setQuestion("");
     setBusy(true); setError(null);
     try {
       const history = messages.slice(-6).map(message => ({ ...message, content: message.content.slice(0, MaximumChatQuestionLength) }));
       const response = await askCopilot(sessionId, text, history);
-      setMessages([...messages.slice(-6), { role: "user", content: text }, { role: "assistant", content: response.answer }]);
-      setQuestion("");
-      setContextNote(`Full session file available: ${NumberFormatter.format(response.contextEntryCount)} log records. Copilot may read relevant portions.`);
-    } catch (error) { setError(errorMessage(error)); }
+      setMessages([...nextMessages, { role: "assistant", content: response.answer }]);
+    } catch (error) {
+      setMessages(messages);
+      setQuestion(question);
+      setError(errorMessage(error));
+    }
     finally { setBusy(false); }
   }
 
   return <aside className="copilot-panel" hidden={hidden} aria-labelledby="copilotTitle" onKeyDown={event => {
     if (event.key === "Escape" && !busy) { event.stopPropagation(); close(); }
   }}>
-        <div className="dialog-titlebar"><div className="dialog-icon"><MessageSquare size={21} /></div><div>
-          <h2 id="copilotTitle">Ask Copilot about logs</h2>
-          <p>Read-only chat through your local GitHub Copilot CLI.</p>
-        </div><button className="icon-button" disabled={busy} aria-label="Close Copilot chat" onClick={close}><X size={17} /></button></div>
-        <div className="copilot-content">
-          <p><strong>{status?.applicationName ?? "Selected session"}</strong> · Full session ({NumberFormatter.format(entryCount)} log records).</p>
-          <p className="muted">Every question provides the complete session log file, including new entries. Filters and paging do not limit chat. Previously deleted records are unavailable.</p>
-          <p>The CLI runs locally, but questions, log text, and recent conversation are sent to GitHub Copilot's service.
-            Logs are not automatically redacted. Do not share secrets or sensitive data. Copilot's service may retain submitted data.</p>
-          {!version ? <div className="copilot-setup">
-            <p>Install the current GitHub Copilot CLI and run <code>copilot login</code> in a terminal first. A Copilot entitlement and internet connection are required.</p>
-            <button ref={connectButton} className="primary" disabled={busy} onClick={connect}>{busy ? "Connecting…" : "Connect local Copilot"}</button>
-          </div> : <>
-            <p className="muted">Connected CLI: {version}. Copilot can read the session file, but cannot run commands or change logs.</p>
-            <div className="copilot-messages" role="log" aria-label="Copilot conversation" aria-live="polite">
-              {messages.map((message, index) => <div className={`copilot-message ${message.role}`} key={index}>
-                <strong>{message.role === "user" ? "You" : "Copilot"}</strong><p>{message.content}</p>
-              </div>)}
-            </div>
-            <form onSubmit={event => { event.preventDefault(); void submit(); }}>
-              <label htmlFor="copilotQuestion">Question about these logs</label>
-              <textarea ref={questionInput} id="copilotQuestion" value={question} maxLength={MaximumChatQuestionLength} disabled={busy}
-                rows={3} placeholder="What caused the errors? Cite the log IDs." onChange={event => setQuestion(event.target.value)} />
-              <div className="dialog-footer">
-                <button type="button" disabled={busy || !messages.length} onClick={() => { setMessages([]); setContextNote(null); setError(null); }}>Clear chat</button>
-                <button type="submit" className="primary" disabled={busy || !question.trim() || !entryCount}>{busy ? "Asking Copilot…" : "Ask Copilot"}</button>
-              </div>
-            </form>
-          </>}
-          {busy && <p role="status">{version ? "Waiting for Copilot (up to two minutes)…" : "Checking the local CLI…"}</p>}
-          {contextNote && <p className="muted" role="status">{contextNote} AI answers can be wrong; verify against the logs.</p>}
-          {error && <p className="notice danger" role="alert">{error}</p>}
-        </div>
+    <header className="copilot-header">
+      <MessageSquare size={19} aria-hidden="true" />
+      <div className="copilot-heading">
+        <h2 id="copilotTitle">Ask Copilot about logs</h2>
+        <p title={status?.applicationName}>{status?.applicationName ?? "Selected session"}</p>
+      </div>
+      <button className="icon-button ghost-button" disabled={busy || !messages.length} aria-label="New chat" title="New chat"
+        onClick={() => { setMessages([]); setQuestion(""); setError(null); followMessages.current = true; questionInput.current?.focus(); }}>
+        <SquarePen size={17} />
+      </button>
+      <button className="icon-button ghost-button" disabled={busy} aria-label="Close Copilot chat" title="Close chat" onClick={close}><X size={17} /></button>
+    </header>
+    <div className="copilot-content">
+      {!version && <div className="copilot-setup">
+        <button ref={connectButton} className="primary" disabled={busy} onClick={connect}>{busy ? "Connecting…" : "Connect local Copilot"}</button>
+      </div>}
+      <div ref={conversation} className="copilot-messages" role="log" aria-label="Copilot conversation" aria-live="polite"
+        onScroll={event => {
+          const log = event.currentTarget;
+          followMessages.current = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+        }}>
+        {messages.map((message, index) => <div className={`copilot-message ${message.role}`} key={index}>
+          <span className="visually-hidden">{message.role === "user" ? "You" : "Copilot"}</span><p>{message.content}</p>
+        </div>)}
+        {busy && version && <div className="copilot-thinking" role="status">Thinking…</div>}
+      </div>
+      {error && <p className="notice danger" role="alert">{error}</p>}
+      <form className="copilot-composer" onSubmit={event => { event.preventDefault(); void submit(); }}>
+        <label className="visually-hidden" htmlFor="copilotQuestion">Message Copilot</label>
+        <textarea ref={questionInput} id="copilotQuestion" value={question} maxLength={MaximumChatQuestionLength} disabled={busy || !version}
+          rows={2} placeholder="Ask about this session…" onChange={event => setQuestion(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              void submit();
+            }
+          }} />
+        <button type="submit" className="icon-button primary" aria-label="Send message" title="Send message"
+          disabled={busy || !version || !question.trim() || !entryCount}><ArrowUp size={18} /></button>
+      </form>
+    </div>
   </aside>;
 }

@@ -34,9 +34,10 @@ describe("log-first workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ask Copilot" }));
     const panel = screen.getByRole("complementary", { name: "Ask Copilot about logs" });
     fireEvent.click(screen.getByRole("button", { name: "Connect local Copilot" }));
-    const input = await screen.findByLabelText("Question about these logs") as HTMLTextAreaElement;
+    const input = screen.getByLabelText("Message Copilot") as HTMLTextAreaElement;
+    await waitFor(() => expect(input.hasAttribute("disabled")).toBe(false));
     fireEvent.change(input, { target: { value: "First question" } });
-    fireEvent.click(within(panel).getByRole("button", { name: "Ask Copilot" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Send message" }));
     await screen.findByText("Existing answer");
     fireEvent.change(input, { target: { value: "Keep this draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Metrics" }));
@@ -63,9 +64,10 @@ describe("log-first workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ask Copilot" }));
     const panel = screen.getByRole("complementary", { name: "Ask Copilot about logs" });
     fireEvent.click(screen.getByRole("button", { name: "Connect local Copilot" }));
-    const input = await screen.findByLabelText("Question about these logs");
+    const input = screen.getByLabelText("Message Copilot");
+    await waitFor(() => expect(input.hasAttribute("disabled")).toBe(false));
     fireEvent.change(input, { target: { value: "In-flight question" } });
-    fireEvent.click(within(panel).getByRole("button", { name: "Ask Copilot" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Send message" }));
     fireEvent.click(screen.getByRole("button", { name: "Metrics" }));
     await screen.findByText("No metric measurements captured yet.");
     await act(async () => finish({ answer: "Response while hidden", contextEntryCount: 1, contextTruncated: false }));
