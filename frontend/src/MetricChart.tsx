@@ -63,7 +63,8 @@ export function MetricChart({ metrics }: { metrics: MetricMeasurement[] }) {
             grid: { stroke: color("--cp-border"), width: 1 }, ticks: { show: false },
             values: (_plot, values) => values.map(value => {
               const raw = value * current.current.scale;
-              return Number.isFinite(raw) ? axisNumber.format(raw) : "";
+              if (!Number.isFinite(raw)) return "";
+              return raw !== 0 && (Math.abs(raw) < 0.0001 || Math.abs(raw) >= 1e6) ? raw.toExponential(2) : axisNumber.format(raw);
             }) }
         ],
         cursor: {

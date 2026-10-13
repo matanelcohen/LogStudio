@@ -5,7 +5,9 @@ import { displayText, MaximumDisplayedTraces, spanRelation, traceGroups, traceMa
 import { TelemetryTags } from "./TelemetryTags";
 
 const durationFormat = new Intl.NumberFormat(undefined, { maximumSignificantDigits: 4 });
-function duration(value: number): string { return `${durationFormat.format(value)} ms`; }
+function duration(value: number): string {
+  return `${value >= 1e6 ? value.toExponential(2) : durationFormat.format(value)} ms`;
+}
 function SpanDetails({ span, spans }: { span: TelemetrySpan; spans: TelemetrySpan[] }) {
   return <section className="trace-inspector" aria-label="Selected span details">
     <div className="telemetry-panel-heading"><span className="workspace-kicker">SPAN DETAILS</span>
@@ -37,6 +39,8 @@ export function TraceExplorer({ spans }: { spans: TelemetrySpan[] }) {
   const traces = useMemo(() => traceGroups(spans), [spans]);
   const matches = useMemo(() => traces.filter(([traceId, entries]) => traceMatches(traceId, entries, query)), [traces, query]);
   const displayed = matches.slice(0, MaximumDisplayedTraces);
+  const pinned = matches.find(([traceId]) => traceId === selectedTraceId);
+  if (pinned && !displayed.includes(pinned)) displayed[displayed.length - 1] = pinned;
   const active = displayed.find(([traceId]) => traceId === selectedTraceId) ?? displayed[0];
   const activeSpans = active?.[1] ?? [];
   const waterfall = traceWaterfall(activeSpans);

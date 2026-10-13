@@ -53,4 +53,14 @@ describe("trace explorer", () => {
     expect(screen.getByRole("status").textContent).toContain("selected span has left");
     expect(screen.queryByRole("region", { name: "Selected span details" })).toBeNull();
   });
+  it("keeps an explicitly selected retained trace visible when newer traces fill the list", () => {
+    const { rerender } = render(<TraceExplorer spans={[root, child]} />);
+    fireEvent.click(screen.getByRole("button", { name: /SELECT orders · 30 ms/ }));
+    const newer = Array.from({ length: 60 }, (_, index) => ({ ...other, id: index + 3, traceId: `new-${index}` }));
+    rerender(<TraceExplorer spans={[root, child, ...newer]} />);
+    const list = screen.getByRole("region", { name: "Trace list" });
+    expect(within(list).getAllByRole("button")).toHaveLength(50);
+    expect(within(list).getByRole("button", { name: /POST \/orders/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("region", { name: "Selected span details" }).textContent).toContain("SELECT orders");
+  });
 });
