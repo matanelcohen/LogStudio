@@ -272,8 +272,8 @@ does not verify Windows-specific execution.
 
 ### Publishing compiled releases
 
-Set the package version in `Directory.Build.props`, then push a matching tag such as
-`v1.0.0` (or `v1.0.0-rc.1` for a prerelease). The
+Set and commit the package version in `Directory.Build.props`, then push a matching tag
+on that commit, such as `v1.0.1` (or `v1.0.1-rc.1` for a prerelease). The
 [compiled-release workflow](.github/workflows/release.yml) validates the tag, restores,
 builds, tests the frontend/backend and installer contracts, and verifies a source install.
 Release jobs use the latest .NET 10 SDK servicing release compatible with `global.json`.
@@ -285,6 +285,12 @@ Prereleases do not replace GitHub's latest stable release used by the default in
 
 The workflow can also be run manually with an existing version tag; reruns replace that
 tag's assets. It publishes GitHub release assets, not packages to NuGet.org.
+
+If validation reports a tag/package-version mismatch, the tag points to a commit with
+the wrong version. Updating the default branch or rerunning the failed workflow does
+not change that tagged commit. For an unpublished release, recreate the tag on the
+corrected commit before running the workflow again; for an already published release,
+commit a new package version and create a new matching tag instead.
 
 ## Optional Copilot log chat
 
