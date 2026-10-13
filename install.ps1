@@ -166,6 +166,7 @@ try {
         $ToolDirectory = Join-Path $DotnetHome ".dotnet/tools"
         $ToolScope = @("--global")
     }
+    [void][IO.Directory]::CreateDirectory($ToolDirectory)
     $InstallCache = Join-Path $Artifacts (".install-cache." + [Guid]::NewGuid().ToString("N"))
     [void][IO.Directory]::CreateDirectory($InstallCache)
     $InstalledTools = & $Dotnet tool list @ToolScope
