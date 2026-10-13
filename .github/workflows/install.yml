@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -26,13 +26,13 @@ jobs:
           dotnet-version: "10.0.301"
       - name: Check installer contracts
         shell: pwsh
-        run: node --test tests/installers/installers.test.mjs
+        run: node --test tests/installers/installers.test.mjs tests/installers/releases.test.mjs
       - name: Install on Windows PowerShell
         if: runner.os == 'Windows'
         shell: powershell
         run: .\install.ps1 -Local
-      - name: Install on macOS Bash
-        if: runner.os == 'macOS'
+      - name: Install on Unix Bash
+        if: runner.os != 'Windows'
         shell: bash
         run: ./install.sh --local
       - name: Verify installed tool

@@ -1,0 +1,171 @@
+name: Compiled releases
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag (for example v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.301"
+      - name: Validate release tag and package version
+        id: version
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        shell: bash
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] || { echo "Expected a vX.Y.Z release tag"; exit 1; }
+          git show-ref --verify "refs/tags/$RELEASE_TAG"
+          version="$(dotnet msbuild src/LogStudio/LogStudio.csproj -nologo -getProperty:PackageVersion)"
+          [[ "$RELEASE_TAG" == "v$version" ]] || { echo "Tag must match Directory.Build.props package version ($version)"; exit 1; }
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+      - name: Test installer contracts
+        run: node --test tests/installers/installers.test.mjs tests/installers/releases.test.mjs
+      - name: Restore, build, test, pack, and verify source installation
+        run: ./install.sh --local --online
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: release-inputs
+          path: |
+            frontend/dist/
+            artifacts/*.nupkg
+          if-no-files-found: error
+
+  compile:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: ubuntu-latest
+            rid: linux-arm64
+          - os: macos-latest
+            rid: osx-x64
+          - os: macos-latest
+            rid: osx-arm64
+          - os: windows-latest
+            rid: win-x64
+          - os: windows-latest
+            rid: win-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.validate.outputs.tag }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.301"
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          name: release-inputs
+      - name: Publish self-contained application
+        shell: pwsh
+        env:
+          RELEASE_RID: ${{ matrix.rid }}
+        run: |
+          dotnet publish src/LogStudio.Tool/LogStudio.Tool.csproj -c Release -r $env:RELEASE_RID --self-contained true -p:PackAsTool=false -p:PublishSingleFile=false -p:PublishTrimmed=false -o artifacts/publish
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $extension = if ($IsWindows) { ".exe" } else { "" }
+          Move-Item "artifacts/publish/LogStudio.Tool$extension" "artifacts/publish/logstudio$extension"
+          Copy-Item README.md, src/LogStudio/dependency-notices.txt, frontend/dist/third-party-notices.txt artifacts/publish/
+          $hostRid = [Runtime.InteropServices.RuntimeInformation]::RuntimeIdentifier
+          if ($hostRid -eq $env:RELEASE_RID) {
+            & "./artifacts/publish/logstudio$extension" --help
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Archive application and checksum
+        shell: pwsh
+        env:
+          RELEASE_RID: ${{ matrix.rid }}
+        run: |
+          New-Item -ItemType Directory -Path artifacts/release -Force | Out-Null
+          $extension = if ($IsWindows) { ".zip" } else { ".tar.gz" }
+          $name = "logstudio-$env:RELEASE_RID$extension"
+          $archive = Join-Path "artifacts/release" $name
+          if ($IsWindows) {
+            Compress-Archive -Path artifacts/publish/* -DestinationPath $archive
+          } else {
+            chmod +x artifacts/publish/logstudio
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            tar -czf $archive -C artifacts/publish .
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText("$archive.sha256", "$hash  $name`n", [Text.Encoding]::ASCII)
+      - name: Verify native compiled-release installation
+        shell: pwsh
+        env:
+          RELEASE_RID: ${{ matrix.rid }}
+        run: |
+          if ([Runtime.InteropServices.RuntimeInformation]::RuntimeIdentifier -eq $env:RELEASE_RID) {
+            $extension = if ($IsWindows) { ".zip" } else { ".tar.gz" }
+            $env:LOGSTUDIO_TEST_ARCHIVE = (Resolve-Path "artifacts/release/logstudio-$env:RELEASE_RID$extension").Path
+            $env:LOGSTUDIO_TEST_RID = $env:RELEASE_RID
+            node --test tests/installers/releases.test.mjs
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: compiled-${{ matrix.rid }}
+          path: artifacts/release/*
+          if-no-files-found: error
+
+  release:
+    needs: [validate, compile]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.validate.outputs.tag }}
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          pattern: compiled-*
+          path: artifacts/release
+          merge-multiple: true
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          name: release-inputs
+          path: artifacts/inputs
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        shell: bash
+        run: |
+          cp install-release.sh install-release.ps1 artifacts/release/
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" artifacts/release/* artifacts/inputs/artifacts/*.nupkg --clobber
+          else
+            options=()
+            if [[ "$RELEASE_TAG" == *-* ]]; then options+=(--prerelease); fi
+            gh release create "$RELEASE_TAG" --verify-tag --generate-notes "${options[@]}" artifacts/release/* artifacts/inputs/artifacts/*.nupkg
+          fi

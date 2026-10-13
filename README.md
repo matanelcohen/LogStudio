@@ -129,7 +129,57 @@ Browsers without backdrop-filter support use opaque surfaces.
 
 ## Quick start: wrapper (recommended)
 
-Build and install from source with the native installer for your operating system.
+### Install a compiled release (fastest)
+
+**macOS / Linux — one command, no clone, build, .NET SDK, or Node.js:**
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.sh | bash
+```
+
+The installer detects x64 / ARM64, downloads the self-contained release and verifies its
+SHA-256 checksum before installing. Linux releases require glibc (not Alpine/musl) and the
+[native dependencies required by .NET](https://learn.microsoft.com/dotnet/core/install/linux).
+macOS releases support Intel and Apple Silicon. The wrapped command still needs its own
+dependencies; wrapping `dotnet run` still requires your application's .NET SDK.
+
+The executable is linked into `~/.local/bin/logstudio`. If that directory is not already in
+PATH, use the command printed by the installer. No sudo or shell-profile edits are made.
+
+```bash
+# Pin a release or choose user-writable directories:
+curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.sh \
+  | bash -s -- --version v0.1.0 --install-dir "$HOME/.local/share/logstudio" --bin-dir "$HOME/.local/bin"
+logstudio --open -- dotnet run --project ./path/to/App.csproj
+```
+
+**Windows — PowerShell (no administrator shell):**
+
+```powershell
+$installer = Join-Path $env:TEMP "logstudio-install-release.ps1"
+Invoke-WebRequest -UseBasicParsing https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.ps1 -OutFile $installer
+& $installer
+logstudio --open -- dotnet run --project .\path\to\App.csproj
+```
+
+Use `& $installer -Version v0.1.0 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
+version or choose a directory. If execution policy blocks the script, use the process-only
+override described below; when launching a separate PowerShell process, add the printed
+`bin` directory to PATH in your current terminal yourself. The installer otherwise updates
+PATH for the current PowerShell session only, never the persistent user or system PATH.
+
+Windows releases support x64 and ARM64 and default to `%LOCALAPPDATA%\LogStudio`.
+Each installation uses a fresh `release.*` directory; an update switches the link/launcher
+only after verification, preserving older releases and any running process.
+To uninstall, remove the `logstudio` link (Windows: `bin/logstudio.cmd`) and the installation
+directory. Unused older `release.*` directories can be removed once no process is using them.
+Checksums detect corrupt downloads; they are not independent signatures. Download scripts
+to a file and inspect them first if you do not want to pipe a remote script into Bash.
+The quick-install URLs become available after the first successful release workflow.
+
+### Build, test, and install from source
+
+Use the existing native installer to prepare and verify a development checkout.
 Prerequisites: the **.NET 10 SDK** selected by `global.json` (10.0.301 or a compatible later
 10.0 feature band), **Node.js 22.12+**, and npm. Use the x64 or ARM64 installers matching
 your computer from [.NET downloads](https://dotnet.microsoft.com/download/dotnet/10.0)
@@ -208,9 +258,24 @@ an online package-vulnerability check. New computers normally need internet acce
 first install. Neither script disables TLS certificate validation or removes dependencies to
 make a restore succeed.
 
-The [installer CI](.github/workflows/install.yml) exercises clean Windows and macOS installs.
+The [installer CI](.github/workflows/install.yml) exercises clean Linux, Windows, and macOS installs.
 Use its Windows job as the native Windows validation result; running PowerShell on macOS alone
 does not verify Windows-specific execution.
+
+### Publishing compiled releases
+
+Set the package version in `Directory.Build.props`, then push a matching tag such as
+`v0.1.0` (or `v0.1.0-rc.1` for a prerelease). The
+[compiled-release workflow](.github/workflows/release.yml) validates the tag, restores,
+builds, tests the frontend/backend and installer contracts, and verifies a source install.
+Only after those checks pass does it publish self-contained x64 and ARM64 archives for
+Linux, macOS, and Windows, per-archive SHA-256 checksums, both NuGet packages, and the
+quick-install scripts to a GitHub Release. The archives retain `LogStudio.dll`, the embedded
+viewer, runtime files, and dependency notices; running them needs no installed .NET runtime.
+Prereleases do not replace GitHub's latest stable release used by the default installer.
+
+The workflow can also be run manually with an existing version tag; reruns replace that
+tag's assets. It publishes GitHub release assets, not packages to NuGet.org.
 
 ## Optional Copilot log chat
 
