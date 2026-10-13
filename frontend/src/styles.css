@@ -1,4 +1,6 @@
 .app [hidden] { display: none !important; }
+.app:has(> .workspace-region > .telemetry-workspace) { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
+.app > .workspace-region:has(> .telemetry-workspace) { margin: 0; }
 .telemetry-workspace {
   --telemetry-series-1: #007e88;
   --telemetry-series-2: #7253ba;
@@ -146,7 +148,7 @@ html[data-theme="dark"] .telemetry-workspace {
 @media (min-width: 1900px) {
   .telemetry-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
-@media (max-width: 1600px) {
+@media (max-width: 1300px) {
   .trace-explorer { grid-template-columns: 270px minmax(0, 1fr); }
   .trace-list { grid-row: 1 / 3; }
   .trace-waterfall { border-right: 0; }
