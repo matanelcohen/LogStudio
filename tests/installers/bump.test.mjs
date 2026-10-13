@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
@@ -19,6 +19,29 @@ function run(command, args, cwd) {
   });
   assert.equal(result.error, undefined, result.error?.message);
   return result;
+}
+
+function fixture(t, source) {
+  const dir = mkdtempSync(join(tmpdir(), "bump-test-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(join(dir, "frontend"));
+  mkdirSync(join(dir, "samples", "PackageConsumer"), { recursive: true });
+
+  const propsPath = join(dir, "Directory.Build.props");
+  const pkgPath = join(dir, "frontend", "package.json");
+  const lockPath = join(dir, "frontend", "package-lock.json");
+  const consumerPath = join(dir, "samples", "PackageConsumer", "PackageConsumer.csproj");
+  const readmePath = join(dir, "README.md");
+  const localBump = join(dir, basename(source));
+
+  writeFileSync(propsPath, `<Project>\n  <PropertyGroup>\n    <Version>1.0.0</Version>\n  </PropertyGroup>\n</Project>\n`);
+  writeFileSync(pkgPath, JSON.stringify({ name: "logstudio-frontend", version: "1.0.0" }, null, 2));
+  writeFileSync(lockPath, JSON.stringify({ name: "logstudio-frontend", version: "1.0.0", packages: { "": { name: "logstudio-frontend", version: "1.0.0" } } }, null, 2));
+  writeFileSync(consumerPath, `<Project>\n  <ItemGroup>\n    <PackageReference Include="LogStudio" Version="1.0.0" />\n  </ItemGroup>\n</Project>\n`);
+  writeFileSync(readmePath, `# Test\n--version 1.0.0\n-Version 1.0.0\n\`1.0.0\` (or \`1.0.0-rc.1\`)\nLogStudio.1.0.0.nupkg\n`);
+  writeFileSync(localBump, readFileSync(source, "utf8"), { mode: 0o755 });
+
+  return { dir, localBump, propsPath, pkgPath, lockPath, consumerPath, readmePath };
 }
 
 test("bump-version.sh help runs and displays usage", { skip: windows }, () => {
@@ -65,28 +88,8 @@ test("bump-version.ps1 rejects invalid semver format", () => {
   assert.match(result.stderr, /Invalid version/);
 });
 
-test("bump-version.sh updates version across repository files", (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "bump-test-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-
-  mkdirSync(join(dir, "frontend"));
-  mkdirSync(join(dir, "samples", "PackageConsumer"), { recursive: true });
-
-  const propsPath = join(dir, "Directory.Build.props");
-  const pkgPath = join(dir, "frontend", "package.json");
-  const lockPath = join(dir, "frontend", "package-lock.json");
-  const consumerPath = join(dir, "samples", "PackageConsumer", "PackageConsumer.csproj");
-  const readmePath = join(dir, "README.md");
-
-  writeFileSync(propsPath, `<Project>\n  <PropertyGroup>\n    <Version>1.0.0</Version>\n  </PropertyGroup>\n</Project>\n`);
-  writeFileSync(pkgPath, JSON.stringify({ name: "logstudio-frontend", version: "1.0.0" }, null, 2));
-  writeFileSync(lockPath, JSON.stringify({ name: "logstudio-frontend", version: "1.0.0", packages: { "": { name: "logstudio-frontend", version: "1.0.0" } } }, null, 2));
-  writeFileSync(consumerPath, `<Project>\n  <ItemGroup>\n    <PackageReference Include="LogStudio" Version="1.0.0" />\n  </ItemGroup>\n</Project>\n`);
-  writeFileSync(readmePath, `# Test\n--version v1.0.0\n-Version v1.0.0\n\`v1.0.0\` (or \`v1.0.0-rc.1\`)\n--version 1.0.0\nLogStudio.1.0.0.nupkg\n`);
-
-  // Copy bump-version.sh into dir so ProjectRoot is dir
-  const localBump = join(dir, "bump-version.sh");
-  writeFileSync(localBump, readFileSync(bashBump, "utf8"), { mode: 0o755 });
+test("bump-version.sh updates version across repository files", { skip: windows }, (t) => {
+  const { dir, localBump, propsPath, pkgPath, lockPath, consumerPath, readmePath } = fixture(t, bashBump);
 
   const result = run("bash", [localBump, "1.2.3"], dir);
   assert.equal(result.status, 0, result.stderr);
@@ -97,34 +100,15 @@ test("bump-version.sh updates version across repository files", (t) => {
   assert.equal(JSON.parse(readFileSync(lockPath, "utf8")).packages[""].version, "1.2.3");
   assert.match(readFileSync(consumerPath, "utf8"), /Version="1\.2\.3"/);
   const readme = readFileSync(readmePath, "utf8");
-  assert.match(readme, /--version v1\.2\.3/);
-  assert.match(readme, /-Version v1\.2\.3/);
-  assert.match(readme, /`v1\.2\.3` \(or `v1\.2\.3-rc\.1`\)/);
   assert.match(readme, /--version 1\.2\.3/);
+  assert.match(readme, /-Version 1\.2\.3/);
+  assert.match(readme, /`1\.2\.3` \(or `1\.2\.3-rc\.1`\)/);
   assert.match(readme, /LogStudio\.1\.2\.3\.nupkg/);
+  assert.doesNotMatch(readme, /1\.0\.0|v1\.2\.3/);
 });
 
 test("bump-version.ps1 updates version across repository files", (t) => {
-  const dir = mkdtempSync(join(tmpdir(), "bump-test-ps-"));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-
-  mkdirSync(join(dir, "frontend"));
-  mkdirSync(join(dir, "samples", "PackageConsumer"), { recursive: true });
-
-  const propsPath = join(dir, "Directory.Build.props");
-  const pkgPath = join(dir, "frontend", "package.json");
-  const lockPath = join(dir, "frontend", "package-lock.json");
-  const consumerPath = join(dir, "samples", "PackageConsumer", "PackageConsumer.csproj");
-  const readmePath = join(dir, "README.md");
-
-  writeFileSync(propsPath, `<Project>\n  <PropertyGroup>\n    <Version>1.0.0</Version>\n  </PropertyGroup>\n</Project>\n`);
-  writeFileSync(pkgPath, JSON.stringify({ name: "logstudio-frontend", version: "1.0.0" }, null, 2));
-  writeFileSync(lockPath, JSON.stringify({ name: "logstudio-frontend", version: "1.0.0", packages: { "": { name: "logstudio-frontend", version: "1.0.0" } } }, null, 2));
-  writeFileSync(consumerPath, `<Project>\n  <ItemGroup>\n    <PackageReference Include="LogStudio" Version="1.0.0" />\n  </ItemGroup>\n</Project>\n`);
-  writeFileSync(readmePath, `# Test\n--version v1.0.0\n-Version v1.0.0\n\`v1.0.0\` (or \`v1.0.0-rc.1\`)\n--version 1.0.0\nLogStudio.1.0.0.nupkg\n`);
-
-  const localBump = join(dir, "bump-version.ps1");
-  writeFileSync(localBump, readFileSync(powershellBump, "utf8"));
+  const { dir, localBump, propsPath, pkgPath, lockPath, consumerPath, readmePath } = fixture(t, powershellBump);
 
   const result = run("pwsh", ["-NoProfile", "-File", localBump, "-Version", "1.2.3"], dir);
   assert.equal(result.status, 0, result.stderr);
@@ -135,9 +119,48 @@ test("bump-version.ps1 updates version across repository files", (t) => {
   assert.equal(JSON.parse(readFileSync(lockPath, "utf8")).packages[""].version, "1.2.3");
   assert.match(readFileSync(consumerPath, "utf8"), /Version="1\.2\.3"/);
   const readme = readFileSync(readmePath, "utf8");
-  assert.match(readme, /--version v1\.2\.3/);
-  assert.match(readme, /-Version v1\.2\.3/);
-  assert.match(readme, /`v1\.2\.3` \(or `v1\.2\.3-rc\.1`\)/);
   assert.match(readme, /--version 1\.2\.3/);
+  assert.match(readme, /-Version 1\.2\.3/);
+  assert.match(readme, /`1\.2\.3` \(or `1\.2\.3-rc\.1`\)/);
   assert.match(readme, /LogStudio\.1\.2\.3\.nupkg/);
+  assert.doesNotMatch(readme, /1\.0\.0|v1\.2\.3/);
 });
+
+for (const [source, command, options, tagOption] of [
+  [bashBump, "bash", [], "--tag"],
+  [powershellBump, "pwsh", ["-NoProfile", "-File"], "-Tag"]
+]) {
+  const skip = command === "bash" && windows;
+
+  test(`${basename(source)} rejects prefixed versions without modifying files`, { skip }, (t) => {
+    const f = fixture(t, source);
+    const paths = [f.propsPath, f.pkgPath, f.lockPath, f.consumerPath, f.readmePath];
+    const original = paths.map((path) => readFileSync(path, "utf8"));
+    for (const version of ["v1.0.2", "V1.0.2", "v1.0.3-rc.1"]) {
+      const result = run(command, [...options, f.localBump, version], f.dir);
+      assert.equal(result.status, 1, result.stdout);
+      assert.match(result.stderr, /Invalid version/);
+      assert.deepEqual(paths.map((path) => readFileSync(path, "utf8")), original);
+    }
+  });
+
+  for (const version of ["1.0.2", "1.0.3", "1.0.3-rc.1"]) {
+    test(`${basename(source)} creates the exact ${version} tag`, { skip }, (t) => {
+      const f = fixture(t, source);
+      for (const args of [
+        ["init", "--quiet"],
+        ["-c", "user.name=Contract Test", "-c", "user.email=contract@example.invalid", "-c", "commit.gpgsign=false", "commit", "--quiet", "--allow-empty", "-m", "fixture"]
+      ]) {
+        const result = run("git", args, f.dir);
+        assert.equal(result.status, 0, result.stderr);
+      }
+      const result = run(command, [...options, f.localBump, version, tagOption], f.dir);
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(run("git", ["tag", "--list"], f.dir).stdout.trim(), version);
+      assert.equal(run("git", ["rev-parse", `refs/tags/${version}`], f.dir).stdout, run("git", ["rev-parse", "HEAD"], f.dir).stdout);
+      assert.equal(JSON.parse(readFileSync(f.pkgPath, "utf8")).version, version);
+      assert.match(result.stdout, new RegExp(`Successfully bumped version to ${version.replaceAll(".", "\\.")}`));
+      assert.doesNotMatch(result.stdout, /\bv[0-9]+\./);
+    });
+  }
+}

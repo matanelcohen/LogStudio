@@ -9,6 +9,7 @@ import { test } from "node:test";
 
 const bashInstaller = fileURLToPath(new URL("../../install-release.sh", import.meta.url));
 const powershellInstaller = fileURLToPath(new URL("../../install-release.ps1", import.meta.url));
+const releaseWorkflow = readFileSync(new URL("../../.github/workflows/release.yml", import.meta.url), "utf8");
 const windows = process.platform === "win32";
 
 function run(command, args, env = {}, options = {}) {
@@ -95,15 +96,67 @@ test("release installer help needs no SDK, repository checkout, or downloads", (
   }
 });
 
-test("release installers reject unsafe tags before downloading", (t) => {
+test("release installers reject unsafe and prefixed tags before downloading", (t) => {
   const f = fixture(t);
-  for (const tag of ["../main", "v0.1.0;echo unsafe", "v1", "v1.2.3/other"]) {
+  for (const tag of ["../main", "1.0.2;echo unsafe", "1", "1.2.3/other", "v1.0.2", "V1.0.2", "v1.0.3-rc.1"]) {
     const ps = f.powershell("-Version", tag);
     assert.notEqual(ps.status, 0);
     assert.match(ps.stderr, /Expected a release tag/);
     if (!windows) assert.equal(f.bash("--version", tag).status, 2);
   }
   assert.equal(existsSync(f.env.MOCK_LOG), false);
+});
+
+test("PowerShell accepts unprefixed versions before checking the Windows platform", { skip: windows }, (t) => {
+  const f = fixture(t);
+  for (const version of ["1.0.2", "1.0.3", "1.0.3-rc.1"]) {
+    const result = f.powershell("-Version", version);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Use install-release\.sh on macOS or Linux/);
+  }
+  assert.equal(existsSync(f.env.MOCK_LOG), false);
+});
+
+test("release workflow uses unprefixed tags without normalizing manual input", () => {
+  assert.match(releaseWorkflow, /tags: \["\[0-9\]\*\.\[0-9\]\*\.\[0-9\]\*"\]/);
+  assert.match(releaseWorkflow, /ref: refs\/tags\/\$\{\{ inputs\.tag \|\| github\.ref_name \}\}/);
+  assert.match(releaseWorkflow, /RELEASE_TAG: \$\{\{ inputs\.tag \|\| github\.ref_name \}\}/);
+  assert.doesNotMatch(releaseWorkflow, /startsWith\(inputs\.tag, 'v'\)|format\('v\{0\}'/);
+});
+
+test("release validation requires the exact unprefixed package version", { skip: windows }, (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "logstudio-version-test."));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const match = releaseWorkflow.match(/      - name: Validate release tag and package version\n[\s\S]*?        run: \|\n((?:          .*\n)+)/);
+  assert.ok(match, "Release tag validation step must exist");
+  const script = match[1].replace(/^          /gm, "");
+  const cases = [
+    { tag: "1.0.2", version: "1.0.2", valid: true },
+    { tag: "1.0.3", version: "1.0.3", valid: true },
+    { tag: "1.0.3-rc.1", version: "1.0.3-rc.1", valid: true },
+    { tag: "v1.0.2", version: "1.0.2", error: /Expected an unprefixed/ },
+    { tag: "V1.0.2", version: "1.0.2", error: /Expected an unprefixed/ },
+    { tag: "v1.0.3-rc.1", version: "1.0.3-rc.1", error: /Expected an unprefixed/ },
+    { tag: "1.0.3", version: "1.0.2", error: /Tag must match/ },
+    { tag: "1.0.2", version: "1.0.2", existingTag: "1.0.1" },
+    { tag: "1.0", version: "1.0", error: /Expected an unprefixed/ }
+  ];
+  for (const [index, { tag, version, valid, error, existingTag = tag }] of cases.entries()) {
+    const output = join(directory, `output-${index}`);
+    const result = run("bash", ["-euo", "pipefail", "-c", `
+git() { [[ "$*" == "show-ref --verify refs/tags/$EXISTING_TAG" ]]; }
+dotnet() { printf '%s\\n' "$PACKAGE_VERSION"; }
+${script}
+`], { RELEASE_TAG: tag, PACKAGE_VERSION: version, EXISTING_TAG: existingTag, GITHUB_OUTPUT: output });
+    if (valid) {
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      assert.equal(readFileSync(output, "utf8"), `tag=${tag}\n`);
+    } else {
+      assert.notEqual(result.status, 0, tag);
+      if (error) assert.match(result.stdout + result.stderr, error);
+      assert.equal(existsSync(output), false);
+    }
+  }
 });
 
 test("Bash validates options before downloads", { skip: windows }, (t) => {
@@ -133,11 +186,11 @@ for (const [os, arch, rid] of [
     f.env.MOCK_OS = os;
     f.env.MOCK_ARCH = arch;
     const asset = unixArchive(f, rid);
-    const result = f.bash("--version", "v0.1.0-rc.1");
+    const result = f.bash("--version", "1.0.3-rc.1");
     assert.equal(result.status, 0, result.stderr);
     const link = readlinkSync(join(f.bin, "logstudio"));
     assert.equal(existsSync(link), true);
-    assert.match(readFileSync(f.env.MOCK_LOG, "utf8"), new RegExp(`/releases/download/v0\\.1\\.0-rc\\.1/${asset}`));
+    assert.ok(readFileSync(f.env.MOCK_LOG, "utf8").includes(`/releases/download/1.0.3-rc.1/${asset}`));
     assert.equal(run(join(f.bin, "logstudio"), ["--help"]).status, 0);
     assert.equal(f.bash().status, 0);
     assert.notEqual(readlinkSync(join(f.bin, "logstudio")), link);
@@ -145,6 +198,16 @@ for (const [os, arch, rid] of [
     assert.match(readFileSync(f.env.MOCK_LOG, "utf8"), /releases\/latest\/download/);
   });
 }
+
+test("Bash downloads stable releases using the exact unprefixed version", { skip: windows }, (t) => {
+  const f = fixture(t);
+  const asset = unixArchive(f);
+  for (const version of ["1.0.2", "1.0.3"]) {
+    const result = f.bash("--version", version);
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(readFileSync(f.env.MOCK_LOG, "utf8").includes(`/releases/download/${version}/${asset}`));
+  }
+});
 
 test("Bash checksum failure leaves an existing installation untouched", { skip: windows }, (t) => {
   const f = fixture(t);
@@ -244,7 +307,7 @@ test("compiled archive installs and runs without an installed .NET runtime", { s
   const help = run(executable, ["--help"], { DOTNET_ROOT: join(f.directory, "no-dotnet"), DOTNET_MULTILEVEL_LOOKUP: "0" });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /logstudio/i);
-  const update = windows ? f.powershell("-Version", "v0.1.0") : f.bash("--version", "v0.1.0");
+  const update = windows ? f.powershell("-Version", "1.0.2") : f.bash("--version", "1.0.2");
   assert.equal(update.status, 0, update.stderr);
   if (windows) {
     const bin = join(f.install, "bin");

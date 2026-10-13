@@ -2,11 +2,11 @@ name: Compiled releases
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["[0-9]*.[0-9]*.[0-9]*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing release tag (for example v1.0.0; v prefix optional)"
+        description: "Existing release tag (for example 1.0.2; no v prefix)"
         required: true
         type: string
 
@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ inputs.tag && !startsWith(inputs.tag, 'v') && format('v{0}', inputs.tag) || inputs.tag || github.ref_name }}
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -35,13 +35,13 @@ jobs:
       - name: Validate release tag and package version
         id: version
         env:
-          RELEASE_TAG: ${{ inputs.tag && !startsWith(inputs.tag, 'v') && format('v{0}', inputs.tag) || inputs.tag || github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         shell: bash
         run: |
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] || { echo "Expected a vX.Y.Z release tag"; exit 1; }
+          [[ "$RELEASE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] || { echo "Expected an unprefixed X.Y.Z release tag"; exit 1; }
           git show-ref --verify "refs/tags/$RELEASE_TAG"
           version="$(dotnet msbuild src/LogStudio/LogStudio.csproj -nologo -getProperty:PackageVersion)"
-          [[ "$RELEASE_TAG" == "v$version" ]] || { echo "Tag must match Directory.Build.props package version ($version)"; exit 1; }
+          [[ "$RELEASE_TAG" == "$version" ]] || { echo "Tag must match Directory.Build.props package version ($version)"; exit 1; }
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
       - name: Test installer contracts
         run: node --test tests/installers/installers.test.mjs tests/installers/releases.test.mjs tests/installers/bump.test.mjs

@@ -18,8 +18,8 @@ usage() {
     "" \
     "Usage: ./bump-version.sh [--tag] <version>" \
     "" \
-    "  <version>  The new version (e.g. 1.0.1 or v1.0.1; v prefix optional)." \
-    "  --tag, -t  Create or update the git tag (e.g. v1.0.1) pointing to HEAD." \
+    "  <version>  The new version (e.g. 1.0.2; no v prefix)." \
+    "  --tag, -t  Create or update the git tag (e.g. 1.0.2) pointing to HEAD." \
     "  --help, -h Show this help." \
     "" \
     "This script updates:" \
@@ -56,12 +56,9 @@ if [[ -z "$TargetVersion" ]]; then
   exit 2
 fi
 
-CleanVersion="${TargetVersion#v}"
-TagVersion="v$CleanVersion"
-
 SemverPattern='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$'
-if [[ ! "$CleanVersion" =~ $SemverPattern ]]; then
-  printf 'Invalid version: "%s". Expected semver format such as 1.0.0 or 1.0.0-rc.1\n' "$TargetVersion" >&2
+if [[ ! "$TargetVersion" =~ $SemverPattern ]]; then
+  printf 'Invalid version: "%s". Expected unprefixed semver such as 1.0.2 or 1.0.2-rc.1\n' "$TargetVersion" >&2
   exit 1
 fi
 
@@ -76,15 +73,15 @@ if [[ -z "$CurrentVersion" ]]; then
   exit 1
 fi
 
-printf 'Updating version from %s to %s...\n' "$CurrentVersion" "$CleanVersion"
+printf 'Updating version from %s to %s...\n' "$CurrentVersion" "$TargetVersion"
 
 # 1. Update Directory.Build.props
-sed -i.bak -E "s/<Version>${CurrentVersion}<\/Version>/<Version>${CleanVersion}<\/Version>/" "$PropsFile"
+sed -i.bak -E "s/<Version>${CurrentVersion}<\/Version>/<Version>${TargetVersion}<\/Version>/" "$PropsFile"
 rm -f "$PropsFile.bak"
 
 # 2. Update frontend/package.json
 if [[ -f "$FrontendPackage" ]]; then
-  sed -i.bak -E "s/\"version\": \"[^\"]+\"/\"version\": \"${CleanVersion}\"/" "$FrontendPackage"
+  sed -i.bak -E "s/\"version\": \"[^\"]+\"/\"version\": \"${TargetVersion}\"/" "$FrontendPackage"
   rm -f "$FrontendPackage.bak"
 fi
 
@@ -100,48 +97,46 @@ if [[ -f "$FrontendLock" ]]; then
       lock.packages[""].version = newVer;
     }
     fs.writeFileSync(path, JSON.stringify(lock, null, 2) + "\n");
-  ' "$FrontendLock" "$CleanVersion"
+  ' "$FrontendLock" "$TargetVersion"
 fi
 
 # 4. Update samples/PackageConsumer/PackageConsumer.csproj
 if [[ -f "$ConsumerProject" ]]; then
-  sed -i.bak -E "s/<PackageReference Include=\"LogStudio\" Version=\"[^\"]+\"/<PackageReference Include=\"LogStudio\" Version=\"${CleanVersion}\"/" "$ConsumerProject"
+  sed -i.bak -E "s/<PackageReference Include=\"LogStudio\" Version=\"[^\"]+\"/<PackageReference Include=\"LogStudio\" Version=\"${TargetVersion}\"/" "$ConsumerProject"
   rm -f "$ConsumerProject.bak"
 fi
 
 # 5. Update README.md
 if [[ -f "$ReadmeFile" ]]; then
-  sed -i.bak -E "s/--version v${CurrentVersion}/--version v${CleanVersion}/g" "$ReadmeFile"
+  sed -i.bak -E "s/--version ${CurrentVersion}/--version ${TargetVersion}/g" "$ReadmeFile"
   rm -f "$ReadmeFile.bak"
-  sed -i.bak -E "s/-Version v${CurrentVersion}/-Version v${CleanVersion}/g" "$ReadmeFile"
+  sed -i.bak -E "s/-Version ${CurrentVersion}/-Version ${TargetVersion}/g" "$ReadmeFile"
   rm -f "$ReadmeFile.bak"
-  sed -i.bak -E "s/\`v${CurrentVersion}\` \(or \`v${CurrentVersion}-rc\.1\`/\`v${CleanVersion}\` \(or \`v${CleanVersion}-rc\.1\`/g" "$ReadmeFile"
+  sed -i.bak -E "s/\`${CurrentVersion}\` \(or \`${CurrentVersion}-rc\.1\`/\`${TargetVersion}\` \(or \`${TargetVersion}-rc\.1\`/g" "$ReadmeFile"
   rm -f "$ReadmeFile.bak"
-  sed -i.bak -E "s/--version ${CurrentVersion}/--version ${CleanVersion}/g" "$ReadmeFile"
-  rm -f "$ReadmeFile.bak"
-  sed -i.bak -E "s/LogStudio\.${CurrentVersion}\.nupkg/LogStudio\.${CleanVersion}\.nupkg/g" "$ReadmeFile"
+  sed -i.bak -E "s/LogStudio\.${CurrentVersion}\.nupkg/LogStudio\.${TargetVersion}\.nupkg/g" "$ReadmeFile"
   rm -f "$ReadmeFile.bak"
 fi
 
 # Verify with MSBuild if dotnet is available
 if command -v dotnet >/dev/null 2>&1 && [[ -f "$LibraryProject" ]]; then
   ResolvedVersion="$(dotnet msbuild "$LibraryProject" -nologo -getProperty:PackageVersion 2>/dev/null || true)"
-  if [[ -n "$ResolvedVersion" && "$ResolvedVersion" != "$CleanVersion" ]]; then
-    printf 'Warning: MSBuild PackageVersion evaluated to %s, expected %s\n' "$ResolvedVersion" "$CleanVersion" >&2
+  if [[ -n "$ResolvedVersion" && "$ResolvedVersion" != "$TargetVersion" ]]; then
+    printf 'Warning: MSBuild PackageVersion evaluated to %s, expected %s\n' "$ResolvedVersion" "$TargetVersion" >&2
   fi
 fi
 
 # 6. Optional git tag
 if [[ "$CreateTag" == true ]]; then
   if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git tag -f "$TagVersion"
-    printf 'Updated git tag %s -> %s\n' "$TagVersion" "$(git rev-parse --short HEAD)"
+    git tag -f "$TargetVersion"
+    printf 'Updated git tag %s -> %s\n' "$TargetVersion" "$(git rev-parse --short HEAD)"
   else
     printf 'Warning: Cannot create git tag; not inside a git repository.\n' >&2
   fi
 fi
 
-printf '\nSuccessfully bumped version to %s (%s)\n' "$CleanVersion" "$TagVersion"
+printf '\nSuccessfully bumped version to %s\n' "$TargetVersion"
 printf 'Updated:\n'
 printf '  - Directory.Build.props\n'
 printf '  - frontend/package.json\n'
@@ -149,5 +144,5 @@ printf '  - frontend/package-lock.json\n'
 printf '  - samples/PackageConsumer/PackageConsumer.csproj\n'
 printf '  - README.md\n'
 if [[ "$CreateTag" == true ]]; then
-  printf '  - git tag %s\n' "$TagVersion"
+  printf '  - git tag %s\n' "$TargetVersion"
 fi

@@ -12,7 +12,7 @@ Installed=false
 usage() {
   printf '%s\n' \
     "Download and install a compiled Log Studio release (no SDK or Node.js required)." \
-    "Usage: bash install-release.sh [--version vX.Y.Z] [--install-dir <directory>] [--bin-dir <directory>]" \
+    "Usage: bash install-release.sh [--version X.Y.Z] [--install-dir <directory>] [--bin-dir <directory>]" \
     "Supports Linux (glibc) and macOS, on x64 and ARM64. No sudo or shell-profile edits." \
     "Defaults: latest release, ~/.local/share/logstudio, ~/.local/bin." \
     "  --help  Show this help without downloading anything."
@@ -42,8 +42,8 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-if [[ "$Version" != latest && ! "$Version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
-  printf 'Expected a release tag such as v0.1.0 or v0.1.0-rc.1.\n' >&2; exit 2
+if [[ "$Version" != latest && ! "$Version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+  printf 'Expected a release tag such as 1.0.2 or 1.0.2-rc.1, without a v prefix.\n' >&2; exit 2
 fi
 case "$(uname -s)" in
   Linux) Platform="linux" ;;

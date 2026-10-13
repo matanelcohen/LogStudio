@@ -15,8 +15,8 @@ Align the version across Directory.Build.props, frontend, samples, and documenta
 
 Usage: .\bump-version.ps1 [-Version] <version> [-Tag]
 
-  -Version <version> The new version (e.g. 1.0.1 or v1.0.1; v prefix optional).
-  -Tag               Create or update the git tag (e.g. v1.0.1) pointing to HEAD.
+  -Version <version> The new version (e.g. 1.0.2; no v prefix).
+  -Tag               Create or update the git tag (e.g. 1.0.2) pointing to HEAD.
   -Help              Show this help.
 
 This script updates:
@@ -38,12 +38,9 @@ if (-not $Version) {
   exit 2
 }
 
-$CleanVersion = if ($Version.StartsWith("v", [System.StringComparison]::OrdinalIgnoreCase)) { $Version.Substring(1) } else { $Version }
-$TagVersion = "v$CleanVersion"
-
 $SemverPattern = '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$'
-if ($CleanVersion -notmatch $SemverPattern) {
-  [Console]::Error.WriteLine("Invalid version: '$Version'. Expected semver format such as 1.0.0 or 1.0.0-rc.1")
+if ($Version -notmatch $SemverPattern) {
+  [Console]::Error.WriteLine("Invalid version: '$Version'. Expected unprefixed semver such as 1.0.2 or 1.0.2-rc.1")
   exit 1
 }
 
@@ -70,16 +67,16 @@ if ($propsContent -match '<Version>([^<]+)</Version>') {
   exit 1
 }
 
-Write-Host "Updating version from $CurrentVersion to $CleanVersion..."
+Write-Host "Updating version from $CurrentVersion to $Version..."
 
 # 1. Update Directory.Build.props
-$propsContent = [System.Text.RegularExpressions.Regex]::Replace($propsContent, "<Version>$([regex]::Escape($CurrentVersion))</Version>", "<Version>$CleanVersion</Version>")
+$propsContent = [System.Text.RegularExpressions.Regex]::Replace($propsContent, "<Version>$([regex]::Escape($CurrentVersion))</Version>", "<Version>$Version</Version>")
 [System.IO.File]::WriteAllText($PropsFile, $propsContent)
 
 # 2. Update frontend/package.json
 if (Test-Path $FrontendPackage) {
   $pkgContent = [System.IO.File]::ReadAllText($FrontendPackage)
-  $pkgReplacement = '"version": "' + $CleanVersion + '"'
+  $pkgReplacement = '"version": "' + $Version + '"'
   $pkgContent = [System.Text.RegularExpressions.Regex]::Replace($pkgContent, '"version":\s*"[^"]+"', $pkgReplacement)
   [System.IO.File]::WriteAllText($FrontendPackage, $pkgContent)
 }
@@ -87,7 +84,7 @@ if (Test-Path $FrontendPackage) {
 # 3. Update frontend/package-lock.json
 if (Test-Path $FrontendLock) {
   $lockContent = [System.IO.File]::ReadAllText($FrontendLock)
-  $lockReplacement = '${1}"' + $CleanVersion + '"'
+  $lockReplacement = '${1}"' + $Version + '"'
   $lockContent = [System.Text.RegularExpressions.Regex]::Replace($lockContent, '("name":\s*"logstudio-frontend",\s*"version":\s*)"[^"]+"', $lockReplacement)
   $lockContent = [System.Text.RegularExpressions.Regex]::Replace($lockContent, '("":\s*\{\s*"name":\s*"logstudio-frontend",\s*"version":\s*)"[^"]+"', $lockReplacement)
   [System.IO.File]::WriteAllText($FrontendLock, $lockContent)
@@ -96,7 +93,7 @@ if (Test-Path $FrontendLock) {
 # 4. Update samples/PackageConsumer/PackageConsumer.csproj
 if (Test-Path $ConsumerProject) {
   $consumerContent = [System.IO.File]::ReadAllText($ConsumerProject)
-  $consumerReplacement = '${1}"' + $CleanVersion + '"'
+  $consumerReplacement = '${1}"' + $Version + '"'
   $consumerContent = [System.Text.RegularExpressions.Regex]::Replace($consumerContent, '(<PackageReference Include="LogStudio" Version=)"[^"]+"', $consumerReplacement)
   [System.IO.File]::WriteAllText($ConsumerProject, $consumerContent)
 }
@@ -104,28 +101,27 @@ if (Test-Path $ConsumerProject) {
 # 5. Update README.md
 if (Test-Path $ReadmeFile) {
   $readmeContent = [System.IO.File]::ReadAllText($ReadmeFile)
-  $readmeContent = $readmeContent.Replace("--version v$CurrentVersion", "--version v$CleanVersion")
-  $readmeContent = $readmeContent.Replace("-Version v$CurrentVersion", "-Version v$CleanVersion")
-  $oldPattern = '`v' + $CurrentVersion + '` (or `v' + $CurrentVersion + '-rc.1`'
-  $newPattern = '`v' + $CleanVersion + '` (or `v' + $CleanVersion + '-rc.1`'
+  $readmeContent = $readmeContent.Replace("--version $CurrentVersion", "--version $Version")
+  $readmeContent = $readmeContent.Replace("-Version $CurrentVersion", "-Version $Version")
+  $oldPattern = '`' + $CurrentVersion + '` (or `' + $CurrentVersion + '-rc.1`'
+  $newPattern = '`' + $Version + '` (or `' + $Version + '-rc.1`'
   $readmeContent = $readmeContent.Replace($oldPattern, $newPattern)
-  $readmeContent = $readmeContent.Replace("--version $CurrentVersion", "--version $CleanVersion")
-  $readmeContent = $readmeContent.Replace("LogStudio.$CurrentVersion.nupkg", "LogStudio.$CleanVersion.nupkg")
+  $readmeContent = $readmeContent.Replace("LogStudio.$CurrentVersion.nupkg", "LogStudio.$Version.nupkg")
   [System.IO.File]::WriteAllText($ReadmeFile, $readmeContent)
 }
 
 # 6. Optional git tag
 if ($Tag) {
-  & git tag -f $TagVersion
+  & git tag -f $Version
   if ($LASTEXITCODE -eq 0) {
     $shortSha = (& git rev-parse --short HEAD).Trim()
-    Write-Host "Updated git tag $TagVersion -> $shortSha"
+    Write-Host "Updated git tag $Version -> $shortSha"
   } else {
-    Write-Warning "Could not update git tag $TagVersion"
+    Write-Warning "Could not update git tag $Version"
   }
 }
 
-Write-Host "`nSuccessfully bumped version to $CleanVersion ($TagVersion)"
+Write-Host "`nSuccessfully bumped version to $Version"
 Write-Host "Updated:"
 Write-Host "  - Directory.Build.props"
 Write-Host "  - frontend/package.json"
@@ -133,5 +129,5 @@ Write-Host "  - frontend/package-lock.json"
 Write-Host "  - samples/PackageConsumer/PackageConsumer.csproj"
 Write-Host "  - README.md"
 if ($Tag) {
-  Write-Host "  - git tag $TagVersion"
+  Write-Host "  - git tag $Version"
 }

@@ -11,7 +11,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 if ($Help) {
     Write-Host @"
 Download and install a compiled Windows Log Studio release (no SDK or Node.js required).
-Usage: ./install-release.ps1 [-Version vX.Y.Z] [-InstallDir <directory>]
+Usage: ./install-release.ps1 [-Version X.Y.Z] [-InstallDir <directory>]
 Supports x64 and ARM64. Default: latest release in %LOCALAPPDATA%\LogStudio.
 No administrator access or persistent PATH changes. -Help downloads nothing.
 "@
@@ -25,8 +25,8 @@ $PreviousBin = $null
 $Installed = $false
 $PreviousSecurityProtocol = [Net.ServicePointManager]::SecurityProtocol
 try {
-    if ($Version -ne "latest" -and $Version -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$') {
-        throw "Expected a release tag such as v0.1.0 or v0.1.0-rc.1."
+    if ($Version -ne "latest" -and $Version -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$') {
+        throw "Expected a release tag such as 1.0.2 or 1.0.2-rc.1, without a v prefix."
     }
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
         throw "Use install-release.sh on macOS or Linux."
