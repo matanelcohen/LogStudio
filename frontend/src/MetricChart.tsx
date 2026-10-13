@@ -74,9 +74,13 @@ export function MetricChart({ metrics }: { metrics: MetricMeasurement[] }) {
             const time = chart.posToVal(chart.cursor.left!, "x");
             let nearest = 0;
             let distance = Infinity;
+            let verticalDistance = Infinity;
             current.current.points.forEach((point, index) => {
               const next = Math.abs(Date.parse(point.timestamp) / 1000 - time);
-              if (next < distance) { nearest = index; distance = next; }
+              const vertical = Math.abs(chart.valToPos(point.value / current.current.scale, "y") - (chart.cursor.top ?? 0));
+              if (next < distance || (next === distance && vertical < verticalDistance)) {
+                nearest = index; distance = next; verticalDistance = vertical;
+              }
             });
             return nearest;
           }

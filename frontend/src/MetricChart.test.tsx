@@ -7,7 +7,7 @@ import type { MetricMeasurement } from "./telemetry-api";
 const { instances, constructor } = vi.hoisted(() => {
   const instances: {
     options: uPlot.Options; data: uPlot.AlignedData;
-    cursor: { left: number; idxs: (number | null)[] }; select: { width: number };
+    cursor: { left: number; top: number; idxs: (number | null)[] }; select: { width: number };
     scales: { x: { min: number; max: number } };
     setData: ReturnType<typeof vi.fn>; setSize: ReturnType<typeof vi.fn>;
     setScale: ReturnType<typeof vi.fn>; setCursor: ReturnType<typeof vi.fn>;
@@ -15,7 +15,7 @@ const { instances, constructor } = vi.hoisted(() => {
   }[] = [];
   const constructor = vi.fn(function(options: uPlot.Options, data: uPlot.AlignedData) {
     const chart = {
-      options, data, cursor: { left: 0, idxs: [null, null] as (number | null)[] }, select: { width: 0 },
+      options, data, cursor: { left: 0, top: 0, idxs: [null, null] as (number | null)[] }, select: { width: 0 },
       scales: { x: { min: 0, max: 1 } },
       setData: vi.fn(), setSize: vi.fn(), setScale: vi.fn(), setCursor: vi.fn(), destroy: vi.fn(),
       posToVal: vi.fn(), valToPos: vi.fn((value: number) => value)
@@ -45,6 +45,9 @@ describe("metric chart lifecycle and interaction", () => {
     const chart = instances[0]!;
     expect(chart.options.mode).toBe(2);
     expect(chart.data).toEqual([null, [[Date.parse(metric.timestamp) / 1000, Date.parse(metric.timestamp) / 1000], [-1, 1]]]);
+    chart.posToVal.mockReturnValue(Date.parse(metric.timestamp) / 1000);
+    chart.cursor.top = 1;
+    expect(chart.options.cursor!.dataIdx!(chart as unknown as uPlot, 1, 0, 0)).toBe(1);
     expect(screen.getByRole("img").getAttribute("aria-label")).toContain("raw measurements; values in table below");
   });
   it("updates a mounted plot without losing a selected time window, and resets zoom explicitly", () => {
