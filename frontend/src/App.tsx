@@ -1,7 +1,7 @@
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import * as Popover from "@radix-ui/react-popover";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { Activity, AlertCircle, Check, ChevronDown, ChevronRight, Clock3, Compass, Database, FileUp, GitBranch, HardDrive, History, Logs, MessageSquare, Monitor, Moon, Pause, Play, Settings, Sun, X } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, ChevronRight, Clock3, Compass, Database, FileUp, HardDrive, History, Logs, MessageSquare, Monitor, Moon, Pause, Play, Settings, Sun, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ConditionDialog } from "./ConditionDialog";
 import { ClearHistoryDialog } from "./ClearHistoryDialog";
@@ -22,12 +22,10 @@ import { Hint } from "./ui";
 import { AppearanceChoices, useAppearance } from "./useAppearance";
 import { useTypography } from "./useTypography";
 import { useLiveStatus, useLogPage } from "./useLogExplorer";
-import { TelemetryWorkspace, type TelemetryView } from "./TelemetryWorkspace";
 
 interface PauseSnapshot { maximumId: number; status: ViewerStatus | null; }
 
 export default function App() {
-  const [workspaceView, setWorkspaceView] = useState<"logs" | TelemetryView>("logs");
   const [query, setQuery] = useState<QueryState>(defaultQuery);
   const [cursor, setCursor] = useState<PageCursor>({ before: null, after: null });
   const [pause, setPause] = useState<PauseSnapshot | null>(null);
@@ -156,13 +154,11 @@ export default function App() {
   return (
     <Tooltip.Provider delayDuration={400}>
       <div className="discover-shell">
-        <a className="skip-link" href="#workspace">{workspaceView === "logs" ? "Skip to log results" : "Skip to telemetry"}</a>
+        <a className="skip-link" href="#workspace">Skip to log results</a>
         <nav className="discover-rail" aria-label="Workspace applications">
           <span className="rail-brand" aria-hidden="true"><Logs size={23} /></span>
           <span className="rail-label" aria-hidden="true">WORKSPACE</span>
-          <button className={`rail-item ${workspaceView === "logs" ? "active" : ""}`} aria-label="Discover logs" aria-current={workspaceView === "logs" ? "page" : undefined} title="Discover logs" onClick={() => { setWorkspaceView("logs"); if (workspaceView === "logs") searchRef.current?.focus(); }}><Compass size={20} /><span>Discover</span></button>
-          <button className={`rail-item ${workspaceView === "metrics" ? "active" : ""}`} aria-label="Metrics" aria-current={workspaceView === "metrics" ? "page" : undefined} onClick={() => setWorkspaceView("metrics")}><Activity size={20} /><span>Metrics</span></button>
-          <button className={`rail-item ${workspaceView === "traces" ? "active" : ""}`} aria-label="Traces" aria-current={workspaceView === "traces" ? "page" : undefined} onClick={() => setWorkspaceView("traces")}><GitBranch size={20} /><span>Traces</span></button>
+          <button className="rail-item active" aria-label="Discover logs" aria-current="page" title="Discover logs" onClick={() => searchRef.current?.focus()}><Compass size={20} /><span>Discover</span></button>
           <button className="rail-item" aria-label="Browse sessions" title="Sessions" onClick={() => setSessionsOpen(true)}><History size={20} /><span>Sessions</span></button>
         </nav>
       <div className="app">
@@ -179,7 +175,7 @@ export default function App() {
           <div className="header-actions">
             <span id="connection" className={`connection ${live.connection}`} role="status">{archived ? "Saved session" : connectionLabel}</span>
             <button id="importLogs" ref={importOpener} className="ghost-button" onClick={() => setImportOpen(true)}><FileUp size={14} /> Import</button>
-            <button ref={chatOpener} className="ghost-button" aria-pressed={chatOpen} disabled={workspaceView !== "logs" || !status || status.lastId <= status.clearedThroughId}
+            <button ref={chatOpener} className="ghost-button" aria-pressed={chatOpen} disabled={!status || status.lastId <= status.clearedThroughId}
               onClick={() => setChatOpen(true)}><MessageSquare size={14} /> Ask Copilot</button>
             <Popover.Root>
               <Popover.Trigger asChild><button id="storageInfo" className="icon-button ghost-button" aria-label="Storage details"><HardDrive size={15} /></button></Popover.Trigger>
@@ -195,7 +191,7 @@ export default function App() {
               </Popover.Content></Popover.Portal>
             </Popover.Root>
             <Hint label={pause ? "Resume live updates and catch up from disk." : "Freeze this tab. The command keeps capturing."}>
-              <button id="pause" className={pause ? "paused-control" : "ghost-button"} disabled={archived || workspaceView !== "logs"} onClick={() => setPause(pause ? null : { maximumId: status?.lastId ?? 0, status })}>
+              <button id="pause" className={pause ? "paused-control" : "ghost-button"} disabled={archived} onClick={() => setPause(pause ? null : { maximumId: status?.lastId ?? 0, status })}>
                 {pause ? <Play size={14} /> : <Pause size={14} />}{pause ? "Resume" : "Pause"}
               </button>
             </Hint>
@@ -217,7 +213,7 @@ export default function App() {
             <button ref={settingsOpener} className="icon-button ghost-button" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={15} /></button>
           </div>
         </header>
-        <div className="query-region" hidden={workspaceView !== "logs"}>
+        <div className="query-region">
           <div className="workspace-heading">
             <div><span className="workspace-kicker">LOG EXPLORER</span><h2>Discover</h2><p>Search, filter, and inspect your session history.</p></div>
             <span className="workspace-context"><Database size={14} /> Disk-backed history <span className="context-divider" /> Local workspace</span>
@@ -231,11 +227,10 @@ export default function App() {
             {live.error ? <button onClick={live.reconnect}>Reconnect</button> : <button className="icon-button" aria-label="Dismiss notification" onClick={() => setNotice(null)}><X size={14} /></button>}
           </div>}
         </div>
-        <main id="workspace" className="workspace-region" tabIndex={-1} aria-label={workspaceView === "logs" ? "Log exploration workspace" : `${workspaceView === "metrics" ? "Metrics" : "Traces"} workspace`}>
-          {workspaceView !== "logs" && <TelemetryWorkspace view={workspaceView} archived={archived} />}
-          {chatOpen && <CopilotChatPanel key={query.sessionId} status={status} sessionId={query.sessionId} hidden={workspaceView !== "logs"}
+        <main id="workspace" className="workspace-region" tabIndex={-1} aria-label="Log exploration workspace">
+          {chatOpen && <CopilotChatPanel key={query.sessionId} status={status} sessionId={query.sessionId}
             onClose={() => setChatOpen(false)} returnFocus={() => chatOpener.current?.focus()} />}
-          <div className="workspace" hidden={workspaceView !== "logs"} data-inspector={inspector} data-fields={fields}>
+          <div className="workspace" data-inspector={inspector} data-fields={fields}>
           {fields && <DiscoverSidebar page={activePage} onFilter={openEditor} />}
           <LogTable page={activePage} loading={history.loading} error={history.error} selected={visibleSelection}
             matchCase={query.matchCase} follow={follow} wrap={wrap} pageSize={query.pageSize} typography={typography.settings}
@@ -255,7 +250,7 @@ export default function App() {
             onCondition={addCondition} onDraft={openEditor} onNotice={setNotice} />}
           </div>
         </main>
-        <footer className="app-footer"><span id="capacityNote"><HardDrive size={12} /> {workspaceView === "logs" ? `On disk · ${status?.capacity ? `Limit ${NumberFormatter.format(status.capacity)}` : "Unlimited history"}` : "Telemetry · Recent in-memory capture only"}
+        <footer className="app-footer"><span id="capacityNote"><HardDrive size={12} /> On disk · {status?.capacity ? `Limit ${NumberFormatter.format(status.capacity)}` : "Unlimited history"}
           <span id="evictedNote">{status?.evictedCount ? ` · ${NumberFormatter.format(status.evictedCount)} expired` : " · Localhost only"}</span></span>
           <span id="runMeta"><Clock3 size={12} /> {Math.floor(elapsed / 60)}m {elapsed % 60}s{status && ` · ${TimeFormatter.format(new Date(status.startedAt))}`}</span></footer>
         <ConditionDialog open={editor.open} conditions={query.conditions} includeMode={query.includeMode} seed={editor.seed}

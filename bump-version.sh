@@ -7,6 +7,7 @@ readonly FrontendPackage="$ProjectRoot/frontend/package.json"
 readonly FrontendLock="$ProjectRoot/frontend/package-lock.json"
 readonly ConsumerProject="$ProjectRoot/samples/PackageConsumer/PackageConsumer.csproj"
 readonly ReadmeFile="$ProjectRoot/README.md"
+readonly GuideFile="$ProjectRoot/docs/guide.md"
 readonly LibraryProject="$ProjectRoot/src/LogStudio/LogStudio.csproj"
 
 CreateTag=false
@@ -26,7 +27,7 @@ usage() {
     "  - Directory.Build.props (<Version>)" \
     "  - frontend/package.json and frontend/package-lock.json" \
     "  - samples/PackageConsumer/PackageConsumer.csproj" \
-    "  - README.md installation and package references"
+    "  - README.md and docs/guide.md installation and package references"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -106,17 +107,19 @@ if [[ -f "$ConsumerProject" ]]; then
   rm -f "$ConsumerProject.bak"
 fi
 
-# 5. Update README.md
-if [[ -f "$ReadmeFile" ]]; then
-  sed -i.bak -E "s/--version ${CurrentVersion}/--version ${TargetVersion}/g" "$ReadmeFile"
-  rm -f "$ReadmeFile.bak"
-  sed -i.bak -E "s/-Version ${CurrentVersion}/-Version ${TargetVersion}/g" "$ReadmeFile"
-  rm -f "$ReadmeFile.bak"
-  sed -i.bak -E "s/\`${CurrentVersion}\` \(or \`${CurrentVersion}-rc\.1\`/\`${TargetVersion}\` \(or \`${TargetVersion}-rc\.1\`/g" "$ReadmeFile"
-  rm -f "$ReadmeFile.bak"
-  sed -i.bak -E "s/LogStudio\.${CurrentVersion}\.nupkg/LogStudio\.${TargetVersion}\.nupkg/g" "$ReadmeFile"
-  rm -f "$ReadmeFile.bak"
-fi
+# 5. Update documentation
+for DocumentationFile in "$ReadmeFile" "$GuideFile"; do
+  if [[ -f "$DocumentationFile" ]]; then
+    sed -i.bak -E "s/--version ${CurrentVersion}/--version ${TargetVersion}/g" "$DocumentationFile"
+    rm -f "$DocumentationFile.bak"
+    sed -i.bak -E "s/-Version ${CurrentVersion}/-Version ${TargetVersion}/g" "$DocumentationFile"
+    rm -f "$DocumentationFile.bak"
+    sed -i.bak -E "s/\`${CurrentVersion}\` \(or \`${CurrentVersion}-rc\.1\`/\`${TargetVersion}\` \(or \`${TargetVersion}-rc\.1\`/g" "$DocumentationFile"
+    rm -f "$DocumentationFile.bak"
+    sed -i.bak -E "s/LogStudio\.${CurrentVersion}\.nupkg/LogStudio\.${TargetVersion}\.nupkg/g" "$DocumentationFile"
+    rm -f "$DocumentationFile.bak"
+  fi
+done
 
 # Verify with MSBuild if dotnet is available
 if command -v dotnet >/dev/null 2>&1 && [[ -f "$LibraryProject" ]]; then
@@ -143,6 +146,7 @@ printf '  - frontend/package.json\n'
 printf '  - frontend/package-lock.json\n'
 printf '  - samples/PackageConsumer/PackageConsumer.csproj\n'
 printf '  - README.md\n'
+printf '  - docs/guide.md\n'
 if [[ "$CreateTag" == true ]]; then
   printf '  - git tag %s\n' "$TargetVersion"
 fi

@@ -23,7 +23,7 @@ This script updates:
   - Directory.Build.props (<Version>)
   - frontend/package.json and frontend/package-lock.json
   - samples/PackageConsumer/PackageConsumer.csproj
-  - README.md installation and package references
+  - README.md and docs/guide.md installation and package references
 "@
 }
 
@@ -52,6 +52,7 @@ $FrontendPackage = Join-Path $ProjectRoot "frontend/package.json"
 $FrontendLock = Join-Path $ProjectRoot "frontend/package-lock.json"
 $ConsumerProject = Join-Path $ProjectRoot "samples/PackageConsumer/PackageConsumer.csproj"
 $ReadmeFile = Join-Path $ProjectRoot "README.md"
+$GuideFile = Join-Path $ProjectRoot "docs/guide.md"
 $LibraryProject = Join-Path $ProjectRoot "src/LogStudio/LogStudio.csproj"
 
 if (-not (Test-Path $PropsFile)) {
@@ -98,16 +99,18 @@ if (Test-Path $ConsumerProject) {
   [System.IO.File]::WriteAllText($ConsumerProject, $consumerContent)
 }
 
-# 5. Update README.md
-if (Test-Path $ReadmeFile) {
-  $readmeContent = [System.IO.File]::ReadAllText($ReadmeFile)
-  $readmeContent = $readmeContent.Replace("--version $CurrentVersion", "--version $Version")
-  $readmeContent = $readmeContent.Replace("-Version $CurrentVersion", "-Version $Version")
-  $oldPattern = '`' + $CurrentVersion + '` (or `' + $CurrentVersion + '-rc.1`'
-  $newPattern = '`' + $Version + '` (or `' + $Version + '-rc.1`'
-  $readmeContent = $readmeContent.Replace($oldPattern, $newPattern)
-  $readmeContent = $readmeContent.Replace("LogStudio.$CurrentVersion.nupkg", "LogStudio.$Version.nupkg")
-  [System.IO.File]::WriteAllText($ReadmeFile, $readmeContent)
+# 5. Update documentation
+foreach ($DocumentationFile in @($ReadmeFile, $GuideFile)) {
+  if (Test-Path $DocumentationFile) {
+    $documentationContent = [System.IO.File]::ReadAllText($DocumentationFile)
+    $documentationContent = $documentationContent.Replace("--version $CurrentVersion", "--version $Version")
+    $documentationContent = $documentationContent.Replace("-Version $CurrentVersion", "-Version $Version")
+    $oldPattern = '`' + $CurrentVersion + '` (or `' + $CurrentVersion + '-rc.1`'
+    $newPattern = '`' + $Version + '` (or `' + $Version + '-rc.1`'
+    $documentationContent = $documentationContent.Replace($oldPattern, $newPattern)
+    $documentationContent = $documentationContent.Replace("LogStudio.$CurrentVersion.nupkg", "LogStudio.$Version.nupkg")
+    [System.IO.File]::WriteAllText($DocumentationFile, $documentationContent)
+  }
 }
 
 # 6. Optional git tag
@@ -128,6 +131,7 @@ Write-Host "  - frontend/package.json"
 Write-Host "  - frontend/package-lock.json"
 Write-Host "  - samples/PackageConsumer/PackageConsumer.csproj"
 Write-Host "  - README.md"
+Write-Host "  - docs/guide.md"
 if ($Tag) {
   Write-Host "  - git tag $Version"
 }

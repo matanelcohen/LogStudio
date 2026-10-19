@@ -24,12 +24,9 @@ vi.mock("./useLogExplorer", async () => {
 });
 
 describe("log-first workspace", () => {
-  it("preserves Copilot conversation and drafts across logs-to-metrics navigation", async () => {
+  it("preserves Copilot conversation and drafts while searching logs", async () => {
     vi.spyOn(api, "connectCopilot").mockResolvedValue("test CLI");
     vi.spyOn(api, "askCopilot").mockResolvedValue({ answer: "Existing answer", contextEntryCount: 1, contextTruncated: false });
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
-      enabled: true, metrics: [], spans: [], droppedMetrics: 0, droppedSpans: 0
-    })))));
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Ask Copilot" }));
     const panel = screen.getByRole("complementary", { name: "Ask Copilot about logs" });
@@ -40,12 +37,9 @@ describe("log-first workspace", () => {
     fireEvent.click(within(panel).getByRole("button", { name: "Send message" }));
     await screen.findByText("Existing answer");
     fireEvent.change(input, { target: { value: "Keep this draft" } });
-    fireEvent.click(screen.getByRole("button", { name: "Metrics" }));
-    await screen.findByText("No metric measurements captured yet.");
-    expect(panel.isConnected).toBe(true);
-    expect(panel.hidden).toBe(true);
-    expect(screen.queryByRole("complementary", { name: "Ask Copilot about logs" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "Hello" } });
     fireEvent.click(screen.getByRole("button", { name: "Discover logs" }));
+    expect(panel.isConnected).toBe(true);
     expect(screen.getByRole("complementary", { name: "Ask Copilot about logs" })).toBe(panel);
     expect(panel.hidden).toBe(false);
     expect(input.value).toBe("Keep this draft");
@@ -53,13 +47,10 @@ describe("log-first workspace", () => {
     expect(screen.getByRole("log").textContent).toContain("Existing answer");
   });
 
-  it("retains an in-flight Copilot response while its panel is hidden by telemetry", async () => {
+  it("retains an in-flight Copilot response while inspecting a log", async () => {
     vi.spyOn(api, "connectCopilot").mockResolvedValue("test CLI");
     let finish!: (value: ChatResponse) => void;
     const ask = vi.spyOn(api, "askCopilot").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
-      enabled: true, metrics: [], spans: [], droppedMetrics: 0, droppedSpans: 0
-    })))));
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Ask Copilot" }));
     const panel = screen.getByRole("complementary", { name: "Ask Copilot about logs" });
@@ -68,33 +59,33 @@ describe("log-first workspace", () => {
     await waitFor(() => expect(input.hasAttribute("disabled")).toBe(false));
     fireEvent.change(input, { target: { value: "In-flight question" } });
     fireEvent.click(within(panel).getByRole("button", { name: "Send message" }));
-    fireEvent.click(screen.getByRole("button", { name: "Metrics" }));
-    await screen.findByText("No metric measurements captured yet.");
-    await act(async () => finish({ answer: "Response while hidden", contextEntryCount: 1, contextTruncated: false }));
-    fireEvent.click(screen.getByRole("button", { name: "Discover logs" }));
-    expect(screen.getByText("Response while hidden")).toBeDefined();
+    fireEvent.click(screen.getByRole("row", { name: /Hello/ }));
+    expect(screen.getByRole("button", { name: "Toggle inspector" }).getAttribute("aria-pressed")).toBe("true");
+    await act(async () => finish({ answer: "Response while inspecting", contextEntryCount: 1, contextTruncated: false }));
+    expect(screen.getByText("Response while inspecting")).toBeDefined();
     expect(screen.getByRole("log").textContent).toContain("In-flight question");
     expect(ask).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Close Copilot chat" }).hasAttribute("disabled")).toBe(false);
   });
 
-  it("navigates telemetry only on demand and preserves the log query when returning", async () => {
-    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      enabled: true, metrics: [], spans: [], droppedMetrics: 0, droppedSpans: 0
-    })));
+  it("exposes only logs and sessions without requesting telemetry", () => {
+    const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
     render(<App />);
+    const navigation = screen.getByRole("navigation", { name: "Workspace applications" });
+    expect(within(navigation).getAllByRole("button").map(button => button.getAttribute("aria-label")))
+      .toEqual(["Discover logs", "Browse sessions"]);
+    expect(screen.queryByRole("button", { name: "Metrics" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Traces" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Configure sources" })).toBeNull();
     fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "Hello" } });
-    expect(fetch).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Metrics" }));
-    expect(screen.getByRole("main", { name: "Metrics workspace" })).toBeDefined();
-    expect(screen.queryByRole("textbox", { name: "Search logs" })).toBeNull();
-    await screen.findByText("No metric measurements captured yet.");
-    const signal = fetch.mock.calls[0]?.[1].signal as AbortSignal;
     fireEvent.click(screen.getByRole("button", { name: "Discover logs" }));
-    expect(signal.aborted).toBe(true);
     expect((screen.getByLabelText("Search logs") as HTMLInputElement).value).toBe("Hello");
+    expect(document.activeElement).toBe(screen.getByLabelText("Search logs"));
     expect(screen.getByRole("main", { name: "Log exploration workspace" })).toBeDefined();
+    expect(screen.queryByRole("searchbox", { name: "Search metrics" })).toBeNull();
+    expect(screen.queryByRole("searchbox", { name: "Search traces" })).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
   });
   it("keeps the summary, field browser, timeline, and empty inspector out of the default layout", () => {
     const { container } = render(<App />);

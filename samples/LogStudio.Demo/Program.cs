@@ -28,7 +28,7 @@ internal static class Program
         using ConsoleLogViewer? viewer = options.Showcase
             ? ConsoleLogViewer.Start(new ConsoleLogViewerOptions
             {
-                ApplicationName = "Telemetry showcase",
+                ApplicationName = "Logs showcase",
                 CaptureTelemetry = true,
                 MeterSources = "LogStudio.Demo.*",
                 ActivitySources = "LogStudio.Demo.*",
@@ -201,7 +201,7 @@ internal sealed class DemoRunner : BackgroundService
             await this.RunOrderAsync(telemetry, ++orderId, scenario, stoppingToken).ConfigureAwait(false);
         }
 
-        Console.WriteLine("Synthetic telemetry only. Open the printed Log Studio URL and select Logs, Metrics, or Traces.");
+        Console.WriteLine("Synthetic demo data only. Open the printed Log Studio URL to explore logs in Discover.");
         Console.WriteLine("Commands: success, slow, error, burst (10 mixed orders), help, quit. Ctrl+C also stops the demo.");
         while (!stoppingToken.IsCancellationRequested)
         {
