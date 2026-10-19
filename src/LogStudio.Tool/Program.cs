@@ -119,7 +119,7 @@ internal static class Program
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            RedirectStandardInput = false,
+            RedirectStandardInput = true,
         };
         foreach (string argument in options.Arguments)
         {
@@ -134,18 +134,60 @@ internal static class Program
         }
 
         using CancellationTokenSource outputStop = new();
+        using CancellationTokenSource inputStop = new();
+        Task input = PumpInputAsync(Console.OpenStandardInput(), child.StandardInput.BaseStream, inputStop.Token);
         Task output = PumpAsync(child.StandardOutput, stdout, child, outputStop.Token);
         Task error = PumpAsync(child.StandardError, stderr, child, outputStop.Token);
+        Task waitForExit = child.WaitForExitAsync(cancellationToken);
         bool interrupted = false;
         try
         {
-            await child.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            if (await Task.WhenAny(waitForExit, input).ConfigureAwait(false) == input)
+            {
+                try
+                {
+                    await input.ConfigureAwait(false);
+                }
+                catch
+                {
+                    StopChild(child);
+                    await child.WaitForExitAsync().ConfigureAwait(false);
+                    throw;
+                }
+
+                CloseChildInput(child);
+            }
+
+            await waitForExit.ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             interrupted = true;
             StopChild(child);
             await child.WaitForExitAsync().ConfigureAwait(false);
+        }
+
+        inputStop.Cancel();
+        if (!input.IsCompleted)
+        {
+            CloseChildInput(child);
+        }
+
+        if (input.IsCompleted)
+        {
+            try
+            {
+                await input.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (inputStop.IsCancellationRequested)
+            {
+            }
+            catch (IOException) when (child.HasExited)
+            {
+            }
+            catch (ObjectDisposedException) when (child.HasExited)
+            {
+            }
         }
 
         Task pumps = Task.WhenAll(output, error);
@@ -182,6 +224,32 @@ internal static class Program
         }
 
         return exitCode;
+    }
+
+    private static void CloseChildInput(Process child)
+    {
+        try
+        {
+            child.StandardInput.Close();
+        }
+        catch (IOException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private static async Task PumpInputAsync(Stream source, Stream destination, CancellationToken cancellationToken)
+    {
+        byte[] buffer = new byte[PumpBufferSize];
+        int count;
+        while ((count = await source.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false)) > 0)
+        {
+            await destination.WriteAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
+        }
+
+        await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task PumpAsync(StreamReader source, TextWriter destination, Process child, CancellationToken cancellationToken)
