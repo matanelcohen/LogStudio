@@ -47,6 +47,26 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
     }
 
     [Fact]
+    public async Task WrapperExitsWhenChildFinishesWhileStandardInputRemainsOpen()
+    {
+        using Process process = StartProcess(
+            WrapperArguments("--no-wait", "--", DotnetCommand, DemoPath, "--count", "0"));
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> error = process.StandardError.ReadToEndAsync();
+        try
+        {
+            await process.WaitForExitAsync().WaitAsync(ProcessTimeout);
+            Assert.Equal(0, process.ExitCode);
+            await output;
+            await error;
+        }
+        finally
+        {
+            await KillAsync(process);
+        }
+    }
+
+    [Fact]
     public async Task ShowcaseCapturesLogsNestedTracesAndMetricsUntilQuit()
     {
         using Process process = StartProcess(new[] { DemoPath, "--showcase" });
