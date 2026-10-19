@@ -348,6 +348,32 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("0 keeps all entries (default)", result.Output, StringComparison.Ordinal);
         Assert.Contains("stored in private temporary files", result.Output, StringComparison.Ordinal);
+        Assert.Contains("--version", result.Output, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("--version")]
+    [InlineData("--open", "--version")]
+    [InlineData("--version", "--", "log-studio-no-such-command-93b6")]
+    public async Task WrapperVersionPrintsInstalledVersionWithoutStartingTheViewer(params string[] args)
+    {
+        ProcessResult result = await RunProcessAsync(WrapperArguments(args));
+        string? productVersion = FileVersionInfo.GetVersionInfo(ToolPath).ProductVersion;
+        Assert.False(string.IsNullOrWhiteSpace(productVersion));
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(productVersion.Split('+')[0] + Environment.NewLine, result.Output);
+        Assert.Empty(result.Error);
+    }
+
+    [Fact]
+    public async Task WrapperPassesVersionArgumentAfterSeparatorToTheChild()
+    {
+        ProcessResult expected = await RunProcessAsync(new[] { "--version" });
+        ProcessResult result = await RunProcessAsync(WrapperArguments("--no-wait", "--", DotnetCommand, "--version"));
+        Assert.Equal(0, expected.ExitCode);
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(expected.Output, result.Output);
+        Assert.Contains(UrlPrefix, result.Error, StringComparison.Ordinal);
     }
 
     [Fact]
