@@ -122,7 +122,8 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
         ProcessResult result = await RunProcessAsync(new[] { DemoPath, "--showcase" });
         Assert.Equal(0, result.ExitCode);
         Assert.Contains(UrlPrefix, result.Error, StringComparison.Ordinal);
-        Assert.Contains("Synthetic telemetry only", result.Output, StringComparison.Ordinal);
+        Assert.Contains("Open the printed Log Studio URL to explore logs in Discover.", result.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("select Logs, Metrics, or Traces", result.Output, StringComparison.Ordinal);
     }
 
     [Fact]
