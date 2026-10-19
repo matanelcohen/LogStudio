@@ -463,6 +463,7 @@ dotnet tool install --global LogStudio.Tool --version 1.0.0 \
   --configfile /absolute/path/to/LogStudio/NuGet.Local.Config
 
 logstudio --help
+logstudio --version
 logstudio --open -- dotnet run --project ./path/to/ConsoleApp.csproj
 logstudio --open -- dotnet run --project /absolute/path/to/ConsoleApp.csproj -- --your-argument=value
 ```
@@ -593,6 +594,7 @@ $viewer = "C:\dev\LogStudio"
 | `--name <name>` | Unique random name | Session display name; editable in **Sessions → Rename** |
 | `--no-wait` | Off | Do not keep the viewer alive after child exit |
 | `--help` / `-h` | | Usage |
+| `--version` | | Print the installed Log Studio version and exit; no child command required |
 
 A requested explicit port that is occupied is an error, not an automatic port change.
 Invalid wrapper options exit with code `2`; launch / viewer errors exit with code `1`.

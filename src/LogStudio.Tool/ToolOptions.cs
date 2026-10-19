@@ -4,12 +4,13 @@ using System.Globalization;
 
 namespace LogStudio.Tool;
 
-internal sealed record ToolOptions(int Port, int Capacity, int FlushEveryEntries, string? Name, bool OpenBrowser, bool WaitAfterExit, bool Help, string Command, string[] Arguments)
+internal sealed record ToolOptions(int Port, int Capacity, int FlushEveryEntries, string? Name, bool OpenBrowser, bool WaitAfterExit, bool Help, bool Version, string Command, string[] Arguments)
 {
     internal const string CommandName = "logstudio";
     internal const string Separator = "--";
     internal const string HelpSwitch = "--help";
     internal const string ShortHelpSwitch = "-h";
+    internal const string VersionSwitch = "--version";
     internal const string PortSwitch = "--port";
     internal const string CapacitySwitch = "--capacity";
     internal const string FlushEverySwitch = "--flush-every";
@@ -35,7 +36,9 @@ internal sealed record ToolOptions(int Port, int Capacity, int FlushEveryEntries
             {
                 case HelpSwitch:
                 case ShortHelpSwitch:
-                    return new ToolOptions(port, capacity, flushEvery, name, open, wait, true, string.Empty, Array.Empty<string>());
+                    return new ToolOptions(port, capacity, flushEvery, name, open, wait, true, false, string.Empty, Array.Empty<string>());
+                case VersionSwitch:
+                    return new ToolOptions(port, capacity, flushEvery, name, open, wait, false, true, string.Empty, Array.Empty<string>());
                 case OpenSwitch:
                     open = true;
                     break;
@@ -76,7 +79,7 @@ internal sealed record ToolOptions(int Port, int Capacity, int FlushEveryEntries
             arguments.Add(args[index++]);
         }
 
-        return new ToolOptions(port, capacity, flushEvery, name, open, wait, false, command, arguments.ToArray());
+        return new ToolOptions(port, capacity, flushEvery, name, open, wait, false, false, command, arguments.ToArray());
     }
 
     private static int ReadInteger(string[] args, ref int index, string option)

@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -41,6 +42,13 @@ internal static class Program
         if (options.Help)
         {
             PrintHelp();
+            return 0;
+        }
+
+        if (options.Version)
+        {
+            string? version = typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            Console.WriteLine(version?.Split('+')[0] ?? typeof(Program).Assembly.GetName().Version?.ToString());
             return 0;
         }
 
@@ -304,6 +312,7 @@ internal static class Program
               --name <name>      Display name for this run (default: unique random name).
               --no-wait          Exit with the child's exit code when it finishes.
               --help, -h         Show this help.
+              --version          Show the installed Log Studio version.
 
             Examples:
               logstudio --open -- dotnet run --project path/to/ConsoleApp.csproj
