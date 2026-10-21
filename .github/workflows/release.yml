@@ -65,6 +65,10 @@ jobs:
             rid: linux-x64
           - os: ubuntu-latest
             rid: linux-arm64
+          - os: ubuntu-latest
+            rid: osx-x64
+          - os: ubuntu-latest
+            rid: osx-arm64
           - os: windows-latest
             rid: win-x64
           - os: windows-latest
@@ -153,6 +157,17 @@ jobs:
         with:
           name: release-inputs
           path: artifacts/inputs
+      - name: Verify release assets
+        shell: bash
+        run: |
+          for rid in linux-x64 linux-arm64 osx-x64 osx-arm64 win-x64 win-arm64; do
+            extension=tar.gz
+            if [[ "$rid" == win-* ]]; then extension=zip; fi
+            asset="logstudio-$rid.$extension"
+            for file in "$asset" "$asset.sha256"; do
+              [[ -s "artifacts/release/$file" ]] || { echo "Missing release asset: $file" >&2; exit 1; }
+            done
+          done
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
