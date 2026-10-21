@@ -424,6 +424,10 @@ pre, code, kbd { font-family: Consolas, "Courier New", Courier, monospace; }
 }
 .query-region { padding: 24px 24px 16px; }
 .query-region > .notice { margin-top: 12px; }
+.application-picker { margin-bottom: 16px; font-size: calc(12px * var(--ui-font-scale, 1)); }
+.application-picker-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+.application-picker-controls select { max-width: min(440px, 100%); }
+.application-picker .notice { margin-top: 8px; }
 .workspace-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
 .workspace-kicker { color: var(--cp-native-accent); font-size: calc(10px * var(--ui-font-scale, 1)); font-weight: 650; letter-spacing: 1.2px; }
 .workspace-heading h2 { font-size: calc(26px * var(--ui-font-scale, 1)); font-weight: 600; letter-spacing: -.7px; margin: 3px 0; line-height: 1.25; }

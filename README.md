@@ -46,6 +46,17 @@ Keep using your existing command after `--`. The wrapped command still needs its
 dependencies; for example, `dotnet run` requires your application's .NET SDK.
 The viewer opens locally in your browser. Without `--open`, open the URL printed in the terminal.
 
+To choose an already-running .NET app instead of wrapping a command:
+
+```bash
+logstudio --listen-all --open
+```
+
+Choose an app from **Running app** in the viewer. Nothing is attached automatically.
+This mode captures new `ILogger` events from apps with the .NET logging EventSource
+provider enabled; it cannot recover existing stdout/stderr. See the
+[running-app guide](docs/guide.md#choose-a-running-net-app).
+
 ### Install from source
 
 Requires the **.NET 10 SDK** selected by `global.json` and **Node.js 22.12+** with npm.

@@ -62,6 +62,34 @@ Browsers without backdrop-filter support use opaque surfaces.
 
 ## Quick start: wrapper (recommended)
 
+### Choose a running .NET app
+
+```bash
+logstudio --listen-all --open
+```
+
+This starts a localhost viewer without launching or following a command. Open the
+printed URL if you omit `--open`, then choose **Running app** from the dropdown.
+Discovery refreshes automatically, and **Refresh apps** updates it immediately.
+Even if only one app is running, no app is attached until you select it.
+
+The list contains accessible .NET processes advertising runtime diagnostics, with
+their process IDs to distinguish instances. This requires compatible .NET
+EventPipe diagnostics and permission to access the target (normally the same OS
+user). Applications with diagnostics disabled will not appear.
+Capture uses the `Microsoft-Extensions-Logging` EventSource provider:
+the target must include and enable the `Microsoft.Extensions.Logging.EventSource`
+logging provider, as default ASP.NET Core hosts do.
+Only new `ILogger` events after selection are captured; earlier events, arbitrary
+`Console.WriteLine` output, and other processes' stdout/stderr are not available.
+Use the normal command wrapper when you need console output.
+
+Switching apps stops the previous listener and replaces the current capture
+history, so export any history you want to keep first. Exiting apps are not
+replaced automatically; select another app yourself. Ctrl+C disconnects the viewer
+without stopping the external application. `--listen-all` cannot be combined with
+a child command or `--no-wait`; the existing wrapper mode is unchanged.
+
 ### Install a compiled release (fastest)
 
 **macOS / Linux — one command, no clone, build, .NET SDK, or Node.js:**

@@ -63,6 +63,8 @@ public sealed class ConsoleLogViewerOptions
     /// <summary>Gets or sets the run working directory recorded in session details.</summary>
     public string? RunWorkingDirectory { get; set; }
 
+    internal IRunningApplications? RunningApplications { get; set; }
+
     internal ViewerSettings Validate()
     {
         if (this.Port < 0 || this.Port > ViewerConstants.MaximumPort)
@@ -105,7 +107,7 @@ public sealed class ConsoleLogViewerOptions
         ArgumentNullException.ThrowIfNull(this.RunArguments);
         return new ViewerSettings(this.Port, this.Capacity, this.FlushEveryEntries, this.MaxLineLength, this.CaptureConsole, this.OpenBrowser, name,
             this.SaveSession, sessions, this.RunCommand, (string[])this.RunArguments.Clone(), this.RunWorkingDirectory ?? Environment.CurrentDirectory,
-            this.CaptureTelemetry, this.MeterSources, this.ActivitySources, this.TelemetryIntervalMilliseconds, this.TelemetryCapacity);
+            this.CaptureTelemetry, this.MeterSources, this.ActivitySources, this.TelemetryIntervalMilliseconds, this.TelemetryCapacity, this.RunningApplications);
     }
 }
 
@@ -126,4 +128,5 @@ internal sealed record ViewerSettings(
     string MeterSources,
     string ActivitySources,
     int TelemetryIntervalMilliseconds,
-    int TelemetryCapacity);
+    int TelemetryCapacity,
+    IRunningApplications? RunningApplications = null);

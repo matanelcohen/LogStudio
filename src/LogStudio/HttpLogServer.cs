@@ -40,6 +40,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private readonly SessionCatalog sessions;
     private readonly TelemetryRecorder? telemetry;
     private readonly TelemetrySettings initialTelemetrySettings;
+    private readonly IRunningApplications? runningApplications;
     private readonly string pathPrefix;
     private readonly string authority;
     private readonly string contentSecurityPolicy;
@@ -60,6 +61,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
         this.renameSession = renameSession;
         this.sessions = sessions;
         this.telemetry = telemetry;
+        this.runningApplications = settings.RunningApplications;
         this.initialTelemetrySettings = new(settings.MeterSources, settings.ActivitySources, false);
         this.copilot = copilot ?? new CopilotCliClient();
         this.pathPrefix = $"/{Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant()}/";
@@ -212,6 +214,11 @@ internal sealed class HttpLogServer : IAsyncDisposable
             }
 
             string route = request.Url.AbsolutePath[this.pathPrefix.Length..];
+            if (route == "api/applications")
+            {
+                await this.RunningApplicationsAsync(context, cancellationToken).ConfigureAwait(false);
+                return;
+            }
             if (route is "api/telemetry/sources" or "api/telemetry/suggest")
             {
                 await this.TelemetrySuggestionsAsync(context, route == "api/telemetry/suggest", cancellationToken).ConfigureAwait(false);
@@ -436,6 +443,51 @@ internal sealed class HttpLogServer : IAsyncDisposable
         {
             response.Close();
         }
+    }
+
+    private async Task RunningApplicationsAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        HttpListenerRequest request = context.Request;
+        HttpListenerResponse response = context.Response;
+        if (this.runningApplications is null)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.NotFound, "Running application selection requires --listen-all.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (!string.IsNullOrEmpty(request.QueryString[ViewerConstants.SessionIdQuery]))
+            throw new ArgumentException("Select a running application from the live session.");
+        RunningApplicationsState state;
+        if (request.HttpMethod == ViewerConstants.GetMethod)
+        {
+            state = this.runningApplications.GetState();
+        }
+        else if (request.HttpMethod == ViewerConstants.PostMethod)
+        {
+            if (request.Headers[ViewerConstants.ClearRequestHeader] != "select-application")
+            {
+                await WriteErrorAsync(response, HttpStatusCode.Forbidden, "An explicit select-application action header is required.", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            if (!int.TryParse(request.QueryString["processId"], NumberStyles.None, CultureInfo.InvariantCulture, out int processId) || processId <= 0 ||
+                !long.TryParse(request.QueryString["startedAtTicks"], NumberStyles.None, CultureInfo.InvariantCulture, out long startedAtTicks) || startedAtTicks <= 0)
+                throw new ArgumentException("Choose a running application with a valid process identity.");
+            try
+            {
+                state = await this.runningApplications.SelectAsync(processId, startedAtTicks, cancellationToken).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException exception)
+            {
+                await WriteErrorAsync(response, HttpStatusCode.Conflict, exception.Message, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+        }
+        else
+        {
+            await WriteErrorAsync(response, HttpStatusCode.MethodNotAllowed, "Use GET to list applications or POST to select one.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(state, ViewerConstants.JsonOptions),
+            ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task TelemetrySettingsAsync(HttpListenerContext context, CancellationToken cancellationToken)

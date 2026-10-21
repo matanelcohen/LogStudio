@@ -1,8 +1,37 @@
-import { describe, expect, it } from "vitest";
-import { readPage, readStatus } from "./api";
+import { describe, expect, it, vi } from "vitest";
+import { fetchApplications, readPage, readStatus, selectApplication } from "./api";
 import { Entry, fixturePage, Status } from "./test-fixtures";
 
 describe("typed server payloads", () => {
+  it("reads selection mode while remaining compatible with saved statuses", () => {
+    expect(readStatus(Status).listenAll).toBe(false);
+    expect(readStatus({ ...Status, listenAll: true }).listenAll).toBe(true);
+    expect(() => readStatus({ ...Status, listenAll: "true" })).toThrow("application selection mode");
+  });
+
+  it("lists apps without attaching and preserves exact process identity on explicit selection", async () => {
+    const application = { processId: 42, name: "Example.Api", startedAtTicks: "639112345678901234" };
+    const state = { applications: [application], selected: null, error: null };
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(state)))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...state, selected: application })));
+    vi.stubGlobal("fetch", fetch);
+    const signal = new AbortController().signal;
+    expect(await fetchApplications(signal)).toEqual(state);
+    expect(fetch).toHaveBeenNthCalledWith(1, "api/applications", { signal });
+    expect((await selectApplication(application)).selected).toEqual(application);
+    expect(fetch).toHaveBeenNthCalledWith(2, "api/applications?processId=42&startedAtTicks=639112345678901234", {
+      method: "POST", headers: { "X-Log-Studio-Action": "select-application" }
+    });
+  });
+
+  it("rejects numeric start identities that lose precision and surfaces selection failures", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      applications: [{ processId: 42, name: "App", startedAtTicks: 639112345678901234 }], selected: null, error: null
+    }))).mockResolvedValueOnce(new Response(JSON.stringify({ error: "Application exited." }), { status: 409 })));
+    await expect(fetchApplications(new AbortController().signal)).rejects.toThrow("process start identity");
+    await expect(selectApplication({ processId: 42, name: "App", startedAtTicks: "639112345678901234" })).rejects.toThrow("Application exited.");
+  });
+
   it("accepts a bounded page without loading full history", () => {
     const page = readPage(fixturePage());
     expect(page.entries).toEqual([Entry]);

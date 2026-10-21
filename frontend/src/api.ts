@@ -1,5 +1,6 @@
 import {
   ApiRoutes, ClearActionHeader, ClearActionValue, CopilotChatActionValue, CopilotConnectActionValue, DeleteSessionActionValue, ImportActionValue, importFormat, MaximumCategorySuggestions, MaximumChatAnswerLength, MaximumChatRequestBytes, MaximumHighlights, MaximumPageSize, PageSize, QueryKeys, RenameActionValue, Severities, Streams, UploadContentType, validateImportFile,
+  SelectApplicationActionValue, type RunningApplication, type RunningApplicationsState,
   type ChatMessage, type ChatResponse, type ClearResult, type LogEntry, type LogPage, type SessionInfo, type ViewerStatus
 } from "./model";
 
@@ -52,6 +53,7 @@ export function readStatus(value: unknown): ViewerStatus {
   if (exitCode !== null && (typeof exitCode !== "number" || !Number.isSafeInteger(exitCode)))
     throw new Error("The server returned an invalid exit code.");
   return {
+    listenAll: data.listenAll === undefined ? false : boolean(data.listenAll, "application selection mode"),
     applicationName: text(data.applicationName, "application name"),
     startedAt: timestamp(data.startedAt, "start time"),
     capacity: count(data.capacity, "capacity"),
@@ -72,6 +74,42 @@ export function readStatus(value: unknown): ViewerStatus {
     historyDirectory: text(data.historyDirectory, "history directory"),
     clearedThroughId: count(data.clearedThroughId, "clear checkpoint")
   };
+}
+
+function readApplication(value: unknown): RunningApplication {
+  const data = object(value);
+  const processId = count(data.processId, "process ID");
+  const startedAtTicks = text(data.startedAtTicks, "process start identity");
+  if (processId === 0 || !/^[1-9]\d{0,18}$/.test(startedAtTicks))
+    throw new Error("The server returned an invalid process identity.");
+  return { processId, name: text(data.name, "application name"), startedAtTicks };
+}
+
+function readApplications(value: unknown): RunningApplicationsState {
+  const data = object(value);
+  if (!Array.isArray(data.applications)) throw new Error("The server returned an invalid application list.");
+  return {
+    applications: data.applications.map(readApplication),
+    selected: data.selected === null ? null : readApplication(data.selected),
+    error: nullableText(data.error, "application error")
+  };
+}
+
+export async function fetchApplications(signal: AbortSignal): Promise<RunningApplicationsState> {
+  const response = await fetch(ApiRoutes.Applications, { signal });
+  const data: unknown = await response.json();
+  if (!response.ok) throw new ApiError(text(object(data).error, "application list error"), response.status);
+  return readApplications(data);
+}
+
+export async function selectApplication(application: RunningApplication): Promise<RunningApplicationsState> {
+  const parameters = new URLSearchParams({ processId: String(application.processId), startedAtTicks: application.startedAtTicks });
+  const response = await fetch(`${ApiRoutes.Applications}?${parameters}`, {
+    method: "POST", headers: { [ClearActionHeader]: SelectApplicationActionValue }
+  });
+  const data: unknown = await response.json();
+  if (!response.ok) throw new ApiError(text(object(data).error, "application selection error"), response.status);
+  return readApplications(data);
 }
 
 function readEntry(value: unknown): LogEntry {

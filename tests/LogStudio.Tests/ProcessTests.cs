@@ -5,11 +5,13 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Reflection;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace LogStudio.Tests;
@@ -205,11 +207,234 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
     [InlineData("--capacity", "-1", "--", "dotnet")]
     [InlineData("--flush-every", "0", "--", "dotnet")]
     [InlineData("--flush-every", "invalid", "--", "dotnet")]
+    [InlineData("--listen-all", "--no-wait")]
+    [InlineData("--no-wait", "--listen-all")]
+    [InlineData("--listen-all", "--", "dotnet")]
+    [InlineData("--listen-all", "--")]
+    [InlineData("--listen-all", "dotnet")]
     public async Task InvalidWrapperArgumentsFailExplicitly(params string[] args)
     {
         ProcessResult result = await RunProcessAsync(WrapperArguments(args));
         Assert.Equal(2, result.ExitCode);
         Assert.False(string.IsNullOrWhiteSpace(result.Error));
+    }
+
+    [Fact]
+    public async Task ListenAllRequiresSelectionThenCapturesOnlyNewStructuredLogsWithoutStoppingTheTarget()
+    {
+        using Process process = StartProcess(WrapperArguments("--listen-all"));
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string>? error = null;
+        using ILoggerFactory loggerFactory = LoggerFactory.Create(builder => builder
+            .SetMinimumLevel(LogLevel.Trace)
+            .AddEventSourceLogger());
+        ILogger logger = loggerFactory.CreateLogger("ListenAll.ProcessTests");
+        string longCategory = new('c', 600);
+        ILogger longCategoryLogger = loggerFactory.CreateLogger(longCategory);
+        string beforeSelection = $"before-selection-{Guid.NewGuid():N}";
+        string selectedMessage = $"captured-after-selection-{Guid.NewGuid():N}";
+        string categoryMessage = $"long-category-{Guid.NewGuid():N}";
+        string severityPrefix = $"severity-{Guid.NewGuid():N}-";
+        try
+        {
+            Uri url = await ReadUrlAsync(process);
+            error = process.StandardError.ReadToEndAsync();
+            using HttpClient client = new();
+            using CancellationTokenSource timeout = new(ProcessTimeout);
+            logger.LogWarning("{Message}", beforeSelection);
+            using (JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token))
+            {
+                Assert.True(snapshot.RootElement.GetProperty("status").GetProperty("listenAll").GetBoolean());
+                Assert.Empty(snapshot.RootElement.GetProperty("entries").EnumerateArray());
+            }
+
+            JsonElement target;
+            using (JsonDocument state = JsonDocument.Parse(await client.GetStringAsync(new Uri(url, "api/applications"), timeout.Token)))
+            {
+                Assert.Equal(JsonValueKind.Null, state.RootElement.GetProperty("selected").ValueKind);
+                JsonElement[] applications = state.RootElement.GetProperty("applications").EnumerateArray().ToArray();
+                Assert.DoesNotContain(applications, application => application.GetProperty("processId").GetInt32() == process.Id);
+                target = Assert.Single(applications, application => application.GetProperty("processId").GetInt32() == Environment.ProcessId).Clone();
+                Assert.False(string.IsNullOrWhiteSpace(target.GetProperty("name").GetString()));
+                Assert.True(long.Parse(target.GetProperty("startedAtTicks").GetString()!, CultureInfo.InvariantCulture) > 0);
+            }
+
+            Uri selection = ApplicationSelection(url, target);
+            using (HttpResponseMessage denied = await client.PostAsync(selection, null, timeout.Token))
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+            }
+
+            using (JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token))
+            {
+                Assert.Empty(snapshot.RootElement.GetProperty("entries").EnumerateArray());
+            }
+
+            using (JsonDocument state = await SelectApplicationAsync(client, selection, timeout.Token))
+            {
+                Assert.Equal(JsonValueKind.Null, state.RootElement.GetProperty("error").ValueKind);
+                Assert.Equal(Environment.ProcessId, state.RootElement.GetProperty("selected").GetProperty("processId").GetInt32());
+            }
+
+            JsonElement captured;
+            while (true)
+            {
+                // EventPipe publishes in batches; repeat a unique post-selection message until observed.
+                logger.LogWarning("{Message}", selectedMessage);
+                longCategoryLogger.LogInformation("{Message}", categoryMessage);
+                foreach (LogLevel level in Enum.GetValues<LogLevel>().Where(level => level != LogLevel.None))
+                {
+                    logger.Log(level, "{Message}", severityPrefix + level);
+                }
+
+                using JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token);
+                JsonElement[] entries = snapshot.RootElement.GetProperty("entries").EnumerateArray().ToArray();
+                Assert.DoesNotContain(entries, entry => entry.GetProperty("message").GetString() == beforeSelection);
+                JsonElement match = entries.FirstOrDefault(entry => entry.GetProperty("message").GetString() == selectedMessage);
+                if (match.ValueKind != JsonValueKind.Undefined &&
+                    entries.Any(entry => entry.GetProperty("message").GetString() == categoryMessage) &&
+                    Enum.GetValues<LogLevel>().Where(level => level != LogLevel.None)
+                        .All(level => entries.Any(entry => entry.GetProperty("message").GetString() == severityPrefix + level)))
+                {
+                    captured = match.Clone();
+                    Assert.Contains(entries, entry =>
+                        entry.GetProperty("message").GetString() == categoryMessage &&
+                        entry.GetProperty("category").GetString() == longCategory[..512]);
+                    foreach (LogLevel level in Enum.GetValues<LogLevel>().Where(level => level != LogLevel.None))
+                    {
+                        Assert.Contains(entries, entry =>
+                            entry.GetProperty("message").GetString() == severityPrefix + level &&
+                            entry.GetProperty("severity").GetString() == JsonNamingPolicy.CamelCase.ConvertName(level.ToString()));
+                    }
+
+                    break;
+                }
+
+                await Task.Delay(100, timeout.Token);
+            }
+
+            Assert.Equal("warning", captured.GetProperty("severity").GetString());
+            Assert.Equal("ListenAll.ProcessTests", captured.GetProperty("category").GetString());
+            using (JsonDocument unchanged = await SelectApplicationAsync(client, selection, timeout.Token))
+            {
+                Assert.Equal(Environment.ProcessId, unchanged.RootElement.GetProperty("selected").GetProperty("processId").GetInt32());
+            }
+
+            long startedAtTicks = long.Parse(target.GetProperty("startedAtTicks").GetString()!, CultureInfo.InvariantCulture);
+            Uri reusedIdentity = new(url, $"api/applications?processId={Environment.ProcessId}&startedAtTicks={startedAtTicks + 1}");
+            using (JsonDocument failed = await SelectApplicationAsync(client, reusedIdentity, timeout.Token))
+            {
+                Assert.False(string.IsNullOrEmpty(failed.RootElement.GetProperty("error").GetString()));
+                Assert.Equal(Environment.ProcessId, failed.RootElement.GetProperty("selected").GetProperty("processId").GetInt32());
+            }
+
+            using (JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token))
+            {
+                Assert.Contains(snapshot.RootElement.GetProperty("entries").EnumerateArray(),
+                    entry => entry.GetProperty("message").GetString() == selectedMessage);
+            }
+
+            if (!OperatingSystem.IsWindows())
+            {
+                await InterruptAsync(process);
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                Assert.Equal(130, process.ExitCode);
+                logger.LogWarning("The external target still runs after listener shutdown.");
+                using Process externalTarget = System.Diagnostics.Process.GetCurrentProcess();
+                Assert.False(externalTarget.HasExited);
+            }
+        }
+        finally
+        {
+            await KillAsync(process);
+            await output;
+            if (error is not null) await error;
+        }
+    }
+
+    [Fact]
+    public async Task ListenAllClearsHistoryOnExplicitSwitchAndDoesNotReconnectAfterTargetExit()
+    {
+        using Process target = StartProcess(new[] { DemoPath, "--showcase" });
+        using Process listener = StartProcess(WrapperArguments("--listen-all"));
+        Task<string> output = listener.StandardOutput.ReadToEndAsync();
+        Task<string>? error = null;
+        Task<string> targetOutput = target.StandardOutput.ReadToEndAsync();
+        Task<string>? targetError = null;
+        using ILoggerFactory loggerFactory = LoggerFactory.Create(builder => builder.AddEventSourceLogger());
+        ILogger logger = loggerFactory.CreateLogger("ListenAll.SwitchTests");
+        string marker = $"history-before-switch-{Guid.NewGuid():N}";
+        try
+        {
+            await ReadUrlAsync(target);
+            targetError = target.StandardError.ReadToEndAsync();
+            Uri url = await ReadUrlAsync(listener);
+            error = listener.StandardError.ReadToEndAsync();
+            using HttpClient client = new();
+            using CancellationTokenSource timeout = new(ProcessTimeout);
+            JsonElement self;
+            JsonElement other;
+            using (JsonDocument state = JsonDocument.Parse(await client.GetStringAsync(new Uri(url, "api/applications"), timeout.Token)))
+            {
+                JsonElement[] applications = state.RootElement.GetProperty("applications").EnumerateArray().ToArray();
+                self = Assert.Single(applications, application => application.GetProperty("processId").GetInt32() == Environment.ProcessId).Clone();
+                other = Assert.Single(applications, application => application.GetProperty("processId").GetInt32() == target.Id).Clone();
+            }
+
+            using (JsonDocument selected = await SelectApplicationAsync(client, ApplicationSelection(url, self), timeout.Token))
+            {
+                Assert.Equal(Environment.ProcessId, selected.RootElement.GetProperty("selected").GetProperty("processId").GetInt32());
+            }
+
+            while (true)
+            {
+                logger.LogInformation("{Message}", marker);
+                using JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token);
+                if (snapshot.RootElement.GetProperty("entries").EnumerateArray().Any(entry => entry.GetProperty("message").GetString() == marker)) break;
+                await Task.Delay(100, timeout.Token);
+            }
+
+            using (JsonDocument selected = await SelectApplicationAsync(client, ApplicationSelection(url, other), timeout.Token))
+            {
+                Assert.Equal(target.Id, selected.RootElement.GetProperty("selected").GetProperty("processId").GetInt32());
+            }
+
+            logger.LogInformation("This unselected process must not be captured.");
+            using (JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token))
+            {
+                Assert.Empty(snapshot.RootElement.GetProperty("entries").EnumerateArray());
+            }
+
+            await target.StandardInput.WriteLineAsync("quit");
+            target.StandardInput.Close();
+            await target.WaitForExitAsync().WaitAsync(ProcessTimeout);
+            while (true)
+            {
+                using JsonDocument state = JsonDocument.Parse(await client.GetStringAsync(new Uri(url, "api/applications"), timeout.Token));
+                if (state.RootElement.GetProperty("selected").ValueKind == JsonValueKind.Null)
+                {
+                    Assert.DoesNotContain(state.RootElement.GetProperty("applications").EnumerateArray(),
+                        application => application.GetProperty("processId").GetInt32() == target.Id);
+                    break;
+                }
+
+                await Task.Delay(100, timeout.Token);
+            }
+
+            logger.LogInformation("Do not automatically reconnect to this still-running process.");
+            using JsonDocument afterExit = await GetSnapshotAsync(client, url, timeout.Token);
+            Assert.DoesNotContain(afterExit.RootElement.GetProperty("entries").EnumerateArray(),
+                entry => entry.GetProperty("category").GetString() == "ListenAll.SwitchTests");
+        }
+        finally
+        {
+            await KillAsync(listener);
+            await KillAsync(target);
+            await output;
+            await targetOutput;
+            if (error is not null) await error;
+            if (targetError is not null) await targetError;
+        }
     }
 
     [Fact]
@@ -439,6 +664,32 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
         .Single(attribute => attribute.Key == key).Value ?? throw new InvalidOperationException($"Missing fixture metadata: {key}.");
 
     private static string[] WrapperArguments(params string[] arguments) => new[] { ToolPath }.Concat(arguments).ToArray();
+
+    private static Uri ApplicationSelection(Uri url, JsonElement application) => new(url,
+        $"api/applications?processId={application.GetProperty("processId").GetInt32()}&startedAtTicks={application.GetProperty("startedAtTicks").GetString()}");
+
+    private static async Task<JsonDocument> SelectApplicationAsync(HttpClient client, Uri route, CancellationToken cancellationToken)
+    {
+        using HttpRequestMessage selection = new(HttpMethod.Post, route);
+        selection.Headers.Add(ViewerConstants.ClearRequestHeader, "select-application");
+        using HttpResponseMessage response = await client.SendAsync(selection, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+    }
+
+    private static async Task<JsonDocument> GetSnapshotAsync(HttpClient client, Uri url, CancellationToken cancellationToken) =>
+        JsonDocument.Parse(await client.GetStringAsync(new Uri(url, ViewerConstants.SnapshotRoute), cancellationToken));
+
+    private static async Task InterruptAsync(Process process)
+    {
+        ProcessStartInfo info = new("kill") { UseShellExecute = false };
+        info.ArgumentList.Add("-s");
+        info.ArgumentList.Add("INT");
+        info.ArgumentList.Add(process.Id.ToString(CultureInfo.InvariantCulture));
+        using Process signal = Process.Start(info)!;
+        await signal.WaitForExitAsync().WaitAsync(ProcessTimeout);
+        Assert.Equal(0, signal.ExitCode);
+    }
 
     private static Process StartProcess(
         IEnumerable<string> arguments,

@@ -5,7 +5,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>logstudio</ToolCommandName>
     <PackageId>LogStudio.Tool</PackageId>
-    <Description>Wrap any console command with a disk-backed localhost log explorer, conditional filters and streaming exports.</Description>
+    <Description>Explore console commands or selected running .NET applications with disk-backed localhost logs, conditional filters and streaming exports.</Description>
     <PackageTags>console;logging;log-viewer;dotnet-tool;local-development</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RollForward>Major</RollForward>
@@ -15,5 +15,9 @@
     <None Include="../../README.md" Pack="true" PackagePath="/" />
     <None Include="../../frontend/dist/third-party-notices.txt" Pack="true" PackagePath="/" />
     <None Include="../LogStudio/dependency-notices.txt" Pack="true" PackagePath="/" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.750501" />
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="4.0.0" />
   </ItemGroup>
 </Project>
