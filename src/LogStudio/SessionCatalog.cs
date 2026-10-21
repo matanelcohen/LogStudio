@@ -8,7 +8,8 @@ namespace LogStudio;
 
 internal sealed record SessionInfo(
     string Id, string Name, DateTimeOffset StartedAt, DateTimeOffset? CompletedAt,
-    int? ExitCode, long EntryCount, string? Command, string[] Arguments, string WorkingDirectory, bool IsCurrent);
+    int? ExitCode, long EntryCount, string? Command, string[] Arguments, string WorkingDirectory, bool IsCurrent,
+    SessionFilters? Filters = null);
 
 internal sealed record SavedSession(SessionInfo Session, ViewerStatus Status, string?[] Categories);
 
@@ -27,6 +28,7 @@ internal sealed class SessionCatalog
     private readonly ViewerSettings settings;
     private readonly Dictionary<string, long> generations = new(StringComparer.Ordinal);
     private readonly string[] arguments;
+    private SessionFilters? filters;
 
     internal SessionCatalog(ViewerSettings settings)
     {
@@ -117,9 +119,36 @@ internal sealed class SessionCatalog
         }
     }
 
-    internal SessionInfo Describe(ViewerStatus status, bool current = true) => new(
-        this.Id, status.ApplicationName, status.StartedAt, status.CompletedAt, status.ExitCode, status.RetainedCount,
-        this.settings.RunCommand, this.arguments, this.settings.RunWorkingDirectory, current);
+    internal SessionInfo Describe(ViewerStatus status, bool current = true)
+    {
+        lock (this.gate) return new(
+            this.Id, status.ApplicationName, status.StartedAt, status.CompletedAt, status.ExitCode, status.RetainedCount,
+            this.settings.RunCommand, this.arguments, this.settings.RunWorkingDirectory, current, this.filters?.Snapshot());
+    }
+
+    internal SessionInfo SaveFilters(string? id, SessionFilters filters, ViewerStatus current)
+    {
+        filters.Validate();
+        filters = filters.Snapshot();
+        lock (this.gate)
+        {
+            if (string.IsNullOrEmpty(id) || id == this.Id)
+            {
+                if (this.settings.SaveSession && File.Exists(Path.Combine(this.DirectoryFor(this.Id), MetadataFile)))
+                {
+                    SavedSession saved = this.Read(this.Id);
+                    this.Write(this.DirectoryFor(this.Id), saved with { Session = saved.Session with { Filters = filters } });
+                }
+                this.filters = filters;
+                return this.Describe(current);
+            }
+
+            SavedSession selected = this.Read(id);
+            SessionInfo updated = selected.Session with { Filters = filters };
+            this.Write(this.DirectoryFor(id), selected with { Session = updated });
+            return updated with { Filters = filters.Snapshot() };
+        }
+    }
 
     internal SessionInfo[] List(ViewerStatus current)
     {

@@ -33,6 +33,9 @@ public sealed class SessionTransferTests
         fixture.Viewer.Record("expired");
         fixture.Viewer.Record("retained first", category: "Transfer.Tests", severity: LogSeverity.Warning);
         fixture.Viewer.Record("retained second", LogStream.Stderr, severity: LogSeverity.Error, category: "Transfer.Tests");
+        using (HttpResponseMessage filters = await fixture.Action(ViewerConstants.SessionsRoute, ViewerConstants.SaveFiltersAction,
+            JsonSerializer.Serialize(new { filters = SessionFiltersTests.Filters() }, ViewerConstants.JsonOptions)))
+            filters.EnsureSuccessStatusCode();
         fixture.Viewer.Complete(7);
         SessionInfo original = (await fixture.List()).Single();
         using HttpResponseMessage exported = await fixture.Client.GetAsync(fixture.Url(ViewerConstants.BundleExportRoute + "?levels=not-json&q=missing"));
@@ -59,6 +62,7 @@ public sealed class SessionTransferTests
         Assert.Equal(original.Command, imported.Command);
         Assert.Equal(original.Arguments, imported.Arguments);
         Assert.Equal(original.WorkingDirectory, imported.WorkingDirectory);
+        SessionFiltersTests.AssertFilters(SessionFiltersTests.Filters(), imported.Filters);
         using LogHistoryReader history = fixture.Catalog.Open(imported.Id);
         LogEntry[] logs = history.ReadEntries().ToArray();
         Assert.Equal(new long[] { 1, 2 }, logs.Select(entry => entry.Id));
@@ -89,6 +93,7 @@ public sealed class SessionTransferTests
         Assert.Contains("\"id\":2", Encoding.UTF8.GetString(bytes), StringComparison.Ordinal);
         Assert.Contains("\"id\":4", Encoding.UTF8.GetString(bytes), StringComparison.Ordinal);
         SessionInfo imported = await fixture.Import(bytes, SessionTransfer.JsonLinesFormat, "Filtered errors");
+        Assert.Null(imported.Filters);
         using LogHistoryReader history = fixture.Catalog.Open(imported.Id);
         LogEntry[] logs = history.ReadEntries().ToArray();
         Assert.Equal(new long[] { 1, 2 }, logs.Select(entry => entry.Id));
@@ -212,12 +217,50 @@ public sealed class SessionTransferTests
             Bundle(Record(), Information() with { StartedAt = default }),
             Bundle(Record(), Information() with { WorkingDirectory = new string('x', 8193) }),
             Bundle(Record(), Information() with { Arguments = Enumerable.Repeat(string.Empty, 1025).ToArray() }),
+            Bundle(Record(), Information() with { Filters = SessionFiltersTests.Filters() with { Severity = "1" } }),
+            Bundle(Record(), Information() with { Filters = SessionFiltersTests.Filters() with { TimeWindow = 1 } }),
+            Bundle(Record(), Information() with { Filters = SessionFiltersTests.Filters() with
+            {
+                Conditions = new[] { new LogCondition("include", "message", "regex", "[") },
+            } }),
             CreateZip((ManifestFile, new string(' ', SessionTransfer.MaximumManifestBytes + 1)), (LogsFile, Record())),
             CreateZip((ManifestFile, "{"), (LogsFile, Record())),
             Encoding.UTF8.GetBytes("not a ZIP"),
         })
         {
             using HttpResponseMessage invalid = await fixture.Upload(bytes, SessionTransfer.BundleFormat);
+            Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+            Assert.Empty(Directory.GetDirectories(fixture.Root));
+        }
+    }
+
+    [Fact]
+    public async Task LegacyBundlesAndSavedMetadataWithoutFiltersRemainReadable()
+    {
+        using Fixture fixture = new();
+        JsonObject manifest = JsonSerializer.SerializeToNode(new SessionBundle(1, Information()), ViewerConstants.JsonOptions)!.AsObject();
+        manifest["session"]!.AsObject().Remove("filters");
+        SessionInfo imported = await fixture.Import(CreateZip((ManifestFile, manifest.ToJsonString()), (LogsFile, Record())), SessionTransfer.BundleFormat);
+        Assert.Null(imported.Filters);
+        string path = Path.Combine(fixture.Root, imported.Id, ManifestFile);
+        JsonObject metadata = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        metadata["session"]!.AsObject().Remove("filters");
+        File.WriteAllText(path, metadata.ToJsonString());
+        Assert.Null((await fixture.List()).Single(session => session.Id == imported.Id).Filters);
+        using LogHistoryReader history = fixture.Catalog.Open(imported.Id);
+        Assert.Single(history.ReadEntries());
+    }
+
+    [Fact]
+    public async Task BundleFiltersMustIncludeAllTypedFields()
+    {
+        using Fixture fixture = new();
+        foreach (string field in new[] { "matchCase", "timeWindow", "levels", "search", "conditions" })
+        {
+            JsonObject manifest = JsonSerializer.SerializeToNode(
+                new SessionBundle(1, Information() with { Filters = SessionFiltersTests.Filters() }), ViewerConstants.JsonOptions)!.AsObject();
+            manifest["session"]!["filters"]!.AsObject().Remove(field);
+            using HttpResponseMessage invalid = await fixture.Upload(CreateZip((ManifestFile, manifest.ToJsonString()), (LogsFile, Record())), SessionTransfer.BundleFormat);
             Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
             Assert.Empty(Directory.GetDirectories(fixture.Root));
         }

@@ -1,7 +1,7 @@
 import {
-  ApiRoutes, ClearActionHeader, ClearActionValue, CopilotChatActionValue, CopilotConnectActionValue, DeleteSessionActionValue, ImportActionValue, importFormat, MaximumCategorySuggestions, MaximumChatAnswerLength, MaximumChatRequestBytes, MaximumHighlights, MaximumPageSize, PageSize, QueryKeys, RenameActionValue, Severities, Streams, UploadContentType, validateImportFile,
+  ApiRoutes, ClearActionHeader, ClearActionValue, ConditionFields, ConditionModes, ConditionOperators, CopilotChatActionValue, CopilotConnectActionValue, DeleteSessionActionValue, ImportActionValue, importFormat, IncludeModes, MaximumCategorySuggestions, MaximumChatAnswerLength, MaximumChatRequestBytes, MaximumHighlights, MaximumPageSize, PageSize, QueryKeys, readChoice, RenameActionValue, SaveFiltersActionValue, Severities, Streams, UploadContentType, validateConditions, validateImportFile,
   SelectApplicationActionValue, type RunningApplication, type RunningApplicationsState,
-  type ChatMessage, type ChatOptions, type ChatResponse, type CopilotConnection, type ClearResult, type LogEntry, type LogPage, type SessionInfo, type ViewerStatus
+  type ChatMessage, type ChatOptions, type ChatResponse, type CopilotConnection, type ClearResult, type LogEntry, type LogPage, type SessionFilters, type SessionInfo, type ViewerStatus
 } from "./model";
 
 export class ApiError extends Error {
@@ -193,8 +193,52 @@ export function readSessionInfo(value: unknown): SessionInfo {
     completedAt: data.completedAt === null ? null : timestamp(data.completedAt, "session completion"),
     exitCode, entryCount: count(data.entryCount, "session entry count"),
     command: nullableText(data.command, "run command"), arguments: data.arguments.map(value => text(value, "argument")),
-    workingDirectory: text(data.workingDirectory, "working directory"), isCurrent: boolean(data.isCurrent, "current session")
+    workingDirectory: text(data.workingDirectory, "working directory"), isCurrent: boolean(data.isCurrent, "current session"),
+    ...(data.filters == null ? {} : { filters: readSessionFilters(data.filters) })
   };
+}
+
+export function readSessionFilters(value: unknown): SessionFilters {
+  const data = object(value);
+  if (data.levels !== null && (!Array.isArray(data.levels) || data.levels.length > Severities.length))
+    throw new Error("The server returned invalid saved levels.");
+  if (!Array.isArray(data.conditions)) throw new Error("The server returned invalid saved conditions.");
+  const conditions = data.conditions.map(value => {
+    const condition = object(value);
+    return {
+      mode: readChoice(text(condition.mode, "condition mode"), ConditionModes),
+      field: readChoice(text(condition.field, "condition field"), ConditionFields),
+      operator: readChoice(text(condition.operator, "condition operator"), ConditionOperators),
+      value: text(condition.value, "condition value")
+    };
+  });
+  if (validateConditions(conditions)) throw new Error("The server returned invalid saved conditions.");
+  const search = text(data.search, "saved search");
+  const category = text(data.category, "saved category");
+  if (search.length > 1024) throw new Error("The server returned an oversized saved search.");
+  if (category) {
+    const label = nullableText(JSON.parse(category), "saved category");
+    if (label !== null && label.length > 512) throw new Error("The server returned an oversized saved category.");
+  }
+  const timeWindow = count(data.timeWindow, "saved time window");
+  if (![0, 60000, 300000, 900000].includes(timeWindow)) throw new Error("The server returned an invalid saved time window.");
+  return {
+    search, matchCase: boolean(data.matchCase, "saved case setting"),
+    severity: readChoice(text(data.severity, "saved severity"), ["all", "warningPlus", "errorPlus", ...Severities]),
+    levels: data.levels === null ? null : (data.levels as unknown[]).map(value => readChoice(text(value, "saved level"), Severities)),
+    stream: readChoice(text(data.stream, "saved stream"), ["all", ...Streams]),
+    category, timeWindow, conditions,
+    includeMode: readChoice(text(data.includeMode, "saved include mode"), IncludeModes)
+  };
+}
+
+export async function saveSessionFilters(id: string, filters: SessionFilters): Promise<void> {
+  const response = await fetch(`${ApiRoutes.Sessions}?${new URLSearchParams({ [QueryKeys.SessionId]: id })}`, {
+    method: "POST", keepalive: true,
+    headers: { [ClearActionHeader]: SaveFiltersActionValue, "Content-Type": "application/json" },
+    body: JSON.stringify({ filters })
+  });
+  if (!response.ok) throw new ApiError(text(object(await response.json()).error, "filter save error"), response.status);
 }
 
 export function importSessionFile(file: File, name: string, onProgress: (percent: number) => void): Promise<SessionInfo> {

@@ -22,6 +22,7 @@ import { Hint } from "./ui";
 import { AppearanceChoices, useAppearance } from "./useAppearance";
 import { useTypography } from "./useTypography";
 import { useLiveStatus, useLogPage } from "./useLogExplorer";
+import { useSessionFilters } from "./useSessionFilters";
 
 interface PauseSnapshot { maximumId: number; status: ViewerStatus | null; }
 
@@ -44,6 +45,10 @@ export default function App() {
   const [chatOpen, setChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [applicationListening, setApplicationListening] = useState(false);
+  const filters = useSessionFilters(
+    filters => setQuery(query => query.sessionId ? query : { ...query, ...filters }),
+    error => setNotice({ tone: "warning", message: `Could not save or restore session filters: ${errorMessage(error)}` })
+  );
   const [now, setNow] = useState(Date.now());
   const searchRef = useRef<HTMLInputElement>(null);
   const editorOpener = useRef<HTMLElement | null>(null);
@@ -95,21 +100,24 @@ export default function App() {
         searchRef.current?.focus();
         searchRef.current?.select();
       } else if (event.key === "Escape" && target === searchRef.current) {
-        setQuery(query => ({ ...query, search: "" }));
+        const next = { ...query, search: "" };
+        setQuery(next);
+        filters.save(next, true);
         setCursor({ before: null, after: null });
       }
     }
     document.addEventListener("keydown", shortcut);
     return () => document.removeEventListener("keydown", shortcut);
-  }, []);
+  }, [query]);
 
-  function changeQuery(query: QueryState) {
+  function changeQuery(query: QueryState, forceFilters = false) {
     setQuery(query);
+    filters.save(query, forceFilters);
     setCursor({ before: follow ? null : (status?.lastId ?? 0) + 1, after: null });
   }
 
   function selectSession(session: SessionInfo) {
-    setQuery({ ...defaultQuery(), pageSize: query.pageSize, sessionId: session.isCurrent ? "" : session.id });
+    setQuery({ ...defaultQuery(), ...filters.restore(session), pageSize: query.pageSize, sessionId: session.isCurrent ? "" : session.id });
     setCursor({ before: null, after: null }); setSelected(null); setPause(null); setFollow(true);
     setSessionsOpen(false); setImportOpen(false); setNotice(null);
   }
@@ -221,13 +229,13 @@ export default function App() {
             <span className="workspace-context"><Database size={14} /> Disk-backed history <span className="context-divider" /> Local workspace</span>
           </div>
           {live.status?.listenAll && !archived && <RunningApplicationPicker onListening={setApplicationListening} onAttached={() => {
-            setQuery({ ...defaultQuery(), pageSize: query.pageSize });
+            changeQuery({ ...defaultQuery(), pageSize: query.pageSize });
             setCursor({ before: null, after: null }); setSelected(null); setPause(null); setFollow(true); setChatOpen(false);
             history.refresh(); live.reconnect();
           }} />}
           <QueryBar query={query} page={activePage} loading={history.loading} error={history.error} searchRef={searchRef}
             maximumId={pause?.maximumId ?? null} onChange={changeQuery} onEdit={condition => openEditor(condition ?? null)}
-            onReset={() => { changeQuery({ ...defaultQuery(), pageSize: query.pageSize, sessionId: query.sessionId }); setNotice(null); }}
+            onReset={() => { changeQuery({ ...defaultQuery(), pageSize: query.pageSize, sessionId: query.sessionId }, true); setNotice(null); }}
             onNotice={message => setNotice({ message, tone: "info" })} />
           {(live.error || notice) && <div id="notice" className={`notice ${live.error ? "danger" : notice?.tone}`} role={live.error || notice?.tone === "danger" ? "alert" : "status"}>
             <AlertCircle size={15} /><span>{live.error ?? notice?.message}</span>
@@ -281,7 +289,7 @@ export default function App() {
           }}
           onDeleted={id => {
             if (query.sessionId === id) {
-              setQuery({ ...defaultQuery(), pageSize: query.pageSize }); setSelected(null); setCursor({ before: null, after: null }); setPause(null); setFollow(true);
+              setQuery({ ...defaultQuery(), ...filters.restore({ id: "", isCurrent: true }), pageSize: query.pageSize }); setSelected(null); setCursor({ before: null, after: null }); setPause(null); setFollow(true);
             }
             setNotice({ tone: "info", message: "Saved session and its disk files were deleted." });
           }}

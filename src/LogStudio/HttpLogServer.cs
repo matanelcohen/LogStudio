@@ -282,18 +282,47 @@ internal sealed class HttpLogServer : IAsyncDisposable
             if (route == ViewerConstants.SessionsRoute && request.HttpMethod == ViewerConstants.PostMethod)
             {
                 string? action = request.Headers[ViewerConstants.ClearRequestHeader];
-                if (action is not (ViewerConstants.RenameAction or ViewerConstants.DeleteSessionAction))
+                if (action is not (ViewerConstants.RenameAction or ViewerConstants.DeleteSessionAction or ViewerConstants.SaveFiltersAction))
                 {
-                    await WriteErrorAsync(response, HttpStatusCode.Forbidden, "An explicit rename or delete action is required.", cancellationToken).ConfigureAwait(false);
+                    await WriteErrorAsync(response, HttpStatusCode.Forbidden, "An explicit rename, delete or save-filters action is required.", cancellationToken).ConfigureAwait(false);
                     return;
                 }
-                string id = request.QueryString[ViewerConstants.SessionIdQuery] ?? throw new ArgumentException("Choose a session.");
+                string? selected = request.QueryString[ViewerConstants.SessionIdQuery];
+                string id = selected ?? (action == ViewerConstants.SaveFiltersAction ? string.Empty : throw new ArgumentException("Choose a session."));
                 try
                 {
                     if (action == ViewerConstants.DeleteSessionAction)
                     {
                         this.sessions.Delete(id);
                         await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(new { deleted = true }, ViewerConstants.JsonOptions),
+                            ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+                    }
+                    else if (action == ViewerConstants.SaveFiltersAction)
+                    {
+                        using JsonDocument body = await ReadSessionActionAsync(request, ViewerConstants.MaximumSessionFiltersBytes, cancellationToken).ConfigureAwait(false);
+                        if (body.RootElement.ValueKind != JsonValueKind.Object)
+                            throw new ArgumentException("A session filters object is required.");
+                        JsonElement? value = null;
+                        foreach (JsonProperty property in body.RootElement.EnumerateObject())
+                        {
+                            if (property.Name != ViewerConstants.ConditionsQuery || value.HasValue)
+                                throw new ArgumentException("The session filter request must contain exactly one filters object.");
+                            value = property.Value;
+                        }
+                        if (!value.HasValue || value.Value.ValueKind != JsonValueKind.Object)
+                            throw new ArgumentException("A session filters object is required.");
+                        SessionFilters filters;
+                        try
+                        {
+                            filters = value.Value.Deserialize<SessionFilters>(ViewerConstants.JsonOptions) ??
+                                throw new ArgumentException("A session filters object is required.");
+                        }
+                        catch (JsonException exception)
+                        {
+                            throw new ArgumentException("Session filters must contain all required fields with valid types.", exception);
+                        }
+                        SessionInfo updated = this.sessions.SaveFilters(id, filters, this.logs.GetStatus());
+                        await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(updated, ViewerConstants.JsonOptions),
                             ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
                     }
                     else
@@ -444,6 +473,30 @@ internal sealed class HttpLogServer : IAsyncDisposable
         finally
         {
             response.Close();
+        }
+    }
+
+    private static async Task<JsonDocument> ReadSessionActionAsync(HttpListenerRequest request, int maximumBytes, CancellationToken cancellationToken)
+    {
+        if (request.ContentLength64 == 0 || request.ContentLength64 > maximumBytes)
+            throw new ArgumentException($"The session action must contain 1–{maximumBytes} bytes.");
+        byte[] bytes = new byte[maximumBytes + 1];
+        int length = 0;
+        while (length < bytes.Length)
+        {
+            int read = await request.InputStream.ReadAsync(bytes.AsMemory(length), cancellationToken).ConfigureAwait(false);
+            if (read == 0) break;
+            length += read;
+        }
+        if (length == 0 || length > maximumBytes)
+            throw new ArgumentException($"The session action must contain 1–{maximumBytes} bytes.");
+        try
+        {
+            return JsonDocument.Parse(bytes.AsMemory(0, length), new JsonDocumentOptions { MaxDepth = 16 });
+        }
+        catch (JsonException exception)
+        {
+            throw new ArgumentException("The session action must contain valid JSON.", exception);
         }
     }
 

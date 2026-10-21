@@ -4,6 +4,7 @@ export const ClearActionHeader = "X-Log-Studio-Action";
 export const ClearActionValue = "clear";
 export const ImportActionValue = "import";
 export const RenameActionValue = "rename";
+export const SaveFiltersActionValue = "save-filters";
 export const DeleteSessionActionValue = "delete";
 export const CopilotConnectActionValue = "copilot-connect";
 export const CopilotChatActionValue = "copilot-chat";
@@ -144,6 +145,7 @@ export interface SessionInfo {
   arguments: string[];
   workingDirectory: string;
   isCurrent: boolean;
+  filters?: SessionFilters | null;
 }
 
 export type ImportFormat = "bundle" | "jsonl";
@@ -182,6 +184,14 @@ export interface QueryState {
   dismissedThrough: number;
   pageSize: number;
   sessionId: string;
+}
+
+export type SessionFilters = Pick<QueryState,
+  "search" | "matchCase" | "severity" | "levels" | "stream" | "category" | "timeWindow" | "conditions" | "includeMode">;
+
+export function sessionFilters(query: QueryState): SessionFilters {
+  const { search, matchCase, severity, levels, stream, category, timeWindow, conditions, includeMode } = query;
+  return { search, matchCase, severity, levels, stream, category, timeWindow, conditions, includeMode };
 }
 
 export interface PageCursor {
