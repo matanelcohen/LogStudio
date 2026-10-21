@@ -4,6 +4,6 @@
     <RestoreSources>$(MSBuildThisFileDirectory)../../artifacts</RestoreSources>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="LogStudio" Version="1.2.2" />
+    <PackageReference Include="LogStudio" Version="1.3.0" />
   </ItemGroup>
 </Project>
