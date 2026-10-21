@@ -10,12 +10,12 @@ import { SessionImportDialog } from "./SessionImportDialog";
 import { CopilotChatPanel } from "./CopilotChatPanel";
 import { SettingsDialog } from "./SettingsDialog";
 import { DiscoverSidebar } from "./DiscoverSidebar";
-import { clearSessionLogs } from "./api";
+import { clearSessionLogs, fetchApplications, selectApplication } from "./api";
 import { Inspector } from "./Inspector";
 import { LogTable } from "./LogTable";
 import {
   defaultQuery, errorMessage, NumberFormatter, readChoice, TimeFormatter, validateConditions,
-  type LogCondition, type LogEntry, type Notice, type PageCursor, type QueryState, type SessionInfo, type ViewerStatus
+  type LogCondition, type LogEntry, type Notice, type PageCursor, type QueryState, type RunningApplicationsState, type SessionInfo, type ViewerStatus
 } from "./model";
 import { QueryBar } from "./QueryBar";
 import { Hint } from "./ui";
@@ -43,6 +43,7 @@ export default function App() {
   const [importOpen, setImportOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [applicationListening, setApplicationListening] = useState(false);
   const [now, setNow] = useState(Date.now());
   const searchRef = useRef<HTMLInputElement>(null);
   const editorOpener = useRef<HTMLElement | null>(null);
@@ -169,7 +170,8 @@ export default function App() {
               <History size={14} /><span id="applicationName">{status?.applicationName ?? "Select a session"}</span><ChevronDown size={12} />
             </button>
             <span id="runStatus" className={`run-state-badge ${status?.isCompleted ? status.exitCode ? "failed" : "finished" : "running"}`}>
-              {archived ? "Saved" : status?.isCompleted ? status.exitCode ? `Exit ${status.exitCode}` : "Finished" : status ? "Running" : "Connecting"}
+              {archived ? "Saved" : status?.isCompleted ? status.exitCode ? `Exit ${status.exitCode}` : "Finished" :
+                status?.listenAll ? applicationListening ? "Listening" : "Choose an app" : status ? "Running" : "Connecting"}
             </span>
           </div>
           <div className="header-actions">
@@ -218,6 +220,11 @@ export default function App() {
             <div><span className="workspace-kicker">LOG EXPLORER</span><h2>Discover</h2><p>Search, filter, and inspect your session history.</p></div>
             <span className="workspace-context"><Database size={14} /> Disk-backed history <span className="context-divider" /> Local workspace</span>
           </div>
+          {live.status?.listenAll && !archived && <RunningApplicationPicker onListening={setApplicationListening} onAttached={() => {
+            setQuery({ ...defaultQuery(), pageSize: query.pageSize });
+            setCursor({ before: null, after: null }); setSelected(null); setPause(null); setFollow(true); setChatOpen(false);
+            history.refresh(); live.reconnect();
+          }} />}
           <QueryBar query={query} page={activePage} loading={history.loading} error={history.error} searchRef={searchRef}
             maximumId={pause?.maximumId ?? null} onChange={changeQuery} onEdit={condition => openEditor(condition ?? null)}
             onReset={() => { changeQuery({ ...defaultQuery(), pageSize: query.pageSize, sessionId: query.sessionId }); setNotice(null); }}
@@ -269,6 +276,7 @@ export default function App() {
             if (session.isCurrent) {
               live.reconnect();
             }
+
             if (session.isCurrent ? !query.sessionId : query.sessionId === session.id) history.refresh();
           }}
           onDeleted={id => {
@@ -288,4 +296,73 @@ export default function App() {
       </div>
     </Tooltip.Provider>
   );
+}
+
+function RunningApplicationPicker({ onAttached, onListening }: { onAttached(): void; onListening(value: boolean): void }) {
+  const [state, setState] = useState<RunningApplicationsState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  useEffect(() => {
+    if (busy) return;
+    let active = true;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    async function refresh() {
+      try {
+        const next = await fetchApplications(controller.signal);
+        if (!active) return;
+        setState(next); setError(null); onListening(next.selected !== null);
+      } catch (error) {
+        if (active) setError(errorMessage(error));
+      } finally {
+        if (active) timer = setTimeout(refresh, 2000);
+      }
+    }
+    void refresh();
+    return () => { active = false; controller.abort(); if (timer !== null) clearTimeout(timer); };
+  }, [busy, retry, onListening]);
+
+  const identity = (app: { processId: number; startedAtTicks: string }) => `${app.processId}:${app.startedAtTicks}`;
+  async function choose(value: string) {
+    const application = state?.applications.find(app => identity(app) === value);
+    if (!application || busy) return;
+    setBusy(true); setSelectionError(null);
+    try {
+      const next = await selectApplication(application);
+      if (!mounted.current) return;
+      setState(next); onListening(next.selected !== null);
+      if (next.error) setSelectionError(next.error);
+      else if (next.selected && identity(next.selected) === identity(application)) onAttached();
+    } catch (error) {
+      if (mounted.current) setSelectionError(errorMessage(error));
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  }
+
+  const applications = state?.applications ?? [];
+  const selected = state?.selected;
+  const choices = selected && !applications.some(app => identity(app) === identity(selected)) ? [selected, ...applications] : applications;
+  return <section className="application-picker" aria-label="Live application capture">
+    <div className="application-picker-controls">
+      <label htmlFor="runningApplication">Running app</label>
+      <select id="runningApplication" value={selected ? identity(selected) : ""} disabled={busy || !state}
+        aria-describedby="applicationCaptureHelp" onChange={event => void choose(event.target.value)}>
+        <option value="" disabled>{state && applications.length === 0 ? "No running .NET apps found" : "Choose a running app"}</option>
+        {choices.map(app => <option key={identity(app)} value={identity(app)}>{app.name} (PID {app.processId})</option>)}
+      </select>
+      <button className="ghost-button" disabled={busy} onClick={() => { setSelectionError(null); setRetry(value => value + 1); }}>Refresh apps</button>
+      <span role="status">{busy ? "Connecting to application…" : selected ? `Listening to ${selected.name}` : "Waiting for you to choose an app."}</span>
+    </div>
+    <p id="applicationCaptureHelp" className="muted">Captures new .NET ILogger events only, not existing console output. Switching apps replaces the current capture history.</p>
+    {(selectionError || error || state?.error) && <p className="notice danger" role="alert">{selectionError ?? error ?? state?.error}</p>}
+  </section>;
 }

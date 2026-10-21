@@ -61,7 +61,9 @@ internal static class Program
         Console.CancelKeyPress += handler;
         try
         {
-            return await RunAsync(options, cancellation.Token).ConfigureAwait(false);
+            return options.ListenAll
+                ? await ListenAsync(options, cancellation.Token).ConfigureAwait(false)
+                : await RunAsync(options, cancellation.Token).ConfigureAwait(false);
         }
         catch (ArgumentException exception)
         {
@@ -102,6 +104,40 @@ internal static class Program
         {
             Console.CancelKeyPress -= handler;
         }
+    }
+
+    private static async Task<int> ListenAsync(ToolOptions options, CancellationToken cancellationToken)
+    {
+        await using RunningApplicationsCollector collector = new();
+        await using ConsoleLogViewer viewer = ConsoleLogViewer.Start(new ConsoleLogViewerOptions
+        {
+            CaptureConsole = false,
+            RunningApplications = collector,
+            Port = options.Port,
+            Capacity = options.Capacity,
+            FlushEveryEntries = options.FlushEveryEntries,
+            ApplicationName = options.Name,
+            OpenBrowser = options.OpenBrowser,
+            SaveSession = true,
+            SessionsDirectory = Environment.GetEnvironmentVariable(ToolOptions.SessionsDirectoryEnvironmentVariable),
+        });
+        try
+        {
+            collector.Viewer = viewer;
+            Console.Error.WriteLine("Select a running .NET application in the viewer to start capturing new ILogger events.");
+            Console.Error.WriteLine("Press Ctrl+C to close the viewer. Selected applications will keep running.");
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            await collector.DisposeAsync().ConfigureAwait(false);
+        }
+
+        viewer.Complete(InterruptedExitCode);
+        return InterruptedExitCode;
     }
 
     private static async Task<int> RunAsync(ToolOptions options, CancellationToken cancellationToken)
@@ -303,6 +339,7 @@ internal static class Program
 
             Usage:
               logstudio [options] -- <command> [arguments]
+              logstudio --listen-all [options]
 
             Options:
               --open             Open the browser automatically.
@@ -311,6 +348,7 @@ internal static class Program
               --flush-every <n>  Flush journal buffers every n entries (default: 1000).
               --name <name>      Display name for this run (default: unique random name).
               --no-wait          Exit with the child's exit code when it finishes.
+              --listen-all       Choose a running .NET application in the viewer.
               --help, -h         Show this help.
               --version          Show the installed Log Studio version.
 
@@ -318,6 +356,7 @@ internal static class Program
               logstudio --open -- dotnet run --project path/to/ConsoleApp.csproj
               logstudio --name MyApp -- dotnet path/to/MyApp.dll --input="value with spaces"
               logstudio --no-wait -- dotnet path/to/MyApp.dll
+              logstudio --listen-all --open
 
             Standard input is inherited, so interactive console input still works.
             By default the viewer stays available after the child finishes.
@@ -325,6 +364,9 @@ internal static class Program
             Reads and completion also flush pending entries. Files are deleted on exit.
             Use --no-wait in scripts to preserve normal process lifetime and exit codes.
             No shell expansion is performed; child arguments are passed individually.
+            Listen-all never attaches automatically and captures only new ILogger events.
+            Selecting another application replaces the current log history.
+            Listen-all does not accept a child command or --no-wait.
             """
         );
     }

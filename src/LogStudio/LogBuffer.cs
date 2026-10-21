@@ -350,7 +350,8 @@ internal sealed class LogBuffer : IDisposable
         this.pendingEntries,
         this.settings.FlushEveryEntries,
         this.StorageDirectory,
-        this.clearedThroughId);
+        this.clearedThroughId,
+        this.settings.RunningApplications is not null);
 
     private void Pulse()
     {

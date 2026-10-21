@@ -5,7 +5,7 @@ import { fixturePage, Status } from "./test-fixtures";
 import { useLiveStatus, useLogPage } from "./useLogExplorer";
 import { DefaultTypography, TypographyStorageKey } from "./useTypography";
 import * as api from "./api";
-import type { ChatResponse } from "./model";
+import type { ChatResponse, RunningApplicationsState } from "./model";
 
 const reconnect = vi.hoisted(() => vi.fn());
 
@@ -24,6 +24,97 @@ vi.mock("./useLogExplorer", async () => {
 });
 
 describe("log-first workspace", () => {
+  describe("listen-all application selection", () => {
+    const application = { processId: 42, name: "Example.Api", startedAtTicks: "639112345678901234" };
+    const waiting: RunningApplicationsState = { applications: [application], selected: null, error: null };
+    beforeEach(() => {
+      vi.mocked(useLiveStatus).mockReturnValue({
+        status: { ...Status, listenAll: true, isCompleted: false, completedAt: null, exitCode: null }, connection: "live", error: null, gap: null,
+        reconnect, applyStatus: vi.fn()
+      });
+      vi.spyOn(api, "fetchApplications").mockResolvedValue(waiting);
+    });
+    afterEach(() => {
+      vi.mocked(useLiveStatus).mockReturnValue({
+        status: Status, connection: "live", error: null, gap: null, reconnect, applyStatus: vi.fn()
+      });
+    });
+
+    it("waits for explicit selection even when only one app is running, including refresh", async () => {
+      const select = vi.spyOn(api, "selectApplication");
+      render(<App />);
+      const dropdown = await screen.findByRole("combobox", { name: "Running app" }) as HTMLSelectElement;
+      await screen.findByRole("option", { name: "Example.Api (PID 42)" });
+      expect(dropdown.value).toBe("");
+      expect(screen.getByText("Choose an app")).toBeDefined();
+      fireEvent.click(screen.getByRole("button", { name: "Refresh apps" }));
+      await waitFor(() => expect(api.fetchApplications).toHaveBeenCalledTimes(2));
+      expect(dropdown.value).toBe("");
+      expect(select).not.toHaveBeenCalled();
+    });
+
+    it("attaches only the chosen process and resumes the live view", async () => {
+      vi.spyOn(api, "selectApplication").mockResolvedValue({ ...waiting, selected: application });
+      vi.mocked(api.fetchApplications).mockResolvedValueOnce(waiting).mockResolvedValue({ ...waiting, selected: application });
+      render(<App />);
+      await screen.findByRole("option", { name: "Example.Api (PID 42)" });
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      fireEvent.change(screen.getByRole("combobox", { name: "Running app" }), {
+        target: { value: `${application.processId}:${application.startedAtTicks}` }
+      });
+      await screen.findByText("Listening to Example.Api");
+      expect(api.selectApplication).toHaveBeenCalledExactlyOnceWith(application);
+      expect(screen.getByRole("button", { name: "Pause" })).toBeDefined();
+      expect(reconnect).toHaveBeenCalled();
+    });
+
+    it("keeps a failed selection visible after refreshing discovery", async () => {
+      vi.spyOn(api, "selectApplication").mockRejectedValue(new Error("The application exited."));
+      render(<App />);
+      await screen.findByRole("option", { name: "Example.Api (PID 42)" });
+      fireEvent.change(screen.getByRole("combobox", { name: "Running app" }), {
+        target: { value: `${application.processId}:${application.startedAtTicks}` }
+      });
+      await waitFor(() => expect(api.fetchApplications).toHaveBeenCalledTimes(2));
+      expect(screen.getByRole("alert").textContent).toContain("The application exited.");
+      expect((screen.getByRole("combobox", { name: "Running app" }) as HTMLSelectElement).value).toBe("");
+    });
+
+    it("shows empty discovery without attaching", async () => {
+      vi.mocked(api.fetchApplications).mockResolvedValue({ ...waiting, applications: [] });
+      const select = vi.spyOn(api, "selectApplication");
+      render(<App />);
+      await screen.findByRole("option", { name: "No running .NET apps found" });
+      expect(screen.getByText("Waiting for you to choose an app.")).toBeDefined();
+      expect(select).not.toHaveBeenCalled();
+    });
+
+    it("shows an existing selection on reload but does not attach a replacement when it exits", async () => {
+      vi.mocked(api.fetchApplications).mockResolvedValueOnce({ ...waiting, selected: application }).mockResolvedValue(waiting);
+      const select = vi.spyOn(api, "selectApplication");
+      render(<App />);
+      await screen.findByText("Listening to Example.Api");
+      fireEvent.click(screen.getByRole("button", { name: "Refresh apps" }));
+      await screen.findByText("Waiting for you to choose an app.");
+      expect((screen.getByRole("combobox", { name: "Running app" }) as HTMLSelectElement).value).toBe("");
+      expect(select).not.toHaveBeenCalled();
+    });
+
+    it("does not reset a paused investigation when the collector reports an attachment error", async () => {
+      vi.spyOn(api, "selectApplication").mockResolvedValue({ ...waiting, error: "Attaching timed out." });
+      render(<App />);
+      await screen.findByRole("option", { name: "Example.Api (PID 42)" });
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "Keep my query" } });
+      fireEvent.change(screen.getByRole("combobox", { name: "Running app" }), {
+        target: { value: `${application.processId}:${application.startedAtTicks}` }
+      });
+      await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Attaching timed out."));
+      expect(screen.getByRole("button", { name: "Resume" })).toBeDefined();
+      expect((screen.getByLabelText("Search logs") as HTMLInputElement).value).toBe("Keep my query");
+    });
+  });
+
   it("preserves Copilot conversation and drafts while searching logs", async () => {
     vi.spyOn(api, "connectCopilot").mockResolvedValue("test CLI");
     vi.spyOn(api, "askCopilot").mockResolvedValue({ answer: "Existing answer", contextEntryCount: 1, contextTruncated: false });

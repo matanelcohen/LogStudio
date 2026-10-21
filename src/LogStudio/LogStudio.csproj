@@ -15,6 +15,7 @@
     <None Include="../../README.md" Pack="true" PackagePath="/" />
     <None Include="../../frontend/dist/third-party-notices.txt" Pack="true" PackagePath="/" />
     <InternalsVisibleTo Include="LogStudio.Tests" />
+    <InternalsVisibleTo Include="LogStudio.Tool" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="RandomFriendlyNameGenerator" Version="1.0.9" GeneratePathProperty="true" />
