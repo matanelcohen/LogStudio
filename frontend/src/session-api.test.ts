@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { deleteSession, importSessionFile, readSessionInfo, renameSession } from "./api";
-import { ClearActionHeader, ImportActionValue, type SessionInfo } from "./model";
+import { deleteSession, importSessionFile, readSessionInfo, renameSession, saveSessionFilters } from "./api";
+import { ClearActionHeader, defaultQuery, ImportActionValue, SaveFiltersActionValue, sessionFilters, type SessionInfo } from "./model";
 
 const Session: SessionInfo = {
   id: "imported", name: "Imported run", startedAt: "2026-10-11T08:00:00Z",
@@ -75,5 +75,48 @@ describe("session transfer API", () => {
       expect.objectContaining({ body: JSON.stringify({ name: "New name" }) }));
     await deleteSession("saved/id");
     await expect(deleteSession("saved/id")).rejects.toThrow("did not confirm");
+  });
+
+  it("saves only persistent filters with a protected, keepalive session action", async () => {
+    const filters = sessionFilters({ ...defaultQuery(), search: "needle", levels: [], category: "null", dismissedThrough: 99, sessionId: "other" });
+    const fetcher = vi.fn().mockResolvedValue(new Response("{}"));
+    vi.stubGlobal("fetch", fetcher);
+    await saveSessionFilters("saved/id", filters);
+    expect(fetcher).toHaveBeenCalledWith("api/sessions?sessionId=saved%2Fid", {
+      method: "POST", keepalive: true,
+      headers: { [ClearActionHeader]: SaveFiltersActionValue, "Content-Type": "application/json" },
+      body: JSON.stringify({ filters })
+    });
+    expect(filters).not.toHaveProperty("dismissedThrough");
+    expect(filters).not.toHaveProperty("sessionId");
+    expect(filters).not.toHaveProperty("pageSize");
+  });
+
+  it("reads optional saved filters without losing empty levels or null-category selections", () => {
+    const filters = sessionFilters({
+      ...defaultQuery(), search: "Failure", matchCase: true, levels: [], category: "null", timeWindow: 60000,
+      conditions: [{ mode: "exclude", field: "message", operator: "contains", value: "heartbeat" }], includeMode: "any"
+    });
+    expect(readSessionInfo({ ...Session, filters }).filters).toEqual(filters);
+    const padded = { ...filters, category: " ".repeat(4096) + '"Example"' };
+    expect(readSessionInfo({ ...Session, filters: padded }).filters).toEqual(padded);
+    expect(readSessionInfo({ ...Session, filters: null })).toEqual(Session);
+    expect(readSessionInfo(Session)).toEqual(Session);
+  });
+
+  it.each([
+    { levels: ["unsupported"] }, { levels: {} }, { conditions: null },
+    { conditions: [{ mode: "include", field: "message", operator: "script", value: "x" }] },
+    { conditions: [{ mode: "include", field: "message", operator: "contains", value: "" }] },
+    { includeMode: "other" }, { timeWindow: -1 }, { timeWindow: 1 }, { matchCase: "true" },
+    { category: "{}" }, { category: "not JSON" }, { category: JSON.stringify("x".repeat(513)) },
+    { severity: "1" }, { stream: "other" }
+  ])("rejects invalid saved filters %j", invalid => {
+    expect(() => readSessionInfo({ ...Session, filters: { ...sessionFilters(defaultQuery()), ...invalid } })).toThrow();
+  });
+
+  it("reports errors when filters cannot be saved", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "Invalid filters" }), { status: 400 })));
+    await expect(saveSessionFilters("", sessionFilters(defaultQuery()))).rejects.toThrow("Invalid filters");
   });
 });

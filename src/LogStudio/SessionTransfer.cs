@@ -169,7 +169,8 @@ internal static class SessionTransfer
         DateTimeOffset started = information?.StartedAt ?? first ?? DateTimeOffset.UtcNow;
         DateTimeOffset completed = information?.CompletedAt ?? (last > started ? last.Value : started);
         SessionInfo session = new(id, name, started, completed, information?.ExitCode, count, information?.Command,
-            SessionCatalog.RedactArguments(information?.Arguments ?? Array.Empty<string>()), information?.WorkingDirectory ?? string.Empty, false);
+            SessionCatalog.RedactArguments(information?.Arguments ?? Array.Empty<string>()), information?.WorkingDirectory ?? string.Empty, false,
+            information?.Filters?.Snapshot());
         ViewerStatus status = new(name, started, 0, count, count == 0 ? 0 : 1, count, 0, true, completed, session.ExitCode,
             count + 1, errors, warnings, journal.Position + index.Position, ViewerConstants.DiskBufferBytes * 2, 0,
             ViewerConstants.DefaultFlushEveryEntries, staging, 0);
@@ -241,6 +242,14 @@ internal static class SessionTransfer
             session.WorkingDirectory is null || session.WorkingDirectory.Length > MaximumParameterLength ||
             session.Command?.Length > MaximumParameterLength || session.CompletedAt < session.StartedAt)
             throw new SessionImportException("The bundle session details are invalid or exceed supported limits.");
+        try
+        {
+            session.Filters?.Validate();
+        }
+        catch (ArgumentException exception)
+        {
+            throw new SessionImportException("The bundle session filters are invalid: " + exception.Message, exception);
+        }
         return session;
     }
 

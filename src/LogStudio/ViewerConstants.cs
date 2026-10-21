@@ -23,6 +23,7 @@ internal static class ViewerConstants
     internal const int MaximumCategoryLength = 512;
     internal const int MaximumApplicationNameLength = 128;
     internal const int MaximumSessionActionBytes = 2048;
+    internal const int MaximumSessionFiltersBytes = 32_768;
     internal const int MaximumTelemetrySettingsBytes = 65536;
     internal const int MaximumPort = 65_535;
     internal const int AutomaticPortAttempts = 10;
@@ -57,6 +58,7 @@ internal static class ViewerConstants
     internal const string ImportAction = "import";
     internal const string RenameAction = "rename";
     internal const string DeleteSessionAction = "delete";
+    internal const string SaveFiltersAction = "save-filters";
     internal const string SessionNameProperty = "name";
     internal const string SessionIdQuery = "sessionId";
     internal const string PageSizeQuery = "pageSize";

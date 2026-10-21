@@ -361,6 +361,10 @@ was installed** are available; earlier deleted temporary histories cannot be rec
 Selecting a prior session routes search, paging, level selection and export to that history,
 without changing or stopping the current command. Clear logs affects only the selected session.
 Cleared saved sessions retain their name/date/parameter metadata with zero log entries.
+Search text, match case, selected levels, stream, category, time window, and include/exclude
+conditions are saved automatically with each session. Reopening a session restores its filters;
+switching sessions keeps each run's filters separate. Older sessions without saved filters open
+with the defaults. Pause bounds, paging position, and **Clear view** are not saved.
 
 The manager includes catalog counts, refresh, per-session export, **Rename**, and confirmed
 **Delete**. Current and saved sessions can be renamed; names may contain 1–128 characters.
@@ -371,9 +375,9 @@ are viewing returns the explorer to the current run. Current-run deletion is dis
 use **Clear logs** to delete its captured entries.
 
 Common secret flag names (password, secret, token, API key, authorization, credential) are redacted
-in the saved parameter list. This is best-effort: positional secrets and log text are not
-automatically redacted. Saved files are not encrypted, and disk usage grows until histories are
-cleared or deleted through the session manager.
+in the saved parameter list. This is best-effort: positional secrets, log text, and saved filter
+values are not automatically redacted. Saved files are not encrypted, and disk usage grows until
+histories are cleared or deleted through the session manager.
 
 Library attachment is ephemeral by default. Set `SaveSession=true`, `SessionsDirectory`,
 `RunCommand`, `RunArguments`, and `RunWorkingDirectory` on `ConsoleLogViewerOptions` to opt in.
@@ -386,7 +390,7 @@ Use the arrow beside **Export** to choose between:
   levels, stream, category, time window, and snapshot bounds—not just the visible page.
 - **Portable session bundle (.zip):** streams the selected session's complete retained history,
   independent of search or page filters, plus its name, dates, exit state, command, redacted
-  arguments, and working directory. Session cards have the same bundle-export action.
+  arguments, working directory, and saved filters. Session cards have the same bundle-export action.
   A running session is exported as a point-in-time snapshot, not a continuing subscription.
 
 Click **Import** in the header (or **Sessions → Import**) and choose or drop a `.logstudio.zip`, `.zip`, `.jsonl`, or `.ndjson`
@@ -414,7 +418,7 @@ to `1..N`, so filtered JSONL exports with gaps can be imported reliably. Timesta
 stream, severity, category, and partial-line flags are preserved. Plain JSONL has no run
 parameters; its dates derive from its records and it receives an adjective–animal name by default,
 with the same collision handling as new runs.
-Bundle imports preserve the exported name unless you supply a replacement.
+Bundle imports preserve the exported name unless you supply a replacement, and restore saved filters.
 Empty JSONL is rejected, while a bundle for a cleared/zero-entry session remains valid.
 
 ### Transfer limits and privacy

@@ -8,13 +8,18 @@ import { Entry, fixturePage, Status } from "./test-fixtures";
 import { useLiveStatus, useLogPage } from "./useLogExplorer";
 import { DefaultTypography, TypographyStorageKey } from "./useTypography";
 import * as api from "./api";
-import type { ChatResponse, LogEntry, RunningApplicationsState } from "./model";
+import { defaultQuery, sessionFilters, type ChatResponse, type LogEntry, type RunningApplicationsState } from "./model";
 
 const reconnect = vi.hoisted(() => vi.fn());
 const styles = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "styles.css"), "utf8");
 
-beforeEach(() => localStorage.removeItem(TypographyStorageKey));
-beforeEach(() => vi.spyOn(api, "fetchCopilotHistory").mockResolvedValue([]));
+beforeEach(() => {
+  localStorage.removeItem(TypographyStorageKey);
+  sessionStorage.clear();
+  vi.spyOn(api, "fetchSessions").mockResolvedValue([]);
+  vi.spyOn(api, "saveSessionFilters").mockResolvedValue();
+  vi.spyOn(api, "fetchCopilotHistory").mockResolvedValue([]);
+});
 afterEach(() => localStorage.removeItem(TypographyStorageKey));
 
 vi.mock("./useLogExplorer", async () => {
@@ -387,9 +392,11 @@ describe("log-first workspace", () => {
       arguments: [], workingDirectory: "/current", isCurrent: true
     };
     const renamed = { ...current, name: "Paused investigation" };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify([current])))
-      .mockResolvedValueOnce(new Response(JSON.stringify(renamed)))
-      .mockResolvedValueOnce(new Response(JSON.stringify([renamed]))));
+    vi.mocked(api.fetchSessions).mockResolvedValue([current]);
+    vi.spyOn(api, "renameSession").mockImplementation(async () => {
+      vi.mocked(api.fetchSessions).mockResolvedValue([renamed]);
+      return renamed;
+    });
     const { container, rerender } = render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Pause" }));
     const maximumId = vi.mocked(useLogPage).mock.calls.at(-1)?.[2];
@@ -408,6 +415,39 @@ describe("log-first workspace", () => {
     expect(vi.mocked(useLogPage).mock.calls.at(-1)?.[2]).toBe(maximumId);
     fireEvent.click(screen.getByRole("button", { name: "Close sessions" }));
     expect(screen.getByRole("button", { name: "Resume" })).toBeDefined();
+  });
+
+  it("restores filters on reload and keeps current and saved sessions' filters separate", async () => {
+    const current = {
+      id: "current", name: "Current run", startedAt: "2026-10-12T08:00:00Z",
+      completedAt: null, exitCode: null, entryCount: 10, command: null,
+      arguments: [], workingDirectory: "", isCurrent: true,
+      filters: sessionFilters({ ...defaultQuery(), search: "Current search", matchCase: true })
+    };
+    const saved = {
+      ...current, id: "saved", name: "Saved run", isCurrent: false,
+      filters: { ...current.filters, search: "Saved search", levels: [] }
+    };
+    vi.mocked(api.fetchSessions).mockResolvedValue([current, saved]);
+    render(<App />);
+    const search = screen.getByLabelText("Search logs") as HTMLInputElement;
+    await waitFor(() => expect(search.value).toBe("Current search"));
+    expect((screen.getByLabelText("Match case") as HTMLInputElement).checked).toBe(true);
+    expect(api.saveSessionFilters).not.toHaveBeenCalled();
+    fireEvent.change(search, { target: { value: "Edited current" } });
+    await waitFor(() => expect(api.saveSessionFilters).toHaveBeenCalledWith("", { ...current.filters, search: "Edited current" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+    fireEvent.click(await screen.findByRole("button", { name: "View session" }));
+    expect(search.value).toBe("Saved search");
+    expect(vi.mocked(useLogPage).mock.calls.at(-1)?.[0]).toMatchObject({ sessionId: "saved", levels: [], dismissedThrough: 0 });
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    await waitFor(() => expect(api.saveSessionFilters).toHaveBeenCalledWith("saved", sessionFilters(defaultQuery())));
+    fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+    fireEvent.click(await screen.findByRole("button", { name: "View current" }));
+    expect(search.value).toBe("Edited current");
+    fireEvent.keyDown(search, { key: "Escape" });
+    await waitFor(() => expect(api.saveSessionFilters).toHaveBeenLastCalledWith("", { ...current.filters, search: "" }));
   });
 
   it("uses the chosen text sizes for controls, categories, badges, and inspector metadata", () => {
