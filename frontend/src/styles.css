@@ -711,7 +711,8 @@ mark { background: var(--cp-highlight); color: var(--cp-text); border-radius: 2p
 .selected-details { padding: 20px; }
 .entry-title { display: flex; align-items: center; gap: 8px; font-size: var(--ui-font-size, 14px); font-weight: 500; margin-bottom: 16px; }
 .metadata { display: grid; grid-template-columns: 94px minmax(0, 1fr); gap: 8px; margin: 0 0 16px; font-size: var(--ui-font-size, 14px); }
-.metadata dt { color: var(--cp-secondary-text); }
+.selected-details .metadata { grid-template-columns: minmax(0, 7em) minmax(0, 1fr); }
+.metadata dt { color: var(--cp-secondary-text); overflow-wrap: anywhere; }
 .metadata dd { margin: 0; overflow-wrap: anywhere; font-family: Consolas, "Courier New", Courier, monospace; }
 #detailTime { white-space: pre-line; }
 .selected-details h3 { margin: 16px 0 8px; }

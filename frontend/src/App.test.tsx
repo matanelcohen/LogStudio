@@ -405,6 +405,9 @@ describe("log-first workspace", () => {
     }
     expect(fontSize(".category-cell")).toBeUndefined();
     expect(container.querySelector(".category-cell")?.closest("tbody")).not.toBeNull();
+    expect(rules.find(rule => rule.selectorText === ".selected-details .metadata")?.style.getPropertyValue("grid-template-columns"))
+      .toBe("minmax(0, 7em) minmax(0, 1fr)");
+    expect(rules.find(rule => rule.selectorText === ".metadata dt")?.style.getPropertyValue("overflow-wrap")).toBe("anywhere");
   });
 
   it("changes typography immediately, keeps the current query, and restores focus on dismissal", async () => {
