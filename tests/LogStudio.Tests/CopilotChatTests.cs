@@ -244,6 +244,7 @@ public sealed class CopilotChatTests
     public async Task SubprocessStreamsBoundedTerminalEscapeFreeUpdates()
     {
         string markdown = new string('x', 4000) + "\r\n\r\n```cs\nawait worker.RunAsync();\n```\n\n- Check #1\n- Retry";
+        string normalizedMarkdown = markdown.Replace("\r\n", "\n", StringComparison.Ordinal);
         string answer = "\u001b[32m" + markdown + "\u001b[0m";
         using StringReader reader = new(answer);
         int updates = 0;
@@ -256,11 +257,11 @@ public sealed class CopilotChatTests
             return Task.CompletedTask;
         });
         Assert.True(updates > 1);
-        Assert.Equal(markdown, latest);
+        Assert.Equal(normalizedMarkdown, latest);
         Assert.Equal(answer, output);
         CopilotCliClient client = new((_, input, _) => Task.FromResult(input is null ? "version" : answer));
         await client.ConnectAsync(default);
-        Assert.Equal(markdown, (await client.AskAsync(new ChatContext("question", 1, false), default)).Answer);
+        Assert.Equal(normalizedMarkdown, (await client.AskAsync(new ChatContext("question", 1, false), default)).Answer);
     }
 
     [Fact]
