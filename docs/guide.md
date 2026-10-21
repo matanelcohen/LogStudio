@@ -243,10 +243,16 @@ Only after those checks pass does it publish self-contained x64 and ARM64 archiv
 Linux, macOS, and Windows, per-archive SHA-256 checksums, both NuGet packages, and the
 quick-install scripts to a GitHub Release. The archives retain `LogStudio.dll`, the embedded
 viewer, runtime files, and dependency notices; running them needs no installed .NET runtime.
+macOS archives are cross-published on Ubuntu; no macOS runners are required. Native execution
+checks run only when the runner matches the target runtime, so macOS binaries still need
+verification on a Mac. Publication requires all six platform/architecture archives and checksums.
 Prereleases do not replace GitHub's latest stable release used by the default installer.
 
 The workflow can also be run manually with an existing version tag; reruns replace that
 tag's assets. It publishes GitHub release assets, not packages to NuGet.org.
+If an installer gets HTTP 404 for a missing archive, dispatch **Compiled releases** from
+the branch containing the corrected workflow with the affected release tag. Rerunning an
+old workflow run uses its original workflow definition and will not add newly configured targets.
 
 If validation reports a tag/package-version mismatch, the tag points to a commit with
 the wrong version. Updating the default branch or rerunning the failed workflow does

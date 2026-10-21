@@ -10,6 +10,7 @@ import { test } from "node:test";
 const bashInstaller = fileURLToPath(new URL("../../install-release.sh", import.meta.url));
 const powershellInstaller = fileURLToPath(new URL("../../install-release.ps1", import.meta.url));
 const releaseWorkflow = readFileSync(new URL("../../.github/workflows/release.yml", import.meta.url), "utf8");
+const releaseRids = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64"];
 const windows = process.platform === "win32";
 
 function run(command, args, env = {}, options = {}) {
@@ -122,6 +123,43 @@ test("release workflow uses unprefixed tags without normalizing manual input", (
   assert.match(releaseWorkflow, /ref: refs\/tags\/\$\{\{ inputs\.tag \|\| github\.ref_name \}\}/);
   assert.match(releaseWorkflow, /RELEASE_TAG: \$\{\{ inputs\.tag \|\| github\.ref_name \}\}/);
   assert.doesNotMatch(releaseWorkflow, /startsWith\(inputs\.tag, 'v'\)|format\('v\{0\}'/);
+});
+
+test("release matrix builds every installer target without macOS runners", () => {
+  const targets = new Map([...releaseWorkflow.matchAll(/^\s+- os: (\S+)\n\s+rid: (\S+)/gm)]
+    .map(([, os, rid]) => [rid, os]));
+  assert.deepEqual([...targets.keys()].sort(), [...releaseRids].sort());
+  for (const rid of releaseRids) {
+    assert.equal(targets.get(rid), rid.startsWith("win-") ? "windows-latest" : "ubuntu-latest", rid);
+  }
+});
+
+test("release publication requires every archive and checksum", { skip: windows }, (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "logstudio-release-assets."));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const match = releaseWorkflow.match(/      - name: Verify release assets\n        shell: bash\n        run: \|\n((?:          .*\n)+)/);
+  assert.ok(match, "Release assets must be verified before publication");
+  assert.ok(releaseWorkflow.indexOf("- name: Verify release assets") < releaseWorkflow.indexOf("- name: Publish GitHub Release"));
+  const script = match[1].replace(/^          /gm, "");
+  const assets = releaseRids.flatMap((rid) => {
+    const archive = `logstudio-${rid}.${rid.startsWith("win-") ? "zip" : "tar.gz"}`;
+    return [archive, `${archive}.sha256`];
+  });
+  const downloads = join(directory, "artifacts", "release");
+  mkdirSync(downloads, { recursive: true });
+  for (const asset of assets) writeFileSync(join(downloads, asset), "fixture");
+  const verify = () => run("bash", ["-euo", "pipefail", "-c", script], {}, { cwd: directory });
+  assert.equal(verify().status, 0);
+  for (const asset of assets) {
+    const path = join(downloads, asset);
+    rmSync(path);
+    const missing = verify();
+    assert.notEqual(missing.status, 0, asset);
+    assert.ok(missing.stderr.includes(`Missing release asset: ${asset}`));
+    writeFileSync(path, "");
+    assert.notEqual(verify().status, 0, `Empty asset: ${asset}`);
+    writeFileSync(path, "fixture");
+  }
 });
 
 test("release validation requires the exact unprefixed package version", { skip: windows }, (t) => {
