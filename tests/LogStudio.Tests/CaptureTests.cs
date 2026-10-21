@@ -147,6 +147,37 @@ public sealed class CaptureTests
     }
 
     [Theory]
+    [InlineData("Error: connection failed")]
+    [InlineData("Fatal error: connection failed")]
+    [InlineData("!! connection failed")]
+    public void IndentedErrorTextKeepsTheOriginalLogEventMetadata(string message)
+    {
+        using ConsoleLogViewer viewer = StartServer();
+        using TextWriter writer = viewer.CreateCaptureWriter(TextWriter.Null, LogStream.Stdout);
+        writer.Write("warn: My.Category[0]\n      " + message + "\n      retrying\n");
+        writer.Flush();
+
+        LogEntry entry = Assert.Single(viewer.GetLogs());
+        Assert.Equal("warn: My.Category[0]\n      " + message + "\n      retrying", entry.Message);
+        Assert.Equal(LogSeverity.Warning, entry.Severity);
+        Assert.Equal("My.Category", entry.Category);
+    }
+
+    [Fact]
+    public void UnhandledExceptionStartsAnErrorEventAfterAnInformationalLog()
+    {
+        using ConsoleLogViewer viewer = StartServer();
+        using TextWriter writer = viewer.CreateCaptureWriter(TextWriter.Null, LogStream.Stderr);
+        writer.Write("[INF] ready\nUnhandled exception. System.InvalidOperationException: boom\n   at Example.Run()\n");
+        writer.Flush();
+
+        LogEntry[] entries = viewer.GetLogs().ToArray();
+        Assert.Equal(new[] { "[INF] ready", "Unhandled exception. System.InvalidOperationException: boom\n   at Example.Run()" },
+            entries.Select(entry => entry.Message));
+        Assert.Equal(new[] { LogSeverity.Information, LogSeverity.Error }, entries.Select(entry => entry.Severity));
+    }
+
+    [Theory]
     [InlineData("System.InvalidOperationException: failure")]
     [InlineData("Unhandled exception. System.InvalidOperationException: failure")]
     public void RawExceptionStacksAndMarkersAreGrouped(string header)
@@ -219,6 +250,25 @@ public sealed class CaptureTests
         Assert.Single(viewer.GetLogs());
     }
 
+    [Fact]
+    public async Task ContinuationsAfterIdlePublicationKeepWriterLocalMetadata()
+    {
+        await using ConsoleLogViewer viewer = StartServer();
+        using TextWriter writer = viewer.CreateCaptureWriter(TextWriter.Null, LogStream.Stdout);
+        using TextWriter other = viewer.CreateCaptureWriter(TextWriter.Null, LogStream.Stdout);
+        writer.Write("warn: My.Category[0]\n");
+        await WaitUntilAsync(() => viewer.GetLogs().Count > 0);
+        other.Write("info: Other.Category[0]\n");
+        other.Flush();
+        writer.Write("      warning details\n");
+        writer.Flush();
+
+        LogEntry entry = viewer.GetLogs()[^1];
+        Assert.Equal("      warning details", entry.Message);
+        Assert.Equal(LogSeverity.Warning, entry.Severity);
+        Assert.Equal("My.Category", entry.Category);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -249,6 +299,21 @@ public sealed class CaptureTests
         Assert.Equal("info: New.Category[0]\n  keep this message", entry.Message);
         Assert.Equal(LogSeverity.Information, entry.Severity);
         Assert.Equal("New.Category", entry.Category);
+    }
+
+    [Fact]
+    public void ClearingHistoryResetsWriterLocalContinuationMetadata()
+    {
+        using ConsoleLogViewer viewer = StartServer();
+        using TextWriter writer = viewer.CreateCaptureWriter(TextWriter.Null, LogStream.Stdout);
+        writer.Write("warn: Old.Category[0]\n");
+        Assert.Equal(1, viewer.ClearLogs());
+        writer.Write("      unrelated new text\n");
+        writer.Flush();
+
+        LogEntry entry = Assert.Single(viewer.GetLogs());
+        Assert.Equal(LogSeverity.Output, entry.Severity);
+        Assert.Null(entry.Category);
     }
 
     [Fact]

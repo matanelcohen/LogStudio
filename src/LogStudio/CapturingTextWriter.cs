@@ -18,6 +18,7 @@ internal sealed class CapturingTextWriter : TextWriter
     private readonly StringBuilder entry = new();
     private LogSeverity entrySeverity;
     private string? entryCategory;
+    private bool hasContext;
     private bool hasEntry;
     private bool entryHasLine;
     private bool entryIsPartial;
@@ -117,6 +118,8 @@ internal sealed class CapturingTextWriter : TextWriter
             this.original.Flush();
             this.PublishPartial();
             this.PublishEntry();
+            this.hasContext = false;
+            this.entryCategory = null;
         }
     }
 
@@ -207,11 +210,11 @@ internal sealed class CapturingTextWriter : TextWriter
     private void CaptureLine(string line, bool isPartial)
     {
         string clean = LogParser.StripTerminalEscapes(line);
-        bool header = LogParser.TryParseHeader(clean, out LogSeverity severity, out string? category);
+        bool header = LogParser.TryParseHeader(clean, out LogSeverity severity, out string? category, out bool structured);
         bool exception = LogParser.IsExceptionStart(clean);
         bool continuation = LogParser.IsContinuation(clean);
-        bool continuesEntry = this.partialWasPublished || (!header && continuation) ||
-            (exception && (continuation || this.acceptsException));
+        bool continuesEntry = this.partialWasPublished || (continuation && !structured) ||
+            (exception && !LogParser.IsUnhandledException(clean) && this.acceptsException);
         if (this.hasEntry && !continuesEntry)
         {
             this.PublishEntry();
@@ -221,14 +224,21 @@ internal sealed class CapturingTextWriter : TextWriter
         {
             if (!header && !continuation)
             {
+                this.hasContext = false;
+                this.entryCategory = null;
                 this.logs.Append(clean, this.stream, isPartial);
                 return;
             }
 
             this.hasEntry = true;
-            this.entrySeverity = header ? severity : this.stream == LogStream.Stderr ? LogSeverity.Error :
-                this.stream == LogStream.Viewer ? LogSeverity.Information : LogSeverity.Output;
-            this.entryCategory = category;
+            if (header || !this.hasContext)
+            {
+                this.entrySeverity = header ? severity : this.stream == LogStream.Stderr ? LogSeverity.Error :
+                    this.stream == LogStream.Viewer ? LogSeverity.Information : LogSeverity.Output;
+                this.entryCategory = category;
+            }
+
+            this.hasContext = true;
             this.acceptsException = header && !exception;
         }
 
@@ -254,7 +264,6 @@ internal sealed class CapturingTextWriter : TextWriter
             this.hasEntry = false;
             this.entryHasLine = false;
             this.entryIsPartial = false;
-            this.entryCategory = null;
             this.acceptsException = false;
         }
         else
