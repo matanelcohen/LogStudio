@@ -1,11 +1,15 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { CopilotChatPanel } from "./CopilotChatPanel";
-import type { ChatResponse } from "./model";
+import type { ChatMessage, ChatResponse } from "./model";
 import { Status } from "./test-fixtures";
 
 afterEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  vi.spyOn(api, "fetchCopilotHistory").mockResolvedValue([]);
+  vi.spyOn(api, "clearCopilotHistory").mockResolvedValue();
+});
 
 async function connectCli() {
   await screen.findByRole("combobox", { name: "AI model" });
@@ -136,7 +140,8 @@ describe("full-session log chat panel", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "New chat" }).hasAttribute("disabled")).toBe(false));
     fireEvent.change(screen.getByLabelText("Message Copilot"), { target: { value: "Discard this draft" } });
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
-    expect(screen.getByRole("log").textContent).toBe("");
+    await waitFor(() => expect(screen.getByRole("log").textContent).toBe(""));
+    expect(api.clearCopilotHistory).toHaveBeenCalledWith("");
     expect((screen.getByLabelText("Message Copilot") as HTMLTextAreaElement).value).toBe("");
     expect(document.activeElement).toBe(screen.getByLabelText("Message Copilot"));
     ask("Fresh question");
@@ -283,6 +288,100 @@ describe("full-session log chat panel", () => {
     expect(chat.mock.calls[5]?.[2]).toEqual([3, 4, 5].flatMap(turn => [
       { role: "user", content: `Question ${turn}` }, { role: "assistant", content: `Answer to Question ${turn}` }
     ]));
+  });
+
+  it("restores full per-session history after reopening and bounds only outbound context", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
+    const longAnswer = `${"Detailed answer ".repeat(300)} End of answer`;
+    const history: ChatMessage[] = [1, 2, 3, 4, 5].flatMap(turn => [
+      { role: "user", content: `Saved question ${turn}` }, { role: "assistant", content: `${turn}: ${longAnswer}` }
+    ]);
+    vi.mocked(api.fetchCopilotHistory).mockResolvedValue(history);
+    const chat = vi.spyOn(api, "askCopilot").mockResolvedValue({ answer: "Continued answer", contextEntryCount: 1, contextTruncated: false });
+    const props = { status: Status, sessionId: "saved", onClose: vi.fn(), returnFocus: vi.fn() };
+    const first = render(<CopilotChatPanel {...props} />);
+    await connectCli();
+    await screen.findByText("Saved question 1");
+    expect(screen.getByRole("log").querySelectorAll(".copilot-message")).toHaveLength(10);
+    expect(screen.getByRole("log").textContent).toContain(`1: ${longAnswer}`);
+    first.unmount();
+    render(<CopilotChatPanel {...props} />);
+    await connectCli();
+    await screen.findByText("Saved question 1");
+    expect(api.fetchCopilotHistory).toHaveBeenLastCalledWith("saved", expect.any(AbortSignal));
+    ask("Continue this conversation");
+    await screen.findByText("Continued answer");
+    expect(chat.mock.calls[0]?.[2]).toEqual(history.slice(-6).map(message => ({ ...message, content: message.content.slice(0, 2000) })));
+    expect(screen.getByRole("log").textContent).toContain(`1: ${longAnswer}`);
+  });
+
+  it("reads saved chat without CLI access or remaining logs", async () => {
+    vi.spyOn(api, "connectCopilot").mockRejectedValue(new Error("CLI unavailable"));
+    vi.mocked(api.fetchCopilotHistory).mockResolvedValue([
+      { role: "user", content: "Earlier question" }, { role: "assistant", content: "Earlier diagnosis" }
+    ]);
+    const chat = vi.spyOn(api, "askCopilot");
+    render(<CopilotChatPanel status={{ ...Status, lastId: 0 }} sessionId="saved" onClose={vi.fn()} returnFocus={vi.fn()} />);
+    await screen.findByText("Earlier diagnosis");
+    expect(screen.getByText("CLI unavailable")).toBeDefined();
+    ask("No logs remain");
+    expect(chat).not.toHaveBeenCalled();
+  });
+
+  it("blocks sending until history loads and lets failed loads be retried without losing drafts", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
+    vi.mocked(api.fetchCopilotHistory).mockRejectedValueOnce(new Error("History unavailable"));
+    const chat = vi.spyOn(api, "askCopilot").mockResolvedValue({ answer: "Resumed", contextEntryCount: 1, contextTruncated: false });
+    render(<CopilotChatPanel status={Status} sessionId="saved" onClose={vi.fn()} returnFocus={vi.fn()} />);
+    await connectCli();
+    await screen.findByText("History unavailable");
+    ask("Keep my draft");
+    expect(chat).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(true);
+    vi.mocked(api.fetchCopilotHistory).mockResolvedValue([
+      { role: "user", content: "Prior question" }, { role: "assistant", content: "Prior answer" }
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Retry chat history" }));
+    await screen.findByText("Prior answer");
+    expect((screen.getByLabelText("Message Copilot") as HTMLTextAreaElement).value).toBe("Keep my draft");
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText("Resumed");
+    expect(chat.mock.calls[0]?.[2]).toHaveLength(2);
+  });
+
+  it("does not replace the selected session's conversation with a stale history response", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
+    let finish!: (messages: ChatMessage[]) => void;
+    vi.mocked(api.fetchCopilotHistory).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+      .mockResolvedValueOnce([{ role: "user", content: "Selected question" }, { role: "assistant", content: "Selected answer" }]);
+    const props = { status: Status, onClose: vi.fn(), returnFocus: vi.fn() };
+    const { rerender } = render(<CopilotChatPanel key="first" {...props} sessionId="first" />);
+    await connectCli();
+    rerender(<CopilotChatPanel key="second" {...props} sessionId="second" />);
+    await screen.findByText("Selected answer");
+    await act(async () => finish([{ role: "user", content: "Old question" }, { role: "assistant", content: "Old answer" }]));
+    expect(screen.queryByText("Old answer")).toBeNull();
+    expect(screen.getByText("Selected answer")).toBeDefined();
+  });
+
+  it("preserves the conversation and draft when a persisted New chat reset fails", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
+    vi.mocked(api.fetchCopilotHistory).mockResolvedValue([
+      { role: "user", content: "Saved question" }, { role: "assistant", content: "Saved answer" }
+    ]);
+    vi.mocked(api.clearCopilotHistory).mockRejectedValueOnce(new Error("Could not save chat history"));
+    render(<CopilotChatPanel status={Status} sessionId="saved" onClose={vi.fn()} returnFocus={vi.fn()} />);
+    await connectCli();
+    await screen.findByText("Saved answer");
+    fireEvent.change(screen.getByLabelText("Message Copilot"), { target: { value: "Keep draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    await screen.findByText("Could not save chat history");
+    expect(screen.getByText("Saved answer")).toBeDefined();
+    expect((screen.getByLabelText("Message Copilot") as HTMLTextAreaElement).value).toBe("Keep draft");
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    await waitFor(() => expect(screen.getByRole("log").textContent).toBe(""));
+    expect(api.clearCopilotHistory).toHaveBeenCalledWith("saved");
+    expect((screen.getByLabelText("Message Copilot") as HTMLTextAreaElement).value).toBe("");
   });
 
   it("scrolls new messages inside the transcript without interrupting reading older messages", async () => {

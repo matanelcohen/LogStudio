@@ -1,8 +1,41 @@
 import { describe, expect, it, vi } from "vitest";
-import { askCopilot, connectCopilot } from "./api";
+import { askCopilot, clearCopilotHistory, connectCopilot, fetchCopilotHistory } from "./api";
 import { ApiRoutes, ClearActionHeader } from "./model";
 
 describe("Copilot API", () => {
+  it("loads the complete selected transcript locally and explicitly resets it", async () => {
+    const history = [1, 2, 3, 4, 5].flatMap(turn => [
+      { role: "user", content: `Question ${turn}` }, { role: "assistant", content: "Full answer ".repeat(1000) }
+    ]);
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(history)))
+      .mockResolvedValueOnce(new Response("[]"));
+    vi.stubGlobal("fetch", fetch);
+    const signal = new AbortController().signal;
+    expect(await fetchCopilotHistory("saved", signal)).toEqual(history);
+    expect(fetch).toHaveBeenNthCalledWith(1, `${ApiRoutes.CopilotHistory}?sessionId=saved`, { signal });
+    await clearCopilotHistory("saved");
+    expect(fetch).toHaveBeenNthCalledWith(2, `${ApiRoutes.CopilotHistory}?sessionId=saved`, {
+      method: "POST", headers: { [ClearActionHeader]: "copilot-clear-history" }
+    });
+  });
+
+  it("rejects malformed transcripts and surfaces history read/reset failures", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    for (const history of [
+      {}, [{ role: "user", content: "Incomplete" }],
+      [{ role: "system", content: "Invalid" }, { role: "assistant", content: "Answer" }],
+      [{ role: "user", content: 123 }, { role: "assistant", content: "Answer" }]
+    ]) {
+      fetch.mockResolvedValueOnce(new Response(JSON.stringify(history)));
+      await expect(fetchCopilotHistory("", new AbortController().signal)).rejects.toThrow();
+    }
+    fetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: "Cannot read history" }), { status: 500 }));
+    await expect(fetchCopilotHistory("", new AbortController().signal)).rejects.toThrow("Cannot read history");
+    fetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: "Cannot reset history" }), { status: 500 }));
+    await expect(clearCopilotHistory("")).rejects.toThrow("Cannot reset history");
+  });
+
   it("passes model and reasoning choices in the request, not the prompt", async () => {
     const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ answer: "answer", contextEntryCount: 1, contextTruncated: false }) });
     vi.stubGlobal("fetch", fetch);
