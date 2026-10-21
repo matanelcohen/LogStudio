@@ -111,7 +111,9 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
   }
 
   return <aside ref={panel} className="copilot-panel" hidden={hidden} aria-labelledby="copilotTitle" onKeyDown={event => {
-    if (event.key === "Escape" && !busy) { event.stopPropagation(); close(); }
+    if (event.key === "Escape" && !busy && !event.defaultPrevented && panel.current?.contains(event.target as Node)) {
+      event.stopPropagation(); close();
+    }
   }}>
     <header className="copilot-header">
       <MessageSquare size={19} aria-hidden="true" />
@@ -120,7 +122,7 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
         <p title={status?.applicationName}>{status?.applicationName ?? "Selected session"}</p>
       </div>
       <button className="icon-button ghost-button" disabled={busy || (!messages.length && !question && !error)} aria-label="New chat" title="New chat"
-        onClick={() => { setMessages([]); setQuestion(""); setError(null); setCopied(null); setCopyError(null); followMessages.current = true; setFollowing(true); questionInput.current?.focus(); }}>
+        onClick={() => { setMessages([]); setQuestion(""); if (connection) setError(null); setCopied(null); setCopyError(null); followMessages.current = true; setFollowing(true); questionInput.current?.focus(); }}>
         <SquarePen size={17} />
       </button>
       <button className="icon-button ghost-button" disabled={busy} aria-label="Close Copilot chat" title="Close chat" onClick={close}><X size={17} /></button>

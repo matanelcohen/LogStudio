@@ -22,6 +22,18 @@ function ask(question = "Why did this fail?") {
 }
 
 describe("full-session log chat panel", () => {
+  it("dismisses the model menu with Escape without closing chat", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
+    const close = vi.fn();
+    render(<CopilotChatPanel status={Status} sessionId="" onClose={close} returnFocus={vi.fn()} />);
+    await connectCli();
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "AI model" }), { key: "Enter" });
+    fireEvent.keyDown(await screen.findByRole("option", { name: "Reasoning model" }), { key: "Escape" });
+    expect(close).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByLabelText("Message Copilot"), { key: "Escape" });
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it("shows only discovered reasoning levels and clears the effort when changing models", async () => {
     vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
     const chat = vi.spyOn(api, "askCopilot").mockResolvedValue({ answer: "Selected model answer", contextEntryCount: 1, contextTruncated: false });
@@ -137,6 +149,10 @@ describe("full-session log chat panel", () => {
     const chat = vi.spyOn(api, "askCopilot").mockRejectedValue(new Error("Run copilot login"));
     render(<CopilotChatPanel status={Status} sessionId="" onClose={vi.fn()} returnFocus={vi.fn()} />);
     await screen.findByText("Install Copilot CLI");
+    fireEvent.change(screen.getByLabelText("Message Copilot"), { target: { value: "An unsent draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    expect(screen.getByRole("alert").textContent).toContain("Install Copilot CLI");
+    expect(screen.getByRole("button", { name: "Retry Copilot setup" })).toBeDefined();
     connect.mockResolvedValue(Setup);
     fireEvent.click(screen.getByRole("button", { name: "Retry Copilot setup" }));
     await connectCli();
