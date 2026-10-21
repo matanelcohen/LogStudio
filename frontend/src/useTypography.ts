@@ -24,7 +24,7 @@ export interface TypographySettings {
 }
 
 export const DefaultTypography: Readonly<TypographySettings> = {
-  uiFont: "system", uiFontSize: 13, logFont: "default", logFontSize: 12, logLineHeight: 1.6
+  uiFont: "system", uiFontSize: 14, logFont: "default", logFontSize: 14, logLineHeight: 1.6
 };
 
 export function validateTypography(value: unknown): TypographySettings {
@@ -57,7 +57,8 @@ export function useTypography() {
     const style = document.documentElement.style;
     const properties = {
       "--ui-font-family": UiFonts.find(font => font.value === settings.uiFont)!.family,
-      "--ui-font-scale": String(settings.uiFontSize / 13),
+      "--ui-font-size": `${settings.uiFontSize}px`,
+      "--ui-font-scale": String(settings.uiFontSize / 14),
       "--log-font-family": LogFonts.find(font => font.value === settings.logFont)!.family,
       "--log-font-size": `${settings.logFontSize}px`,
       "--log-line-height": String(settings.logLineHeight)

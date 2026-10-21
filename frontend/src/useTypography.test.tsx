@@ -32,6 +32,16 @@ describe("typography validation", () => {
 });
 
 describe("saved typography", () => {
+  it("defaults interface and log text to 14px", () => {
+    const { result } = renderHook(useTypography);
+    expect(result.current.settings.uiFontSize).toBe(14);
+    expect(result.current.settings.logFontSize).toBe(14);
+    const style = document.documentElement.style;
+    expect(style.getPropertyValue("--ui-font-size")).toBe("14px");
+    expect(style.getPropertyValue("--ui-font-scale")).toBe("1");
+    expect(style.getPropertyValue("--log-font-size")).toBe("14px");
+  });
+
   it("applies independent root tokens and restores saved preferences on remount", () => {
     const settings = { ...DefaultTypography, uiFont: "verdana" as const, uiFontSize: 18, logFont: "menlo" as const, logFontSize: 24, logLineHeight: 2 as const };
     const first = renderHook(useTypography);
@@ -39,7 +49,8 @@ describe("saved typography", () => {
     expect(first.result.current.settings).toEqual(settings);
     const style = document.documentElement.style;
     expect(style.getPropertyValue("--ui-font-family")).toBe(UiFonts[2].family);
-    expect(style.getPropertyValue("--ui-font-scale")).toBe(String(18 / 13));
+    expect(style.getPropertyValue("--ui-font-size")).toBe("18px");
+    expect(style.getPropertyValue("--ui-font-scale")).toBe(String(18 / 14));
     expect(style.getPropertyValue("--log-font-family")).toBe(LogFonts[2].family);
     expect(style.getPropertyValue("--log-font-size")).toBe("24px");
     expect(style.getPropertyValue("--log-line-height")).toBe("2");
@@ -61,6 +72,8 @@ describe("saved typography", () => {
     act(() => result.current.update({ uiFontSize: 18, logFont: "courier", logFontSize: 24, logLineHeight: 2 }));
     act(() => result.current.reset());
     expect(result.current.settings).toEqual(DefaultTypography);
+    expect(document.documentElement.style.getPropertyValue("--ui-font-size")).toBe("14px");
+    expect(document.documentElement.style.getPropertyValue("--log-font-size")).toBe("14px");
     expect(JSON.parse(localStorage.getItem(TypographyStorageKey)!)).toEqual(DefaultTypography);
     expect(localStorage.getItem("other-preference")).toBe("keep");
     localStorage.removeItem("other-preference");
@@ -82,12 +95,16 @@ describe("saved typography", () => {
 
   it("restores previous document styling on unmount", () => {
     const style = document.documentElement.style;
+    style.setProperty("--ui-font-size", "18px");
     style.setProperty("--log-font-size", "16px", "important");
     const { unmount } = renderHook(useTypography);
-    expect(style.getPropertyValue("--log-font-size")).toBe("12px");
+    expect(style.getPropertyValue("--ui-font-size")).toBe("14px");
+    expect(style.getPropertyValue("--log-font-size")).toBe("14px");
     unmount();
+    expect(style.getPropertyValue("--ui-font-size")).toBe("18px");
     expect(style.getPropertyValue("--log-font-size")).toBe("16px");
     expect(style.getPropertyPriority("--log-font-size")).toBe("important");
+    style.removeProperty("--ui-font-size");
     style.removeProperty("--log-font-size");
   });
 });
