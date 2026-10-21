@@ -18,6 +18,7 @@ beforeEach(() => {
   sessionStorage.clear();
   vi.spyOn(api, "fetchSessions").mockResolvedValue([]);
   vi.spyOn(api, "saveSessionFilters").mockResolvedValue();
+  vi.spyOn(api, "fetchCopilotHistory").mockResolvedValue([]);
 });
 afterEach(() => localStorage.removeItem(TypographyStorageKey));
 
@@ -364,6 +365,26 @@ describe("log-first workspace", () => {
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Ask Copilot" }));
   });
 
+  it("allows saved conversations to be reopened when a session has no remaining logs", async () => {
+    const emptyStatus = { ...Status, retainedCount: 0, firstId: 0, lastId: 0 };
+    vi.mocked(useLogPage).mockReturnValueOnce({
+      page: { ...fixturePage(), status: emptyStatus, entries: [] }, loading: false, error: null, refresh: vi.fn()
+    });
+    vi.mocked(useLiveStatus).mockReturnValueOnce({
+      status: emptyStatus, connection: "live", error: null, gap: null, reconnect, applyStatus: vi.fn()
+    });
+    vi.mocked(api.fetchCopilotHistory).mockResolvedValue([
+      { role: "user", content: "Historical question" }, { role: "assistant", content: "Historical answer" }
+    ]);
+    vi.spyOn(api, "connectCopilot").mockRejectedValue(new Error("CLI unavailable"));
+    render(<App />);
+    const opener = screen.getByRole("button", { name: "Ask Copilot" });
+    expect(opener.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(opener);
+    await screen.findByText("Historical answer");
+    expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(true);
+  });
+
   it("updates the session name while paused without resetting the frozen log cursor", async () => {
     const current = {
       id: "current", name: "Current run", startedAt: "2026-10-12T08:00:00Z",
@@ -429,6 +450,27 @@ describe("log-first workspace", () => {
     await waitFor(() => expect(api.saveSessionFilters).toHaveBeenLastCalledWith("", { ...current.filters, search: "" }));
   });
 
+  it("uses the chosen text sizes for controls, categories, badges, and inspector metadata", () => {
+    const { container } = render(<><style>{styles}</style><App /></>);
+    const rules = Array.from(container.querySelector("style")!.sheet!.cssRules)
+      .filter((rule): rule is CSSStyleRule => rule.type === CSSRule.STYLE_RULE);
+    function fontSize(selector: string) {
+      return rules.filter(rule => rule.selectorText.split(",").map(value => value.trim()).includes(selector))
+        .map(rule => rule.style.getPropertyValue("font-size")).filter(Boolean).at(-1);
+    }
+    for (const selector of ["button", ".select-trigger", ".menu-item", ".tooltip", ".field-row", ".muted", ".copilot-copy", ".telemetry-status"]) {
+      expect(fontSize(selector), selector).toBe("var(--ui-font-size, 14px)");
+    }
+    for (const selector of [".logs-scroll tbody", ".logs-scroll .severity-badge", ".message-lines", ".message", "#detailMessage", ".selected-details .metadata", ".selected-details .severity-badge"]) {
+      expect(fontSize(selector), selector).toBe("var(--log-font-size, 14px)");
+    }
+    expect(fontSize(".category-cell")).toBeUndefined();
+    expect(container.querySelector(".category-cell")?.closest("tbody")).not.toBeNull();
+    expect(rules.find(rule => rule.selectorText === ".selected-details .metadata")?.style.getPropertyValue("grid-template-columns"))
+      .toBe("minmax(0, 7em) minmax(0, 1fr)");
+    expect(rules.find(rule => rule.selectorText === ".metadata dt")?.style.getPropertyValue("overflow-wrap")).toBe("anywhere");
+  });
+
   it("changes typography immediately, keeps the current query, and restores focus on dismissal", async () => {
     render(<App />);
     const search = screen.getByLabelText("Search logs") as HTMLInputElement;
@@ -438,6 +480,8 @@ describe("log-first workspace", () => {
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeDefined();
     expect(screen.getByRole("combobox", { name: "UI font" })).toBeDefined();
     expect(screen.getByRole("combobox", { name: "Log font" })).toBeDefined();
+    expect(screen.getByRole("combobox", { name: "UI font size" }).textContent).toContain("14 px");
+    expect(screen.getByRole("combobox", { name: "Log font size" }).textContent).toContain("14 px");
     expect(screen.getByLabelText("Log font preview").textContent).toContain("Application started");
 
     async function choose(label: string, option: string) {
@@ -452,6 +496,7 @@ describe("log-first workspace", () => {
     await choose("Log font", "Courier New");
     await choose("Log font size", "24 px");
     await choose("Log line spacing", "Spacious");
+    expect(document.documentElement.style.getPropertyValue("--ui-font-size")).toBe("18px");
     expect(document.documentElement.style.getPropertyValue("--log-font-size")).toBe("24px");
     expect(document.documentElement.style.getPropertyValue("--log-line-height")).toBe("2");
     expect(scroll.scrollTop).toBe(500);
@@ -463,6 +508,8 @@ describe("log-first workspace", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Reset typography" }));
     expect(JSON.parse(localStorage.getItem(TypographyStorageKey)!)).toEqual(DefaultTypography);
+    expect(document.documentElement.style.getPropertyValue("--ui-font-size")).toBe("14px");
+    expect(document.documentElement.style.getPropertyValue("--log-font-size")).toBe("14px");
     expect(search.value).toBe("Hello");
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull());

@@ -346,6 +346,43 @@ public sealed class CopilotChatTests
     }
 
     [Fact]
+    public async Task ChatHistoryReadsWithoutCopilotAndResetRequiresAnExplicitSameOriginAction()
+    {
+        ViewerSettings settings = new ConsoleLogViewerOptions().Validate();
+        using LogBuffer logs = new(settings);
+        SessionCatalog sessions = new(settings);
+        sessions.AppendChat(null, "Saved question", "Saved answer");
+        int calls = 0;
+        CopilotCliClient copilot = new((_, _, _) => { calls++; return Task.FromResult("version"); });
+        await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, sessions, UnusedRename, copilot);
+        using HttpClient client = new();
+        using JsonDocument history = JsonDocument.Parse(await client.GetStringAsync(new Uri(server.Url, ViewerConstants.CopilotHistoryRoute)));
+        Assert.Equal("Saved answer", history.RootElement[1].GetProperty("content").GetString());
+        using HttpResponseMessage noAction = await client.PostAsync(new Uri(server.Url, ViewerConstants.CopilotHistoryRoute), new StringContent(""));
+        Assert.Equal(HttpStatusCode.Forbidden, noAction.StatusCode);
+        foreach (HttpMethod method in new[] { HttpMethod.Get, HttpMethod.Post })
+        {
+            using HttpRequestMessage foreign = new(method, new Uri(server.Url, ViewerConstants.CopilotHistoryRoute));
+            foreign.Headers.Add("Origin", "https://untrusted.invalid");
+            foreign.Headers.Add(ViewerConstants.ClearRequestHeader, ViewerConstants.CopilotClearHistoryAction);
+            using HttpResponseMessage denied = await client.SendAsync(foreign);
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        }
+        using HttpResponseMessage unsupported = await client.DeleteAsync(new Uri(server.Url, ViewerConstants.CopilotHistoryRoute));
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, unsupported.StatusCode);
+        using HttpResponseMessage invalid = await client.GetAsync(new Uri(server.Url, ViewerConstants.CopilotHistoryRoute + "?sessionId=invalid"));
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        using HttpResponseMessage missing = await client.GetAsync(new Uri(server.Url, ViewerConstants.CopilotHistoryRoute + "?sessionId=" + Guid.NewGuid().ToString("N")));
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+        Assert.Equal(2, sessions.ReadChatHistory(null).Length);
+        using HttpRequestMessage reset = Post(server.Url, ViewerConstants.CopilotHistoryRoute, ViewerConstants.CopilotClearHistoryAction);
+        using HttpResponseMessage cleared = await client.SendAsync(reset);
+        cleared.EnsureSuccessStatusCode();
+        Assert.Equal("[]", await client.GetStringAsync(new Uri(server.Url, ViewerConstants.CopilotHistoryRoute)));
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
     public async Task ChatUsesOnlyTheFullSelectedSavedSessionAndDeletesItsFile()
     {
         string root = Directory.CreateTempSubdirectory("logstudio-copilot-session-test-").FullName;
@@ -388,6 +425,58 @@ public sealed class CopilotChatTests
             Assert.DoesNotContain("current session", file, StringComparison.Ordinal);
             Assert.Contains("saved older", file, StringComparison.Ordinal);
             Assert.False(Directory.Exists(directory));
+            ChatMessage[] expected = { new("user", Request().Question), new("assistant", "Answer #1") };
+            Assert.Equal(expected, new SessionCatalog(settings).ReadChatHistory(saved.Id));
+            Assert.Empty(sessions.ReadChatHistory(null));
+            using JsonDocument transcript = JsonDocument.Parse(await client.GetStringAsync(new Uri(server.Url, ViewerConstants.CopilotHistoryRoute + "?sessionId=" + saved.Id)));
+            Assert.Equal("Answer #1", transcript.RootElement[1].GetProperty("content").GetString());
+            using HttpRequestMessage reset = Post(server.Url, ViewerConstants.CopilotHistoryRoute + "?sessionId=" + saved.Id, ViewerConstants.CopilotClearHistoryAction);
+            using HttpResponseMessage cleared = await client.SendAsync(reset);
+            cleared.EnsureSuccessStatusCode();
+            Assert.Empty(new SessionCatalog(settings).ReadChatHistory(saved.Id));
+            using LogHistoryReader retained = saved.Open(saved.Id);
+            Assert.Equal(2, retained.Status.RetainedCount);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ChatPersistenceFailuresAreReportedWithoutChangingTheTranscript(bool streaming)
+    {
+        string root = Directory.CreateTempSubdirectory("logstudio-chat-save-failure-test-").FullName;
+        try
+        {
+            ViewerSettings settings = new ConsoleLogViewerOptions { SaveSession = true, SessionsDirectory = root }.Validate();
+            using LogBuffer logs = new(settings);
+            logs.Append("retained log", LogStream.Stdout);
+            SessionCatalog sessions = new(settings);
+            sessions.Save(logs);
+            CopilotCliClient copilot = new((_, input, _) => Task.FromResult(input is null ? "version" : "Complete answer"),
+                discoverModels: (_, _) => Task.FromResult(Array.Empty<CopilotModel>()));
+            await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, sessions, UnusedRename, copilot);
+            using HttpClient client = new();
+            using HttpRequestMessage connect = Post(server.Url, ViewerConstants.CopilotConnectRoute, ViewerConstants.CopilotConnectAction);
+            using HttpResponseMessage connected = await client.SendAsync(connect);
+            connected.EnsureSuccessStatusCode();
+            string pending = Path.Combine(root, sessions.Id, "session.json.pending");
+            Directory.CreateDirectory(pending);
+            using HttpRequestMessage ask = Post(server.Url, ViewerConstants.CopilotChatRoute, ViewerConstants.CopilotChatAction,
+                JsonSerializer.Serialize(Request(), ViewerConstants.JsonOptions));
+            if (streaming) ask.Headers.Accept.ParseAdd("application/x-ndjson");
+            using HttpResponseMessage response = await client.SendAsync(ask);
+            Assert.Equal(streaming ? HttpStatusCode.OK : HttpStatusCode.InternalServerError, response.StatusCode);
+            using JsonDocument failure = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Contains("Could not save chat history", failure.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+            Assert.Empty(sessions.ReadChatHistory(null));
+            Assert.Empty(new SessionCatalog(settings).ReadChatHistory(sessions.Id));
+            Directory.Delete(pending);
+            using HttpRequestMessage retry = Post(server.Url, ViewerConstants.CopilotChatRoute, ViewerConstants.CopilotChatAction,
+                JsonSerializer.Serialize(Request(), ViewerConstants.JsonOptions));
+            using HttpResponseMessage retried = await client.SendAsync(retry);
+            retried.EnsureSuccessStatusCode();
+            Assert.Equal(2, new SessionCatalog(settings).ReadChatHistory(sessions.Id).Length);
         }
         finally { Directory.Delete(root, recursive: true); }
     }
@@ -415,7 +504,8 @@ public sealed class CopilotChatTests
         ViewerSettings settings = new ConsoleLogViewerOptions().Validate();
         using LogBuffer logs = new(settings);
         logs.Append("record", LogStream.Stdout);
-        await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, new(settings), UnusedRename, copilot);
+        SessionCatalog sessions = new(settings);
+        await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, sessions, UnusedRename, copilot);
         using HttpClient client = new();
         using HttpRequestMessage connect = Post(server.Url, ViewerConstants.CopilotConnectRoute, ViewerConstants.CopilotConnectAction);
         using HttpResponseMessage connected = await client.SendAsync(connect);
@@ -437,11 +527,16 @@ public sealed class CopilotChatTests
         Assert.Equal("Partial answer", first.RootElement.GetProperty("content").GetString());
         Assert.False(finish.Task.IsCompleted);
         Assert.True(Directory.Exists(snapshotDirectory));
+        using HttpRequestMessage reset = Post(server.Url, ViewerConstants.CopilotHistoryRoute, ViewerConstants.CopilotClearHistoryAction);
+        using HttpResponseMessage busy = await client.SendAsync(reset);
+        Assert.Equal(HttpStatusCode.TooManyRequests, busy.StatusCode);
         finish.SetResult();
         using JsonDocument last = JsonDocument.Parse((await reader.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5)))!);
         Assert.Equal(fail ? "Copilot timed out." : "Complete answer", last.RootElement.GetProperty(fail ? "error" : "answer").GetString());
         Assert.Null(await reader.ReadLineAsync());
         Assert.False(Directory.Exists(snapshotDirectory));
+        Assert.Equal(fail ? Array.Empty<ChatMessage>() : new[] { new ChatMessage("user", Request().Question), new ChatMessage("assistant", "Complete answer") },
+            sessions.ReadChatHistory(null));
     }
 
     [Fact]

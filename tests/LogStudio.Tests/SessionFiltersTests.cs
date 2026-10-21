@@ -102,6 +102,45 @@ public sealed class SessionFiltersTests
         Assert.False(File.Exists(Path.Combine(fixture.Root, catalog.Id, "session.json.pending")));
     }
 
+    [Fact]
+    public void FilterEditsAndChatHistoryUpdatesPreserveEachOther()
+    {
+        using Fixture fixture = new();
+        ViewerSettings settings = new ConsoleLogViewerOptions
+        {
+            CaptureConsole = false,
+            SaveSession = true,
+            SessionsDirectory = fixture.Root,
+        }.Validate();
+        using LogBuffer logs = new(settings);
+        logs.Append("retained", LogStream.Stdout);
+        SessionCatalog catalog = new(settings);
+        catalog.SaveFilters(null, Filters(), logs.GetStatus());
+        catalog.AppendChat(null, "First question", "First answer");
+        catalog.Save(logs);
+
+        SessionFilters latest = Filters() with { Search = "latest" };
+        catalog.SaveFilters(catalog.Id, latest, logs.GetStatus());
+        catalog.AppendChat(null, "Follow-up question", "Follow-up answer");
+        catalog.Save(logs);
+        ChatMessage[] expected =
+        {
+            new("user", "First question"), new("assistant", "First answer"),
+            new("user", "Follow-up question"), new("assistant", "Follow-up answer"),
+        };
+        SessionCatalog restarted = new(settings);
+        AssertFilters(latest, restarted.Information(catalog.Id, logs.GetStatus()).Filters);
+        Assert.Equal(expected, restarted.ReadChatHistory(catalog.Id));
+
+        SessionFilters edited = latest with { Search = "saved edit" };
+        restarted.SaveFilters(catalog.Id, edited, logs.GetStatus());
+        Assert.Equal(expected, new SessionCatalog(settings).ReadChatHistory(catalog.Id));
+        restarted.ClearChatHistory(catalog.Id);
+        SessionCatalog reloaded = new(settings);
+        AssertFilters(edited, reloaded.Information(catalog.Id, logs.GetStatus()).Filters);
+        Assert.Empty(reloaded.ReadChatHistory(catalog.Id));
+    }
+
     [Theory]
     [MemberData(nameof(InvalidFilters))]
     public async Task InvalidTypedFiltersAreRejectedWithoutMutatingMemoryOrSavedMetadata(string filters)

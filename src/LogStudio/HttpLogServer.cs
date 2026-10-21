@@ -231,6 +231,11 @@ internal sealed class HttpLogServer : IAsyncDisposable
                 await this.TelemetrySettingsAsync(context, cancellationToken).ConfigureAwait(false);
                 return;
             }
+            if (route == ViewerConstants.CopilotHistoryRoute)
+            {
+                await this.ChatHistoryAsync(context, cancellationToken).ConfigureAwait(false);
+                return;
+            }
             if (route is ViewerConstants.CopilotConnectRoute or ViewerConstants.CopilotChatRoute)
             {
                 if (request.HttpMethod != ViewerConstants.PostMethod)
@@ -727,6 +732,45 @@ internal sealed class HttpLogServer : IAsyncDisposable
         finally { this.copilotSlot.Release(); }
     }
 
+    private async Task ChatHistoryAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        HttpListenerRequest request = context.Request;
+        HttpListenerResponse response = context.Response;
+        bool clear = request.HttpMethod == ViewerConstants.PostMethod;
+        if (!clear && request.HttpMethod != ViewerConstants.GetMethod)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.MethodNotAllowed, "Use GET to read chat history or POST with an explicit action to clear it.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (clear && request.Headers[ViewerConstants.ClearRequestHeader] != ViewerConstants.CopilotClearHistoryAction)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.Forbidden, "An explicit chat history clear action header is required.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (clear && !this.copilotSlot.Wait(0))
+        {
+            await WriteErrorAsync(response, HttpStatusCode.TooManyRequests, "A Copilot request is already running. Wait for it to finish.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        try
+        {
+            string? selected = request.QueryString[ViewerConstants.SessionIdQuery];
+            if (clear) this.sessions.ClearChatHistory(selected);
+            await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(this.sessions.ReadChatHistory(selected), ViewerConstants.JsonOptions),
+                ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException ||
+            (exception is IOException && exception is not (FileNotFoundException or DirectoryNotFoundException)))
+        {
+            this.diagnostics.WriteLine($"Log Studio chat history failed: {exception}");
+            await WriteErrorAsync(response, HttpStatusCode.InternalServerError, "Could not read or save chat history. Check local files and permissions.", cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (clear) this.copilotSlot.Release();
+        }
+    }
+
     private async Task ChatAsync(HttpListenerContext context, bool connect, CancellationToken cancellationToken)
     {
         HttpListenerRequest request = context.Request;
@@ -788,11 +832,17 @@ internal sealed class HttpLogServer : IAsyncDisposable
                         {
                             result = await this.copilot.AskAsync(snapshot, streamDeadline.Token, chat,
                                 content => WriteChatEventAsync(response, new { content }, streamDeadline.Token)).ConfigureAwait(false);
+                            this.sessions.AppendChat(selected, chat.Question, result.Answer);
                             await WriteChatEventAsync(response, result, streamDeadline.Token).ConfigureAwait(false);
                         }
                         catch (CopilotException exception)
                         {
                             await WriteChatEventAsync(response, new { error = exception.Message }, streamDeadline.Token).ConfigureAwait(false);
+                        }
+                        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                        {
+                            this.diagnostics.WriteLine($"Log Studio could not save chat history: {exception}");
+                            await WriteChatEventAsync(response, new { error = "Could not save chat history. Check local files and permissions." }, streamDeadline.Token).ConfigureAwait(false);
                         }
                     }
                     catch (Exception exception) when (streamDeadline.IsCancellationRequested &&
@@ -802,6 +852,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
                     return;
                 }
                 result = await this.copilot.AskAsync(snapshot, cancellationToken, chat).ConfigureAwait(false);
+                this.sessions.AppendChat(selected, chat.Question, result.Answer);
             }
             await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(result, ViewerConstants.JsonOptions),
                 ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
@@ -814,6 +865,12 @@ internal sealed class HttpLogServer : IAsyncDisposable
         catch (HistoryClearedException exception)
         {
             await WriteErrorAsync(response, HttpStatusCode.Conflict, exception.Message, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException ||
+            (exception is IOException && exception is not (FileNotFoundException or DirectoryNotFoundException)))
+        {
+            this.diagnostics.WriteLine($"Log Studio could not save chat history: {exception}");
+            await WriteErrorAsync(response, HttpStatusCode.InternalServerError, "Could not save chat history. Check local files and permissions.", cancellationToken).ConfigureAwait(false);
         }
         finally
         {

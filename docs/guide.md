@@ -45,8 +45,11 @@ previous glass dashboard. Light and Dark Mode use the Clawpilot palette. System 
 keyboard navigation, resize/reorder grips, and per-query filter chips remain available.
 
 Open **Settings** (the gear in the header) to choose the UI font and base size (12–18 px),
-plus an independent monospace font, size (10–24 px), and line spacing for log messages in
-the table and inspector. Controls, headings, menus, and dialogs scale with the UI size.
+plus an independent monospace font, size (10–24 px), and line spacing for log messages.
+Both sizes default to **14 px**. UI text, including controls, menus, dialogs, and helper text,
+uses the chosen UI size, with larger headings scaling proportionally. The log size applies
+to every table-row field (including category, timestamp, and level) and inspector metadata,
+not just messages. The log font and line spacing apply to messages in the table and inspector.
 Changes apply immediately with previews; **Reset typography** restores the original fonts
 and sizes without changing your query, session, or theme.
 Fonts use installed local fallbacks and do not require downloads. Typography preferences
@@ -278,15 +281,22 @@ filters or paging. Logs are not sent until you send a question.
    validated CLI arguments, not prompt instructions. Account policy changes may require reopening
    chat to refresh the catalog; provider-side access or quota errors are shown without losing the draft.
 5. Ask your question—there is no approval checkbox. The full conversation stays visible; follow-up
-   questions include up to three recent question/answer pairs. **New chat** clears the conversation and draft;
-   closing and reopening chat starts over. Switching sessions resets the conversation.
+   questions include up to three recent question/answer pairs. Completed questions and full answers are
+   kept with the selected session and saved locally whenever that session is saved. Reopening chat or
+   switching back to a session restores its conversation, including after restarting Log Studio for
+   saved sessions. Saved chat can be read even without the CLI or remaining logs.
+   **New chat** clears that session's local conversation and the draft without deleting its logs.
+   Unsent drafts, incomplete replies, and model/reasoning choices are not saved.
 
 **Local CLI does not mean local inference.** Questions, session log text read by Copilot, and recent conversation are
 sent to GitHub Copilot's service using your existing CLI authentication. Log text is **not automatically
 redacted**: do not send credentials, secrets, personal data, or other sensitive information.
 The bridge uses an isolated temporary CLI configuration, reusing only authentication state and the
 OS credential store (or existing authentication environment variables). Temporary state is removed
-after each request. Clearing browser chat does not delete provider history.
+after each request. Local chat history can contain sensitive log excerpts and is stored with the
+session's private local metadata; deleting the saved session also deletes its chat.
+**New chat** does not delete provider history. Portable session bundles and JSONL exports contain
+logs and run details, not chat history.
 No authentication tokens are entered into or stored by the chat UI.
 The rest of Log Studio remains fully offline and does not require Copilot.
 
