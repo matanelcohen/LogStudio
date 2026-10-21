@@ -125,14 +125,17 @@ test("release workflow uses unprefixed tags without normalizing manual input", (
   assert.doesNotMatch(releaseWorkflow, /startsWith\(inputs\.tag, 'v'\)|format\('v\{0\}'/);
 });
 
-test("release matrix builds every installer target without macOS runners", () => {
-  const targets = new Map([...releaseWorkflow.matchAll(/^\s+- os: (\S+)\n\s+rid: (\S+)/gm)]
-    .map(([, os, rid]) => [rid, os]));
-  assert.deepEqual([...targets.keys()].sort(), [...releaseRids].sort());
-  for (const rid of releaseRids) {
-    assert.equal(targets.get(rid), rid.startsWith("win-") ? "windows-latest" : "ubuntu-latest", rid);
-  }
-});
+for (const [name, lineEnding] of [["LF", "\n"], ["CRLF", "\r\n"]]) {
+  test(`release matrix builds every installer target without macOS runners (${name})`, () => {
+    const workflow = releaseWorkflow.replace(/\r?\n/g, lineEnding);
+    const targets = new Map([...workflow.matchAll(/^\s+- os: (\S+)\r?\n\s+rid: (\S+)/gm)]
+      .map(([, os, rid]) => [rid, os]));
+    assert.deepEqual([...targets.keys()].sort(), [...releaseRids].sort());
+    for (const rid of releaseRids) {
+      assert.equal(targets.get(rid), rid.startsWith("win-") ? "windows-latest" : "ubuntu-latest", rid);
+    }
+  });
+}
 
 test("release publication requires every archive and checksum", { skip: windows }, (t) => {
   const directory = mkdtempSync(join(tmpdir(), "logstudio-release-assets."));
