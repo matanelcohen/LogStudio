@@ -243,7 +243,8 @@ public sealed class CopilotChatTests
     [Fact]
     public async Task SubprocessStreamsBoundedTerminalEscapeFreeUpdates()
     {
-        string answer = "\u001b[32m" + new string('x', 4000) + "\u001b[0m";
+        string markdown = new string('x', 4000) + "\r\n\r\n```cs\nawait worker.RunAsync();\n```\n\n- Check #1\n- Retry";
+        string answer = "\u001b[32m" + markdown + "\u001b[0m";
         using StringReader reader = new(answer);
         int updates = 0;
         string latest = "";
@@ -255,8 +256,11 @@ public sealed class CopilotChatTests
             return Task.CompletedTask;
         });
         Assert.True(updates > 1);
-        Assert.Equal(new string('x', 4000), latest);
+        Assert.Equal(markdown, latest);
         Assert.Equal(answer, output);
+        CopilotCliClient client = new((_, input, _) => Task.FromResult(input is null ? "version" : answer));
+        await client.ConnectAsync(default);
+        Assert.Equal(markdown, (await client.AskAsync(new ChatContext("question", 1, false), default)).Answer);
     }
 
     [Fact]
@@ -437,6 +441,54 @@ public sealed class CopilotChatTests
         Assert.Equal(fail ? "Copilot timed out." : "Complete answer", last.RootElement.GetProperty(fail ? "error" : "answer").GetString());
         Assert.Null(await reader.ReadLineAsync());
         Assert.False(Directory.Exists(snapshotDirectory));
+    }
+
+    [Fact]
+    public async Task StreamDeadlineAbortsSlowReadersAndReleasesTheSharedCopilotSlot()
+    {
+        TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        string? directory = null;
+        CopilotCliClient copilot = new(async (start, input, token, update) =>
+        {
+            if (input is null) return "version";
+            directory = start.WorkingDirectory;
+            try
+            {
+                for (int index = 0; index < 10_000; index++)
+                    await update!(new string('x', CopilotChat.MaximumAnswerLength));
+                await Task.Delay(Timeout.Infinite, token);
+                return "answer";
+            }
+            finally { stopped.TrySetResult(); }
+        }, discoverModels: (_, _) => Task.FromResult(Array.Empty<CopilotModel>()));
+        ViewerSettings settings = new ConsoleLogViewerOptions().Validate();
+        using LogBuffer logs = new(settings);
+        logs.Append("record", LogStream.Stdout);
+        await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, new(settings), UnusedRename, copilot,
+            copilotTimeout: TimeSpan.FromSeconds(1));
+        using HttpClient client = new();
+        using HttpRequestMessage connect = Post(server.Url, ViewerConstants.CopilotConnectRoute, ViewerConstants.CopilotConnectAction);
+        using HttpResponseMessage connected = await client.SendAsync(connect);
+        connected.EnsureSuccessStatusCode();
+        using HttpRequestMessage ask = Post(server.Url, ViewerConstants.CopilotChatRoute, ViewerConstants.CopilotChatAction,
+            JsonSerializer.Serialize(Request(), ViewerConstants.JsonOptions));
+        ask.Headers.Accept.ParseAdd("application/x-ndjson");
+        using HttpResponseMessage response = await client.SendAsync(ask, HttpCompletionOption.ResponseHeadersRead);
+        response.EnsureSuccessStatusCode();
+        await stopped.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
+        while (true)
+        {
+            using HttpRequestMessage retry = Post(server.Url, ViewerConstants.CopilotConnectRoute, ViewerConstants.CopilotConnectAction);
+            using HttpResponseMessage retried = await client.SendAsync(retry, timeout.Token);
+            if (retried.StatusCode != HttpStatusCode.TooManyRequests)
+            {
+                retried.EnsureSuccessStatusCode();
+                break;
+            }
+            await Task.Delay(10, timeout.Token);
+        }
+        Assert.False(Directory.Exists(directory));
     }
 
     [Theory]

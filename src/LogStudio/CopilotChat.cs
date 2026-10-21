@@ -215,7 +215,7 @@ internal sealed class CopilotCliClient
                 start.ArgumentList.Add("--stream=on");
             }
             string output = await this.run(start, prompt, deadline.Token, onOutput).ConfigureAwait(false);
-            string clean = LogParser.StripTerminalEscapes(output).Trim();
+            string clean = LogParser.StripTerminalEscapes(output, preserveLineBreaks: true).Trim();
             if (clean.Length == 0) throw new CopilotException("Copilot returned no response. Run copilot login in a terminal and try again.");
             if (clean.Length > CopilotChat.MaximumAnswerLength) throw new CopilotException("Copilot's response exceeded the 16000-character limit. Ask a narrower question.");
             return clean;
@@ -348,7 +348,7 @@ internal sealed class CopilotCliClient
             if (output.Length + count > CopilotChat.MaximumAnswerLength)
                 throw new CopilotException("Copilot output exceeded the 16000-character limit. Ask a narrower question.");
             output.Append(buffer, 0, count);
-            if (onOutput is not null) await onOutput(LogParser.StripTerminalEscapes(output.ToString())).ConfigureAwait(false);
+            if (onOutput is not null) await onOutput(LogParser.StripTerminalEscapes(output.ToString(), preserveLineBreaks: true)).ConfigureAwait(false);
         }
         return output.ToString();
     }

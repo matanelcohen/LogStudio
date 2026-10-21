@@ -94,7 +94,7 @@ internal sealed class LogParser
             stream == LogStream.Viewer ? LogSeverity.Information : LogSeverity.Output, null);
     }
 
-    internal static string StripTerminalEscapes(string value)
+    internal static string StripTerminalEscapes(string value, bool preserveLineBreaks = false)
     {
         StringBuilder result = new(value.Length);
         for (int index = 0; index < value.Length; index++)
@@ -102,7 +102,7 @@ internal sealed class LogParser
             char character = value[index];
             if (character != Escape)
             {
-                if (character >= ' ' || character == '\t')
+                if (character >= ' ' || character == '\t' || (preserveLineBreaks && character is '\r' or '\n'))
                 {
                     result.Append(character);
                 }
