@@ -250,8 +250,13 @@ public sealed class CaptureTests
         Assert.Single(viewer.GetLogs());
     }
 
-    [Fact]
-    public async Task ContinuationsAfterIdlePublicationKeepWriterLocalMetadata()
+    [Theory]
+    [InlineData("      warning details")]
+    [InlineData("      Error: connection failed")]
+    [InlineData("      Fatal error: connection failed")]
+    [InlineData("      !! connection failed")]
+    [InlineData("      System.Exception: connection failed")]
+    public async Task ContinuationsAfterIdlePublicationKeepWriterLocalMetadata(string message)
     {
         await using ConsoleLogViewer viewer = StartServer();
         using TextWriter writer = viewer.CreateCaptureWriter(TextWriter.Null, LogStream.Stdout);
@@ -260,11 +265,11 @@ public sealed class CaptureTests
         await WaitUntilAsync(() => viewer.GetLogs().Count > 0);
         other.Write("info: Other.Category[0]\n");
         other.Flush();
-        writer.Write("      warning details\n");
+        writer.Write(message + "\n");
         writer.Flush();
 
         LogEntry entry = viewer.GetLogs()[^1];
-        Assert.Equal("      warning details", entry.Message);
+        Assert.Equal(message, entry.Message);
         Assert.Equal(LogSeverity.Warning, entry.Severity);
         Assert.Equal("My.Category", entry.Category);
     }

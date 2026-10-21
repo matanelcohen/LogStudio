@@ -231,7 +231,7 @@ internal sealed class CapturingTextWriter : TextWriter
             }
 
             this.hasEntry = true;
-            if (header || !this.hasContext)
+            if ((header && (!continuation || structured)) || !this.hasContext)
             {
                 this.entrySeverity = header ? severity : this.stream == LogStream.Stderr ? LogSeverity.Error :
                     this.stream == LogStream.Viewer ? LogSeverity.Information : LogSeverity.Output;
