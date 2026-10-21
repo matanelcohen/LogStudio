@@ -45,8 +45,11 @@ previous glass dashboard. Light and Dark Mode use the Clawpilot palette. System 
 keyboard navigation, resize/reorder grips, and per-query filter chips remain available.
 
 Open **Settings** (the gear in the header) to choose the UI font and base size (12–18 px),
-plus an independent monospace font, size (10–24 px), and line spacing for log messages in
-the table and inspector. Controls, headings, menus, and dialogs scale with the UI size.
+plus an independent monospace font, size (10–24 px), and line spacing for log messages.
+Both sizes default to **14 px**. UI text, including controls, menus, dialogs, and helper text,
+uses the chosen UI size, with larger headings scaling proportionally. The log size applies
+to every table-row field (including category, timestamp, and level) and inspector metadata,
+not just messages. The log font and line spacing apply to messages in the table and inspector.
 Changes apply immediately with previews; **Reset typography** restores the original fonts
 and sizes without changing your query, session, or theme.
 Fonts use installed local fallbacks and do not require downloads. Typography preferences
