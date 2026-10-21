@@ -1,13 +1,17 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { fixturePage, Status } from "./test-fixtures";
+import { Entry, fixturePage, Status } from "./test-fixtures";
 import { useLiveStatus, useLogPage } from "./useLogExplorer";
 import { DefaultTypography, TypographyStorageKey } from "./useTypography";
 import * as api from "./api";
-import type { ChatResponse, RunningApplicationsState } from "./model";
+import type { ChatResponse, LogEntry, RunningApplicationsState } from "./model";
 
 const reconnect = vi.hoisted(() => vi.fn());
+const styles = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "styles.css"), "utf8");
 
 beforeEach(() => localStorage.removeItem(TypographyStorageKey));
 afterEach(() => localStorage.removeItem(TypographyStorageKey));
@@ -204,6 +208,128 @@ describe("log-first workspace", () => {
     fireEvent.click(screen.getByRole("row", { name: /Hello/ }));
     expect(container.querySelector(".details-panel")).not.toBeNull();
     expect(screen.getByRole("button", { name: "Toggle inspector" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  describe("multiline log rows", () => {
+    const error: LogEntry = {
+      ...Entry, severity: "error",
+      message: "fail: App.Skill[0]\n      Request failed: AgentId is not set\n" +
+        "      System.InvalidOperationException: AgentId is not set\n" +
+        "         at Example.Run()\n         at Example.Main()"
+    };
+    const next: LogEntry = { ...Entry, id: 2, message: "Next log event" };
+
+    function renderRows(entries: LogEntry[] = [error, next]) {
+      vi.mocked(useLogPage).mockReturnValue({
+        page: {
+          ...fixturePage(error), entries, matchCount: entries.length, highlightTerms: ["AgentId"],
+          errorCount: entries.filter(entry => entry.severity === "error" || entry.severity === "critical").length,
+          warningCount: entries.filter(entry => entry.severity === "warning").length
+        },
+        loading: false, error: null, refresh: vi.fn()
+      });
+      return render(<><style>{styles}</style><App /></>);
+    }
+    afterEach(() => {
+      vi.mocked(useLogPage).mockReturnValue({ page: fixturePage(), loading: false, error: null, refresh: vi.fn() });
+    });
+
+    it("shows one compact error row before the next log and keeps its full text in the inspector", () => {
+      renderRows();
+      const table = screen.getByRole("table", { name: "Captured logs" });
+      const rows = table.querySelectorAll("tbody tr");
+      expect(rows).toHaveLength(2);
+      const row = screen.getByRole("row", { name: /Request failed/ });
+      const preview = within(row).getByText(/fail: App.Skill/, { selector: "pre" });
+      expect(getComputedStyle(preview).whiteSpace).toBe("nowrap");
+      expect(preview.textContent).toBe(error.message);
+      expect(within(row).getAllByText("AgentId", { selector: "mark" })).toHaveLength(2);
+      expect(rows[1]?.textContent).toContain(next.message);
+      const hint = within(row).getByText("+4 lines");
+      expect(hint.parentElement?.title).toBe("4 additional lines. Select this row to inspect the full message.");
+      expect(within(row).getByText("4 additional lines. Select this row to inspect the full message.").className).toBe("visually-hidden");
+      expect(rows[1]?.querySelector(".message-lines")).toBeNull();
+
+      fireEvent.click(hint);
+      const inspector = screen.getByRole("complementary", { name: "Entry inspector" });
+      const details = within(inspector).getByText(/fail: App.Skill/, { selector: "pre" });
+      expect(details.textContent).toBe(error.message);
+      expect(getComputedStyle(details).whiteSpace).toBe("pre-wrap");
+    });
+
+    it("only displays message line breaks when wrapping is explicitly enabled", async () => {
+      renderRows();
+      expect(screen.getByText("+4 lines")).toBeDefined();
+      fireEvent.keyDown(screen.getByRole("button", { name: "Explorer options" }), { key: "Enter" });
+      fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Wrap long lines" }));
+      const preview = screen.getByText(/fail: App.Skill/, { selector: "pre" });
+      expect(getComputedStyle(preview).whiteSpace).toBe("pre-wrap");
+      expect(preview.textContent).toBe(error.message);
+      expect(screen.queryByText("+4 lines")).toBeNull();
+
+      fireEvent.keyDown(screen.getByRole("button", { name: "Explorer options" }), { key: "Enter" });
+      fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Wrap long lines" }));
+      expect(getComputedStyle(screen.getByText(/fail: App.Skill/, { selector: "pre" })).whiteSpace).toBe("nowrap");
+      expect(screen.getByText("+4 lines")).toBeDefined();
+    });
+
+    it.each([
+      ["a single line", "One message", 0],
+      ["an empty message", "", 0],
+      ["LF", "First\nSecond", 1],
+      ["CRLF", "First\r\nSecond\r\nThird", 2],
+      ["CR", "First\rSecond", 1],
+      ["mixed line endings", "First\r\nSecond\nThird\rFourth", 3]
+    ])("counts additional lines for %s without changing the original text", (_, message, extraLines) => {
+      renderRows([{ ...Entry, message }]);
+      const row = screen.getByRole("table", { name: "Captured logs" }).querySelector("tbody tr");
+      expect(row?.querySelector("pre")?.textContent).toBe(message);
+      if (extraLines === 0) {
+        expect(row?.querySelector(".message-lines")).toBeNull();
+      } else {
+        expect(screen.getByText(`+${extraLines} ${extraLines === 1 ? "line" : "lines"}`)).toBeDefined();
+      }
+    });
+
+    it("keeps severity cues on rows when selecting entries or hiding the level column", async () => {
+      const entries: LogEntry[] = [
+        { ...Entry, id: 1, severity: "information", message: "Informational entry" },
+        { ...Entry, id: 2, severity: "warning", message: "Warning entry" },
+        { ...Entry, id: 3, severity: "error", message: "Error entry" },
+        { ...Entry, id: 4, severity: "critical", message: "Critical entry" }
+      ];
+      renderRows(entries);
+      const table = screen.getByRole("table", { name: "Captured logs" });
+      const rows = table.querySelectorAll("tbody tr");
+      expect([...rows].map(row => row.getAttribute("data-severity"))).toEqual(entries.map(entry => entry.severity));
+      expect([...table.querySelectorAll(".severity-badge")].map(badge => badge.textContent)).toEqual(["Info", "Warn", "Error", "Critical"]);
+
+      fireEvent.keyDown(screen.getByRole("row", { name: /Error entry/ }), { key: "Enter" });
+      expect(rows[2]?.classList.contains("selected")).toBe(true);
+      fireEvent.keyDown(screen.getByRole("row", { name: /Warning entry/ }), { key: " " });
+      expect(rows[1]?.classList.contains("selected")).toBe(true);
+      expect(rows[2]?.classList.contains("selected")).toBe(false);
+
+      fireEvent.keyDown(screen.getByRole("button", { name: "Columns" }), { key: "Enter" });
+      fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Level" }));
+      expect(screen.queryByRole("columnheader", { name: /Level/ })).toBeNull();
+      expect(table.querySelector(".severity-badge")).toBeNull();
+      expect([...rows].map(row => row.getAttribute("data-severity"))).toEqual(entries.map(entry => entry.severity));
+    });
+
+    it("updates the multiline hint when a live entry receives additional stack frames", () => {
+      const { rerender } = renderRows();
+      const updated = { ...error, message: `${error.message}\n         at Example.Finish()` };
+      vi.mocked(useLogPage).mockReturnValue({
+        page: { ...fixturePage(updated), entries: [updated, next], matchCount: 2, errorCount: 1, highlightTerms: ["AgentId"] },
+        loading: false, error: null, refresh: vi.fn()
+      });
+      rerender(<><style>{styles}</style><App /></>);
+      expect(screen.queryByText("+4 lines")).toBeNull();
+      expect(screen.getByText("+5 lines")).toBeDefined();
+      expect(screen.getByText(/fail: App.Skill/, { selector: "pre" }).textContent).toBe(updated.message);
+      expect(screen.getByRole("table", { name: "Captured logs" }).querySelectorAll("tbody tr")).toHaveLength(2);
+    });
   });
 
   it("turns inline severity counts into real filters and makes import directly available", () => {

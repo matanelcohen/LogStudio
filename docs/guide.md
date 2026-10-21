@@ -110,7 +110,7 @@ PATH, use the command printed by the installer. No sudo or shell-profile edits a
 ```bash
 # Pin a release or choose user-writable directories:
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.sh \
-  | bash -s -- --version 1.2.1 --install-dir "$HOME/.local/share/logstudio" --bin-dir "$HOME/.local/bin"
+  | bash -s -- --version 1.2.2 --install-dir "$HOME/.local/share/logstudio" --bin-dir "$HOME/.local/bin"
 logstudio --open -- dotnet run --project ./path/to/App.csproj
 ```
 
@@ -123,7 +123,7 @@ Invoke-WebRequest -UseBasicParsing https://github.com/matanelcohen/LogStudio/rel
 logstudio --open -- dotnet run --project .\path\to\App.csproj
 ```
 
-Use `& $installer -Version 1.2.1 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
+Use `& $installer -Version 1.2.2 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
 version or choose a directory. If execution policy blocks the script, use the process-only
 override described below; when launching a separate PowerShell process, add the printed
 `bin` directory to PATH in your current terminal yourself. The installer otherwise updates
@@ -231,7 +231,7 @@ does not verify Windows-specific execution.
 ### Publishing compiled releases
 
 Set and commit the package version in `Directory.Build.props`, then push a matching tag
-on that commit, such as `1.2.1` (or `1.2.1-rc.1` for a prerelease). Versions and tags
+on that commit, such as `1.2.2` (or `1.2.2-rc.1` for a prerelease). Versions and tags
 must not have a `v` prefix. The
 [compiled-release workflow](../.github/workflows/release.yml) validates the tag, restores,
 builds, tests the frontend/backend and installer contracts, and verifies a source install.
@@ -726,7 +726,13 @@ remove the reported folder if necessary. Download JSONL before closing if you wa
 - **Appearance** offers Light, Dark, or automatic system appearance.
 - **Fields**, **Timeline**, and the inspector icon toggle their panels. Inline error/warning
   counts are shortcuts to severity filters. The timeline is visible-page-only.
-- Explorer options set line wrapping and following, refresh disk history, or clear this tab's view.
+- Alternating row shades help track each entry across the table. Red edge markers identify errors
+  and critical entries; amber markers identify warnings, even when the Level column is hidden.
+  Selection highlights preserve these severity markers.
+- Messages use a single-line preview by default. A **+N lines** hint identifies additional lines in
+  the original message; select the row to inspect the complete message and stack trace. Explorer
+  options can enable **Wrap long lines** (which hides the hint), toggle following, refresh disk
+  history, or clear this tab's view.
 
 ### Professional include / exclude conditions
 
@@ -760,9 +766,14 @@ opening control after closing the editor.
 Severity and category are best-effort metadata inferred from .NET console logger headers /
 continuations, JSON console logs, bracket-style levels, and explicit error prefixes.
 Plain stdout is `output`; plain stderr is `error`. Capture timestamps are UTC, with local-time
-display in the table. A console line can produce a partial entry after roughly 250-500 ms idle;
-long lines are split into bounded chunks rather than silently truncated. Adjacent partial chunks
-can be reassembled by concatenating their message text, but line grouping is not inferred.
+display in the table. Recognized log headers and exception messages are grouped with their
+indented continuations, stack frames, and inner-exception markers into one entry. New headers,
+unrelated ordinary lines, and blank separators start separate entries; arbitrary unmarked
+multiline prose cannot be reliably grouped. Grouping is independent for each capture writer.
+Pending entries appear after roughly 250-500 ms idle, or on flush, completion, or shutdown.
+Unterminated lines are marked partial. Messages exceeding `MaxLineLength`, including multiline
+messages, are split into bounded partial chunks rather than silently truncated; concatenate
+their message text to reassemble them. Newlines and indentation are preserved in the inspector.
 
 ## Optional NuGet library attachment
 
@@ -786,7 +797,8 @@ await using ConsoleLogViewer viewer = ConsoleLogViewer.Start(
 `ConsoleLogViewerOptions` also exposes `Port`, `Capacity` (zero / unlimited by default),
 `FlushEveryEntries` (1000 by default), `MaxLineLength` (64-65536), and `CaptureConsole`.
 A positive `Capacity` opts into bounded visible retention.
-`Record` accepts explicit severity and category when available.
+`Record` preserves each call as one message, including multiline text, and accepts explicit
+severity and category when available. The same chunk limit applies to recorded messages.
 `CreateCaptureWriter` supports other text sources without taking ownership of the original
 writer. `Complete(exitCode)` marks a run complete without closing the server.
 
