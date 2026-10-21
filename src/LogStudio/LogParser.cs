@@ -152,7 +152,7 @@ internal sealed class LogParser
             trimmed.StartsWith("Unhandled Exception:", StringComparison.OrdinalIgnoreCase);
     }
 
-    internal static string StripTerminalEscapes(string value)
+    internal static string StripTerminalEscapes(string value, bool preserveLineBreaks = false)
     {
         StringBuilder result = new(value.Length);
         for (int index = 0; index < value.Length; index++)

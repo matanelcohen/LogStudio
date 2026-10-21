@@ -111,6 +111,22 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface CopilotModel {
+  id: string;
+  name: string;
+  reasoningEfforts: string[];
+}
+
+export interface CopilotConnection {
+  version: string;
+  models: CopilotModel[];
+}
+
+export interface ChatOptions {
+  model?: string;
+  reasoningEffort?: string;
+}
+
 export interface ChatResponse {
   answer: string;
   contextEntryCount: number;

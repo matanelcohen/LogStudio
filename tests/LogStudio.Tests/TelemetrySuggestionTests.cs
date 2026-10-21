@@ -299,7 +299,8 @@ public sealed class TelemetrySuggestionTests
         using TelemetryRecorder recorder = new(settings);
         using LogBuffer logs = new(settings);
         int calls = 0;
-        CopilotCliClient cli = new((_, _, _) => { calls++; return Task.FromResult("version"); });
+        CopilotCliClient cli = new((_, _, _) => { calls++; return Task.FromResult("version"); },
+            discoverModels: (_, _) => Task.FromResult(Array.Empty<CopilotModel>()));
         await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, new(settings), _ => throw new InvalidOperationException(), cli, recorder);
         using HttpClient client = new();
         using HttpRequestMessage request = Post(server.Url, body);
@@ -319,7 +320,8 @@ public sealed class TelemetrySuggestionTests
         using TelemetryRecorder recorder = new(settings);
         using LogBuffer logs = new(settings);
         int calls = 0;
-        CopilotCliClient cli = new((_, _, _) => { calls++; return Task.FromResult("version"); });
+        CopilotCliClient cli = new((_, _, _) => { calls++; return Task.FromResult("version"); },
+            discoverModels: (_, _) => Task.FromResult(Array.Empty<CopilotModel>()));
         await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, new(settings), _ => throw new InvalidOperationException(), cli, recorder);
         using HttpClient client = new();
         using HttpResponseMessage sources = await client.GetAsync(new Uri(server.Url, "api/telemetry/sources"));
@@ -435,7 +437,8 @@ public sealed class TelemetrySuggestionTests
     public async Task DisabledCaptureConflictsWithoutLaunchingModel()
     {
         int calls = 0;
-        CopilotCliClient cli = new((_, _, _) => { calls++; return Task.FromResult("version"); });
+        CopilotCliClient cli = new((_, _, _) => { calls++; return Task.FromResult("version"); },
+            discoverModels: (_, _) => Task.FromResult(Array.Empty<CopilotModel>()));
         using HttpClient client = new();
         ViewerSettings disabledSettings = Settings(false);
         using LogBuffer disabledLogs = new(disabledSettings);
