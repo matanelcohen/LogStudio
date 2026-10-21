@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
-import { askCopilot, connectCopilot } from "./api";
+import { askCopilot, clearCopilotHistory, connectCopilot, fetchCopilotHistory } from "./api";
 import { errorMessage, MaximumChatQuestionLength, type ChatMessage, type CopilotConnection, type ViewerStatus } from "./model";
 import { SelectControl } from "./ui";
 
@@ -25,6 +25,9 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
   const [reasoningEffort, setReasoningEffort] = useState("");
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyAttempt, setHistoryAttempt] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const panel = useRef<HTMLElement>(null);
@@ -39,6 +42,17 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
   const followMessages = useRef(true);
   const entryCount = Math.max(0, (status?.lastId ?? 0) - (status?.clearedThroughId ?? 0));
   const selectedModel = connection?.models.find(candidate => candidate.id === model);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setHistoryLoaded(false); setHistoryError(null);
+    void fetchCopilotHistory(sessionId, controller.signal)
+      .then(history => {
+        if (!controller.signal.aborted) { setMessages(history); setHistoryLoaded(true); }
+      })
+      .catch(error => { if (!controller.signal.aborted) setHistoryError(errorMessage(error)); });
+    return () => controller.abort();
+  }, [sessionId, historyAttempt]);
 
   useEffect(() => {
     let active = true;
@@ -87,7 +101,7 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
 
   async function submit() {
     const text = question.trim();
-    if (!text || !connection || inFlight.current || !entryCount) return;
+    if (!text || !connection || !historyLoaded || inFlight.current || !entryCount) return;
     inFlight.current = true;
     const nextMessages: ChatMessage[] = [...messages, { role: "user", content: text }];
     followMessages.current = true;
@@ -110,6 +124,22 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
     finally { inFlight.current = false; setBusy(false); setStreamedAnswer(""); }
   }
 
+  async function newChat() {
+    if (inFlight.current || !historyLoaded) return;
+    inFlight.current = true;
+    setBusy(true);
+    try {
+      if (messages.length) await clearCopilotHistory(sessionId);
+      setMessages([]); setQuestion(""); if (connection) setError(null);
+      setCopied(null); setCopyError(null); followMessages.current = true; setFollowing(true);
+    } catch (error) {
+      setError(errorMessage(error));
+    } finally {
+      inFlight.current = false; setBusy(false);
+      questionInput.current?.focus();
+    }
+  }
+
   return <aside ref={panel} className="copilot-panel" hidden={hidden} aria-labelledby="copilotTitle" onKeyDown={event => {
     if (event.key === "Escape" && !busy && !event.defaultPrevented && panel.current?.contains(event.target as Node)) {
       event.stopPropagation(); close();
@@ -121,8 +151,8 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
         <h2 id="copilotTitle">Ask Copilot about logs</h2>
         <p title={status?.applicationName}>{status?.applicationName ?? "Selected session"}</p>
       </div>
-      <button className="icon-button ghost-button" disabled={busy || (!messages.length && !question && !error)} aria-label="New chat" title="New chat"
-        onClick={() => { setMessages([]); setQuestion(""); if (connection) setError(null); setCopied(null); setCopyError(null); followMessages.current = true; setFollowing(true); questionInput.current?.focus(); }}>
+      <button className="icon-button ghost-button" disabled={busy || !historyLoaded || (!messages.length && !question && !error)} aria-label="New chat" title="New chat"
+        onClick={() => { void newChat(); }}>
         <SquarePen size={17} />
       </button>
       <button className="icon-button ghost-button" disabled={busy} aria-label="Close Copilot chat" title="Close chat" onClick={close}><X size={17} /></button>
@@ -132,7 +162,7 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
         <Sparkles size={26} aria-hidden="true" />
         <h3>Find the story in your logs</h3>
         <div className="copilot-starters">
-          {["What caused the errors?", "Summarize this session"].map(prompt => <button type="button" key={prompt} disabled={busy || !entryCount}
+          {["What caused the errors?", "Summarize this session"].map(prompt => <button type="button" key={prompt} disabled={busy || !historyLoaded || !entryCount}
             onClick={() => { setQuestion(prompt); questionInput.current?.focus(); }}>{prompt}<ArrowUp size={13} aria-hidden="true" /></button>)}
         </div>
       </div>}
@@ -165,6 +195,8 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
       {error && <div className="notice danger" role="alert"><span>{error}</span>{!connection && !preparing &&
         <button type="button" aria-label="Retry Copilot setup" onClick={() => { setupRequest.current = null; setSetupAttempt(value => value + 1); }}><RotateCcw size={14} />Retry</button>}</div>}
       {copyError && <p className="notice danger" role="alert">{copyError}</p>}
+      {historyError && <div className="notice danger" role="alert"><span>{historyError}</span>
+        <button type="button" aria-label="Retry chat history" onClick={() => setHistoryAttempt(value => value + 1)}><RotateCcw size={14} />Retry</button></div>}
       <form className="copilot-composer" onSubmit={event => { event.preventDefault(); void submit(); }}>
         <label className="visually-hidden" htmlFor="copilotQuestion">Message Copilot</label>
         <textarea ref={questionInput} id="copilotQuestion" value={question} maxLength={MaximumChatQuestionLength} disabled={busy}
@@ -185,10 +217,11 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
               onChange={setReasoningEffort} />}
           </div>
           <button type="submit" className="icon-button primary" aria-label="Send message" title="Send message"
-            disabled={busy || !connection || !question.trim() || !entryCount}><ArrowUp size={18} /></button>
+            disabled={busy || !historyLoaded || !connection || !question.trim() || !entryCount}><ArrowUp size={18} /></button>
         </div>
       </form>
-      <div className="copilot-footer" aria-live="polite">{preparing ? "Preparing Copilot…" : !entryCount ? "This session has no logs to analyze." :
+      <div className="copilot-footer" aria-live="polite">{!historyLoaded ? historyError ? "Chat history is unavailable. Retry to continue." : "Loading chat history…" :
+        preparing ? "Preparing Copilot…" : !entryCount ? "This session has no logs to analyze." :
         !connection ? "Copilot is unavailable. Your draft is preserved." : "Enter to send · Shift+Enter for a new line"}</div>
     </div>
   </aside>;

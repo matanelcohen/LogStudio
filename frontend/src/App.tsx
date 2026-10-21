@@ -177,7 +177,7 @@ export default function App() {
           <div className="header-actions">
             <span id="connection" className={`connection ${live.connection}`} role="status">{archived ? "Saved session" : connectionLabel}</span>
             <button id="importLogs" ref={importOpener} className="ghost-button" onClick={() => setImportOpen(true)}><FileUp size={14} /> Import</button>
-            <button ref={chatOpener} className="ghost-button" aria-pressed={chatOpen} disabled={!status || status.lastId <= status.clearedThroughId}
+            <button ref={chatOpener} className="ghost-button" aria-pressed={chatOpen} disabled={!status}
               onClick={() => setChatOpen(true)}><MessageSquare size={14} /> Ask Copilot</button>
             <Popover.Root>
               <Popover.Trigger asChild><button id="storageInfo" className="icon-button ghost-button" aria-label="Storage details"><HardDrive size={15} /></button></Popover.Trigger>

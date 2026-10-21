@@ -1,5 +1,5 @@
 import {
-  ApiRoutes, ClearActionHeader, ClearActionValue, CopilotChatActionValue, CopilotConnectActionValue, DeleteSessionActionValue, ImportActionValue, importFormat, MaximumCategorySuggestions, MaximumChatAnswerLength, MaximumChatRequestBytes, MaximumHighlights, MaximumPageSize, PageSize, QueryKeys, RenameActionValue, Severities, Streams, UploadContentType, validateImportFile,
+  ApiRoutes, ClearActionHeader, ClearActionValue, CopilotChatActionValue, CopilotClearHistoryActionValue, CopilotConnectActionValue, DeleteSessionActionValue, ImportActionValue, importFormat, MaximumCategorySuggestions, MaximumChatAnswerLength, MaximumChatRequestBytes, MaximumHighlights, MaximumPageSize, PageSize, QueryKeys, RenameActionValue, Severities, Streams, UploadContentType, validateImportFile,
   SelectApplicationActionValue, type RunningApplication, type RunningApplicationsState,
   type ChatMessage, type ChatOptions, type ChatResponse, type CopilotConnection, type ClearResult, type LogEntry, type LogPage, type SessionInfo, type ViewerStatus
 } from "./model";
@@ -244,6 +244,28 @@ export async function renameSession(id: string, name: string): Promise<SessionIn
 export async function deleteSession(id: string): Promise<void> {
   const result = object(await manageSession(id, DeleteSessionActionValue));
   if (result.deleted !== true) throw new Error("The server did not confirm deletion.");
+}
+
+export async function fetchCopilotHistory(sessionId: string, signal: AbortSignal): Promise<ChatMessage[]> {
+  const query = sessionId ? `?${new URLSearchParams({ [QueryKeys.SessionId]: sessionId })}` : "";
+  const response = await fetch(ApiRoutes.CopilotHistory + query, { signal });
+  const value: unknown = await response.json();
+  if (!response.ok) throw new ApiError(text(object(value).error, "chat history error"), response.status);
+  if (!Array.isArray(value) || value.length % 2 !== 0) throw new Error("The server returned invalid chat history.");
+  return value.map((value, index) => {
+    const message = object(value);
+    const role = index % 2 === 0 ? "user" : "assistant";
+    if (message.role !== role) throw new Error("The server returned an invalid chat message role.");
+    return { role, content: text(message.content, "chat message") };
+  });
+}
+
+export async function clearCopilotHistory(sessionId: string): Promise<void> {
+  const query = sessionId ? `?${new URLSearchParams({ [QueryKeys.SessionId]: sessionId })}` : "";
+  const response = await fetch(ApiRoutes.CopilotHistory + query, {
+    method: "POST", headers: { [ClearActionHeader]: CopilotClearHistoryActionValue }
+  });
+  if (!response.ok) throw new ApiError(text(object(await response.json()).error, "chat history clear error"), response.status);
 }
 
 export async function connectCopilot(): Promise<CopilotConnection> {

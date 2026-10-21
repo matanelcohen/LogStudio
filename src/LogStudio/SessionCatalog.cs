@@ -10,7 +10,7 @@ internal sealed record SessionInfo(
     string Id, string Name, DateTimeOffset StartedAt, DateTimeOffset? CompletedAt,
     int? ExitCode, long EntryCount, string? Command, string[] Arguments, string WorkingDirectory, bool IsCurrent);
 
-internal sealed record SavedSession(SessionInfo Session, ViewerStatus Status, string?[] Categories);
+internal sealed record SavedSession(SessionInfo Session, ViewerStatus Status, string?[] Categories, ChatMessage[]? ChatHistory = null);
 
 internal sealed class SessionCatalog
 {
@@ -27,6 +27,7 @@ internal sealed class SessionCatalog
     private readonly ViewerSettings settings;
     private readonly Dictionary<string, long> generations = new(StringComparer.Ordinal);
     private readonly string[] arguments;
+    private ChatMessage[] chatHistory = Array.Empty<ChatMessage>();
 
     internal SessionCatalog(ViewerSettings settings)
     {
@@ -51,6 +52,23 @@ internal sealed class SessionCatalog
     internal SessionInfo Information(string? id, ViewerStatus current)
     {
         lock (this.gate) return string.IsNullOrEmpty(id) || id == this.Id ? this.Describe(current) : this.Read(id).Session;
+    }
+
+    internal ChatMessage[] ReadChatHistory(string? id)
+    {
+        lock (this.gate)
+            return string.IsNullOrEmpty(id) || id == this.Id ? this.chatHistory.ToArray() : this.Read(id).ChatHistory ?? Array.Empty<ChatMessage>();
+    }
+
+    internal void AppendChat(string? id, string question, string answer)
+    {
+        lock (this.gate)
+            this.WriteChatHistory(id, this.ReadChatHistory(id).Concat(new[] { new ChatMessage("user", question), new ChatMessage("assistant", answer) }).ToArray());
+    }
+
+    internal void ClearChatHistory(string? id)
+    {
+        lock (this.gate) this.WriteChatHistory(id, Array.Empty<ChatMessage>());
     }
 
     internal string CreateImportStaging()
@@ -154,7 +172,7 @@ internal sealed class SessionCatalog
                 if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(Path.Combine(destination, file), FilePermissions);
             ViewerStatus status = history.Status with { HistoryDirectory = destination };
             if (closing && !status.IsCompleted) status = status with { IsCompleted = true, CompletedAt = DateTimeOffset.UtcNow };
-            this.Write(destination, new SavedSession(this.Describe(status, false), status, history.Categories));
+            this.Write(destination, new SavedSession(this.Describe(status, false), status, history.Categories, this.chatHistory));
         }
     }
 
@@ -196,7 +214,7 @@ internal sealed class SessionCatalog
                 PendingEntries = 0,
                 Revision = saved.Status.Revision + 1,
             };
-            this.Write(directory, new SavedSession(saved.Session with { EntryCount = 0 }, status, Array.Empty<string?>()));
+            this.Write(directory, saved with { Session = saved.Session with { EntryCount = 0 }, Status = status, Categories = Array.Empty<string?>() });
             return new LogClearResult(deleted, status);
         }
     }
@@ -244,6 +262,16 @@ internal sealed class SessionCatalog
             throw new InvalidDataException("The saved session metadata is invalid.");
         if (saved.Session.Id != id) throw new InvalidDataException("The saved session ID does not match its directory.");
         return saved;
+    }
+
+    private void WriteChatHistory(string? id, ChatMessage[] messages)
+    {
+        bool current = string.IsNullOrEmpty(id) || id == this.Id;
+        string selected = current ? this.Id : id!;
+        string directory = this.DirectoryFor(selected);
+        if (!current || (this.settings.SaveSession && File.Exists(Path.Combine(directory, MetadataFile))))
+            this.Write(directory, this.Read(selected) with { ChatHistory = messages });
+        if (current) this.chatHistory = messages;
     }
 
     private SessionInfo RenameSaved(string id, string name)
