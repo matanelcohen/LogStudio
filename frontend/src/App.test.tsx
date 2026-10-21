@@ -14,6 +14,7 @@ const reconnect = vi.hoisted(() => vi.fn());
 const styles = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "styles.css"), "utf8");
 
 beforeEach(() => localStorage.removeItem(TypographyStorageKey));
+beforeEach(() => vi.spyOn(api, "fetchCopilotHistory").mockResolvedValue([]));
 afterEach(() => localStorage.removeItem(TypographyStorageKey));
 
 vi.mock("./useLogExplorer", async () => {
@@ -357,6 +358,26 @@ describe("log-first workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close Copilot chat" }));
     expect(screen.queryByRole("complementary", { name: "Ask Copilot about logs" })).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Ask Copilot" }));
+  });
+
+  it("allows saved conversations to be reopened when a session has no remaining logs", async () => {
+    const emptyStatus = { ...Status, retainedCount: 0, firstId: 0, lastId: 0 };
+    vi.mocked(useLogPage).mockReturnValueOnce({
+      page: { ...fixturePage(), status: emptyStatus, entries: [] }, loading: false, error: null, refresh: vi.fn()
+    });
+    vi.mocked(useLiveStatus).mockReturnValueOnce({
+      status: emptyStatus, connection: "live", error: null, gap: null, reconnect, applyStatus: vi.fn()
+    });
+    vi.mocked(api.fetchCopilotHistory).mockResolvedValue([
+      { role: "user", content: "Historical question" }, { role: "assistant", content: "Historical answer" }
+    ]);
+    vi.spyOn(api, "connectCopilot").mockRejectedValue(new Error("CLI unavailable"));
+    render(<App />);
+    const opener = screen.getByRole("button", { name: "Ask Copilot" });
+    expect(opener.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(opener);
+    await screen.findByText("Historical answer");
+    expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("updates the session name while paused without resetting the frozen log cursor", async () => {

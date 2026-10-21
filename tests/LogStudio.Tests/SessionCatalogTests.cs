@@ -156,6 +156,128 @@ public sealed class SessionCatalogTests
     }
 
     [Fact]
+    public void SavedChatHistoryRetainsFullConversationsAcrossSavesAndSessionChanges()
+    {
+        string root = Directory.CreateTempSubdirectory("logstudio-chat-history-test-").FullName;
+        try
+        {
+            ViewerSettings settings = new ConsoleLogViewerOptions { SaveSession = true, SessionsDirectory = root }.Validate();
+            using LogBuffer logs = new(settings);
+            logs.Append("retained log", LogStream.Stdout);
+            SessionCatalog sessions = new(settings);
+            string answer = "## Diagnosis\n\n" + new string('x', CopilotChat.MaximumAnswerLength - 20);
+            for (int turn = 0; turn < 5; turn++) sessions.AppendChat(null, $"Question {turn}", answer);
+            ChatMessage[] expected = sessions.ReadChatHistory(sessions.Id);
+            Assert.Equal(10, expected.Length);
+            Assert.False(Directory.Exists(Path.Combine(root, sessions.Id)));
+            sessions.Save(logs, closing: true);
+            SessionCatalog restarted = new(settings);
+            Assert.Equal(expected, restarted.ReadChatHistory(sessions.Id));
+
+            sessions.AppendChat(null, "After completion", "Full final answer");
+            expected = sessions.ReadChatHistory(null);
+            Assert.Equal(expected, restarted.ReadChatHistory(sessions.Id));
+            sessions.Save(logs);
+            restarted.Rename(sessions.Id, "Renamed chat");
+            restarted.Clear(sessions.Id);
+            Assert.Equal(expected, new SessionCatalog(settings).ReadChatHistory(sessions.Id));
+            using LogHistoryReader cleared = restarted.Open(sessions.Id);
+            Assert.Equal(0, cleared.Status.RetainedCount);
+            Assert.Equal("Renamed chat", cleared.Status.ApplicationName);
+            if (!OperatingSystem.IsWindows())
+                Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(root, sessions.Id, MetadataFileName)));
+
+            restarted.ClearChatHistory(sessions.Id);
+            Assert.Empty(new SessionCatalog(settings).ReadChatHistory(sessions.Id));
+            restarted.Delete(sessions.Id);
+            Assert.False(Directory.Exists(Path.Combine(root, sessions.Id)));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void ChatResetPersistsWithoutClearingLogsAndUnsavedChatStaysInMemory()
+    {
+        string root = Directory.CreateTempSubdirectory("logstudio-chat-reset-test-").FullName;
+        try
+        {
+            ViewerSettings settings = new ConsoleLogViewerOptions { SaveSession = true, SessionsDirectory = root }.Validate();
+            using LogBuffer logs = new(settings);
+            logs.Append("keep this log", LogStream.Stdout);
+            SessionCatalog sessions = new(settings);
+            sessions.AppendChat(null, "Question", "Answer");
+            sessions.Save(logs);
+            sessions.ClearChatHistory(null);
+            Assert.Empty(new SessionCatalog(settings).ReadChatHistory(sessions.Id));
+            sessions.Save(logs);
+            Assert.Empty(new SessionCatalog(settings).ReadChatHistory(sessions.Id));
+            using LogHistoryReader history = sessions.Open(sessions.Id);
+            Assert.Equal("keep this log", Assert.Single(history.ReadSessionEntries(default)).Message);
+
+            SessionCatalog unsaved = new(settings with { SaveSession = false });
+            unsaved.AppendChat(null, "Private question", "Private answer");
+            unsaved.Save(logs);
+            Assert.Equal(2, unsaved.ReadChatHistory(null).Length);
+            Assert.False(Directory.Exists(Path.Combine(root, unsaved.Id)));
+            Assert.Empty(unsaved.ReadChatHistory(sessions.Id));
+            unsaved.ClearChatHistory(unsaved.Id);
+            Assert.Empty(unsaved.ReadChatHistory(null));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void SubsequentSavesPreserveChatChangesMadeThroughAnotherViewer()
+    {
+        string root = Directory.CreateTempSubdirectory("logstudio-shared-chat-test-").FullName;
+        try
+        {
+            ViewerSettings settings = new ConsoleLogViewerOptions { SaveSession = true, SessionsDirectory = root }.Validate();
+            using LogBuffer logs = new(settings);
+            logs.Append("retained log", LogStream.Stdout);
+            SessionCatalog original = new(settings);
+            original.AppendChat(null, "Before completion", "Original answer");
+            original.Save(logs, closing: true);
+            SessionCatalog other = new(settings);
+            other.AppendChat(original.Id, "Another viewer's question", "Another viewer's answer");
+            ChatMessage[] expected = other.ReadChatHistory(original.Id);
+            original.Save(logs);
+            Assert.Equal(expected, other.ReadChatHistory(original.Id));
+            Assert.Equal(expected, original.ReadChatHistory(null));
+            original.AppendChat(null, "Original viewer's follow-up", "Follow-up answer");
+            Assert.Equal(6, other.ReadChatHistory(original.Id).Length);
+            other.ClearChatHistory(original.Id);
+            original.Save(logs);
+            Assert.Empty(original.ReadChatHistory(null));
+            Assert.Empty(new SessionCatalog(settings).ReadChatHistory(original.Id));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void OlderSessionsWithoutChatHistoryCanBeReadAndReceiveNewConversations()
+    {
+        string root = Directory.CreateTempSubdirectory("logstudio-legacy-chat-test-").FullName;
+        try
+        {
+            ViewerSettings settings = new ConsoleLogViewerOptions { SaveSession = true, SessionsDirectory = root }.Validate();
+            using LogBuffer logs = new(settings);
+            SessionCatalog sessions = new(settings);
+            sessions.Save(logs);
+            string path = Path.Combine(root, sessions.Id, MetadataFileName);
+            SavedSession saved = JsonSerializer.Deserialize<SavedSession>(File.ReadAllText(path), ViewerConstants.JsonOptions)!;
+            File.WriteAllText(path, JsonSerializer.Serialize(new { saved.Session, saved.Status, saved.Categories }, ViewerConstants.JsonOptions));
+            SessionCatalog restarted = new(settings);
+            Assert.Empty(restarted.ReadChatHistory(sessions.Id));
+            restarted.AppendChat(sessions.Id, "New question", "New answer");
+            Assert.Equal(new[] { new ChatMessage("user", "New question"), new ChatMessage("assistant", "New answer") },
+                new SessionCatalog(settings).ReadChatHistory(sessions.Id));
+            Assert.Empty(restarted.ReadChatHistory(null));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public void SavedCommandParametersRedactCommonSecretFlags()
     {
         string[] values = SessionCatalog.RedactArguments(new[] { "--password", SecretValue, "--skill-input:AccessToken=" + SecretValue, "--project", "Safe.csproj" });
