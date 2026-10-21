@@ -322,7 +322,14 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
 
             long startedAtTicks = long.Parse(target.GetProperty("startedAtTicks").GetString()!, CultureInfo.InvariantCulture);
             Uri reusedIdentity = new(url, $"api/applications?processId={Environment.ProcessId}&startedAtTicks={startedAtTicks + 1}");
-            using (JsonDocument failed = await SelectApplicationAsync(client, reusedIdentity, timeout.Token))
+            using (HttpRequestMessage staleSelection = new(HttpMethod.Post, reusedIdentity))
+            {
+                staleSelection.Headers.Add(ViewerConstants.ClearRequestHeader, "select-application");
+                using HttpResponseMessage failed = await client.SendAsync(staleSelection, timeout.Token);
+                Assert.Equal(HttpStatusCode.Conflict, failed.StatusCode);
+            }
+
+            using (JsonDocument failed = JsonDocument.Parse(await client.GetStringAsync(new Uri(url, "api/applications"), timeout.Token)))
             {
                 Assert.False(string.IsNullOrEmpty(failed.RootElement.GetProperty("error").GetString()));
                 Assert.Equal(Environment.ProcessId, failed.RootElement.GetProperty("selected").GetProperty("processId").GetInt32());
@@ -379,6 +386,7 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
                 JsonElement[] applications = state.RootElement.GetProperty("applications").EnumerateArray().ToArray();
                 self = Assert.Single(applications, application => application.GetProperty("processId").GetInt32() == Environment.ProcessId).Clone();
                 other = Assert.Single(applications, application => application.GetProperty("processId").GetInt32() == target.Id).Clone();
+                if (OperatingSystem.IsLinux()) Assert.Equal("LogStudio.Demo", other.GetProperty("name").GetString());
             }
 
             using (JsonDocument selected = await SelectApplicationAsync(client, ApplicationSelection(url, self), timeout.Token))
@@ -434,6 +442,143 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
             await targetOutput;
             if (error is not null) await error;
             if (targetError is not null) await targetError;
+        }
+    }
+
+    [Fact]
+    public async Task ListenAllShutdownIsBoundedWhenTheSelectedTargetCannotAnswerDiagnostics()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using Process target = StartProcess(new[] { DemoPath, "--showcase" });
+        using Process listener = StartProcess(WrapperArguments("--listen-all"));
+        Task<string> output = listener.StandardOutput.ReadToEndAsync();
+        Task<string>? error = null;
+        Task<string> targetOutput = target.StandardOutput.ReadToEndAsync();
+        Task<string>? targetError = null;
+        try
+        {
+            await ReadUrlAsync(target);
+            targetError = target.StandardError.ReadToEndAsync();
+            Uri url = await ReadUrlAsync(listener);
+            error = listener.StandardError.ReadToEndAsync();
+            using HttpClient client = new();
+            using CancellationTokenSource timeout = new(ProcessTimeout);
+            using JsonDocument applications = JsonDocument.Parse(await client.GetStringAsync(new Uri(url, "api/applications"), timeout.Token));
+            JsonElement application = Assert.Single(applications.RootElement.GetProperty("applications").EnumerateArray(),
+                item => item.GetProperty("processId").GetInt32() == target.Id);
+            await SignalAsync(target, "STOP");
+            using (HttpRequestMessage unresponsiveSelection = new(HttpMethod.Post, ApplicationSelection(url, application)))
+            {
+                unresponsiveSelection.Headers.Add(ViewerConstants.ClearRequestHeader, "select-application");
+                using HttpResponseMessage failed = await client.SendAsync(unresponsiveSelection, timeout.Token);
+                Assert.Equal(HttpStatusCode.Conflict, failed.StatusCode);
+            }
+
+            using (JsonDocument failedState = JsonDocument.Parse(await client.GetStringAsync(new Uri(url, "api/applications"), timeout.Token)))
+            {
+                Assert.Equal(JsonValueKind.Null, failedState.RootElement.GetProperty("selected").ValueKind);
+                Assert.False(string.IsNullOrWhiteSpace(failedState.RootElement.GetProperty("error").GetString()));
+            }
+
+            await SignalAsync(target, "CONT");
+            using (JsonDocument selected = await SelectApplicationAsync(client, ApplicationSelection(url, application), timeout.Token))
+            {
+                Assert.Equal(target.Id, selected.RootElement.GetProperty("selected").GetProperty("processId").GetInt32());
+            }
+
+            await SignalAsync(target, "STOP");
+            await InterruptAsync(listener);
+            await listener.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(130, listener.ExitCode);
+            Assert.False(target.HasExited);
+            await SignalAsync(target, "CONT");
+            await target.StandardInput.WriteLineAsync("quit");
+            target.StandardInput.Close();
+            await target.WaitForExitAsync().WaitAsync(ProcessTimeout);
+            Assert.Equal(0, target.ExitCode);
+        }
+        finally
+        {
+            if (!target.HasExited) await SignalAsync(target, "CONT");
+            await KillAsync(listener);
+            await KillAsync(target);
+            await output;
+            await targetOutput;
+            if (error is not null) await error;
+            if (targetError is not null) await targetError;
+        }
+    }
+
+    [Fact]
+    public async Task ListenAllUsesSafeManagedEntrypointNamesAndCapsSessionNamesBeforeSelection()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        string directory = Directory.CreateTempSubdirectory("logstudio-listen-target-").FullName;
+        try
+        {
+            foreach (string file in Directory.EnumerateFiles(Path.GetDirectoryName(DemoPath)!, "*.dll"))
+            {
+                File.Copy(file, Path.Combine(directory, Path.GetFileName(file)));
+            }
+
+            string longName = new('n', 160);
+            string entrypoint = Path.Combine(directory, longName + ".dll");
+            File.Copy(DemoPath, entrypoint);
+            using Process target = StartProcess(new[]
+            {
+                "exec", "--runtimeconfig", Path.ChangeExtension(DemoPath, "runtimeconfig.json"),
+                "--depsfile", Path.ChangeExtension(DemoPath, "deps.json"), entrypoint, "--showcase",
+            });
+            using Process listener = StartProcess(WrapperArguments("--listen-all"));
+            Task<string> output = listener.StandardOutput.ReadToEndAsync();
+            Task<string>? error = null;
+            Task<string> targetOutput = target.StandardOutput.ReadToEndAsync();
+            Task<string>? targetError = null;
+            try
+            {
+                await ReadUrlAsync(target);
+                targetError = target.StandardError.ReadToEndAsync();
+                Uri url = await ReadUrlAsync(listener);
+                error = listener.StandardError.ReadToEndAsync();
+                using HttpClient client = new();
+                using CancellationTokenSource timeout = new(ProcessTimeout);
+                using JsonDocument applications = JsonDocument.Parse(await client.GetStringAsync(new Uri(url, "api/applications"), timeout.Token));
+                JsonElement application = Assert.Single(applications.RootElement.GetProperty("applications").EnumerateArray(),
+                    item => item.GetProperty("processId").GetInt32() == target.Id);
+                Assert.Equal(longName[..128], application.GetProperty("name").GetString());
+                using (JsonDocument selected = await SelectApplicationAsync(client, ApplicationSelection(url, application), timeout.Token))
+                {
+                    Assert.Equal(JsonValueKind.Null, selected.RootElement.GetProperty("error").ValueKind);
+                    Assert.Equal(longName[..128], selected.RootElement.GetProperty("selected").GetProperty("name").GetString());
+                }
+
+                using (JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token))
+                {
+                    Assert.Equal(longName[..128], snapshot.RootElement.GetProperty("status").GetProperty("applicationName").GetString());
+                }
+
+                await InterruptAsync(listener);
+                await listener.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                Assert.Equal(130, listener.ExitCode);
+                Assert.False(target.HasExited);
+                await target.StandardInput.WriteLineAsync("quit");
+                target.StandardInput.Close();
+                await target.WaitForExitAsync().WaitAsync(ProcessTimeout);
+                Assert.Equal(0, target.ExitCode);
+            }
+            finally
+            {
+                await KillAsync(listener);
+                await KillAsync(target);
+                await output;
+                await targetOutput;
+                if (error is not null) await error;
+                if (targetError is not null) await targetError;
+            }
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
         }
     }
 
@@ -680,11 +825,13 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
     private static async Task<JsonDocument> GetSnapshotAsync(HttpClient client, Uri url, CancellationToken cancellationToken) =>
         JsonDocument.Parse(await client.GetStringAsync(new Uri(url, ViewerConstants.SnapshotRoute), cancellationToken));
 
-    private static async Task InterruptAsync(Process process)
+    private static Task InterruptAsync(Process process) => SignalAsync(process, "INT");
+
+    private static async Task SignalAsync(Process process, string name)
     {
         ProcessStartInfo info = new("kill") { UseShellExecute = false };
         info.ArgumentList.Add("-s");
-        info.ArgumentList.Add("INT");
+        info.ArgumentList.Add(name);
         info.ArgumentList.Add(process.Id.ToString(CultureInfo.InvariantCulture));
         using Process signal = Process.Start(info)!;
         await signal.WaitForExitAsync().WaitAsync(ProcessTimeout);

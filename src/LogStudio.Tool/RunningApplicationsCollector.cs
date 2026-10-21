@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -6,6 +7,7 @@ using System.Diagnostics.Tracing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Diagnostics.NETCore.Client;
@@ -16,11 +18,14 @@ namespace LogStudio.Tool;
 internal sealed class RunningApplicationsCollector : IRunningApplications
 {
     private const string LoggingProvider = "Microsoft-Extensions-Logging";
+    private const int MaximumApplicationNameLength = 128;
+    private const int MaximumCommandLineBytes = 4096;
     private static readonly TimeSpan AttachTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(2);
     private readonly object stateGate = new();
     private readonly SemaphoreSlim selectionGate = new(1, 1);
     private readonly CancellationTokenSource shutdown = new();
+    private readonly ConcurrentDictionary<(int ProcessId, long StartedAtTicks), string> applicationNames = new();
     private Attachment? selected;
     private string? error;
     private Task? disposeTask;
@@ -32,7 +37,7 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
         RunningApplication[] applications;
         try
         {
-            applications = Discover();
+            applications = this.Discover();
         }
         catch (Exception exception) when (IsDiagnosticFailure(exception))
         {
@@ -59,19 +64,21 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
             await this.selectionGate.WaitAsync(cancellation.Token).ConfigureAwait(false);
             entered = true;
             cancellation.Token.ThrowIfCancellationRequested();
-            ConsoleLogViewer viewer = this.Viewer ?? throw new InvalidOperationException("The viewer is still starting. Try again.");
-            RunningApplication? application = Discover().FirstOrDefault(item => item.ProcessId == processId && item.StartedAtTicks == startedAtTicks);
+            ConsoleLogViewer viewer = this.Viewer ?? throw this.Fail("The viewer is still starting. Try again.");
+            RunningApplication[] applications = this.Discover();
+            RunningApplication? application = applications.FirstOrDefault(item => item.ProcessId == processId && item.StartedAtTicks == startedAtTicks);
             if (application is null)
             {
-                return this.Fail("This application exited or its process identity changed. Refresh the application list.");
+                throw this.Fail("This application exited or its process identity changed. Refresh the application list.");
             }
 
             lock (this.stateGate)
             {
-                if (this.selected?.Application == application)
+                if (this.selected?.Application is RunningApplication current &&
+                    current.ProcessId == processId && current.StartedAtTicks == startedAtTicks)
                 {
                     this.error = null;
-                    return new RunningApplicationsState(Discover(), application, null);
+                    return new RunningApplicationsState(applications, current, null);
                 }
             }
 
@@ -95,9 +102,9 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
             Attachment attached = candidate;
             attached.Source.Dynamic.All += data => this.Record(attached, data);
             attached.Processing = Task.Run(() => this.Process(attached));
-            if (ReadApplication(processId)?.StartedAtTicks != startedAtTicks)
+            if (this.ReadApplication(processId)?.StartedAtTicks != startedAtTicks)
             {
-                return this.Fail("This application exited or its process identity changed. Refresh the application list.");
+                throw this.Fail("This application exited or its process identity changed. Refresh the application list.");
             }
 
             cancellation.Token.ThrowIfCancellationRequested();
@@ -118,7 +125,7 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
             {
                 if (attached.Ended)
                 {
-                    this.error = "The application's diagnostic connection closed. Select an application to try again.";
+                    throw this.Fail("The application's diagnostic connection closed. Select an application to try again.");
                 }
                 else
                 {
@@ -133,17 +140,22 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
 
             return this.GetState();
         }
-        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (!cancellation.IsCancellationRequested)
         {
-            return this.Fail("Attaching timed out. Check that diagnostics are enabled and the application is responding.");
+            throw this.Fail("Attaching timed out. Check that diagnostics are enabled and the application is responding.", exception);
         }
         catch (OperationCanceledException) when (this.shutdown.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
-            return this.Fail("The listener is shutting down.");
+            lock (this.stateGate)
+            {
+                this.error = "The listener is shutting down.";
+            }
+
+            return this.GetState();
         }
-        catch (Exception exception) when (IsDiagnosticFailure(exception))
+        catch (Exception exception) when (IsDiagnosticFailure(exception) && exception is not SelectionException)
         {
-            return this.Fail("Could not attach. Check that the application is running, diagnostics are enabled, and you have permission.");
+            throw this.Fail("Could not attach. Check that the application is running, diagnostics are enabled, and you have permission.", exception);
         }
         finally
         {
@@ -197,24 +209,49 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
         }
     }
 
-    private static RunningApplication[] Discover() => DiagnosticsClient.GetPublishedProcesses()
-        .Where(processId => processId != Environment.ProcessId)
-        .Select(ReadApplication)
-        .OfType<RunningApplication>()
-        .OrderBy(application => application.Name, StringComparer.OrdinalIgnoreCase)
-        .ThenBy(application => application.ProcessId)
-        .ToArray();
+    private RunningApplication[] Discover()
+    {
+        RunningApplication[] applications = DiagnosticsClient.GetPublishedProcesses()
+            .Where(processId => processId != Environment.ProcessId)
+            .Select(this.ReadApplication)
+            .OfType<RunningApplication>()
+            .OrderBy(application => application.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(application => application.ProcessId)
+            .ToArray();
+        HashSet<(int ProcessId, long StartedAtTicks)> identities = applications
+            .Select(application => (application.ProcessId, application.StartedAtTicks)).ToHashSet();
+        foreach ((int processId, long startedAtTicks) in this.applicationNames.Keys)
+        {
+            if (!identities.Contains((processId, startedAtTicks)))
+            {
+                this.applicationNames.TryRemove((processId, startedAtTicks), out _);
+            }
+        }
 
-    private static RunningApplication? ReadApplication(int processId)
+        return applications;
+    }
+
+    private RunningApplication? ReadApplication(int processId)
     {
         try
         {
             using Process process = System.Diagnostics.Process.GetProcessById(processId);
             long startedAtTicks = process.StartTime.ToUniversalTime().Ticks;
-            string? name = Path.GetFileNameWithoutExtension(process.MainModule?.FileName);
-            return process.HasExited || string.IsNullOrWhiteSpace(name) || startedAtTicks <= 0
-                ? null
-                : new RunningApplication(processId, name.Length > 512 ? name[..512] : name, startedAtTicks);
+            string? executableName = Path.GetFileNameWithoutExtension(process.MainModule?.FileName);
+            if (process.HasExited || string.IsNullOrWhiteSpace(executableName) || startedAtTicks <= 0)
+            {
+                return null;
+            }
+
+            string name = this.applicationNames.GetOrAdd((processId, startedAtTicks), _ =>
+            {
+                string displayName = OperatingSystem.IsLinux() && executableName == "dotnet"
+                    ? ReadManagedApplicationName(processId) ?? executableName
+                    : executableName;
+                displayName = (string.IsNullOrWhiteSpace(displayName) ? executableName : displayName).Trim();
+                return displayName.Length > MaximumApplicationNameLength ? displayName[..MaximumApplicationNameLength] : displayName;
+            });
+            return process.HasExited ? null : new RunningApplication(processId, name, startedAtTicks);
         }
         catch (Exception exception) when (IsDiagnosticFailure(exception) || exception is ArgumentException)
         {
@@ -222,14 +259,69 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
         }
     }
 
-    private RunningApplicationsState Fail(string message)
+    private static string? ReadManagedApplicationName(int processId)
+    {
+        try
+        {
+            using FileStream commandLine = File.OpenRead($"/proc/{processId.ToString(CultureInfo.InvariantCulture)}/cmdline");
+            byte[] buffer = new byte[MaximumCommandLineBytes];
+            int count = commandLine.Read(buffer);
+            ReadOnlySpan<byte> arguments = buffer.AsSpan(0, count);
+            int offset = 0;
+            ReadArgument(arguments, ref offset);
+            bool first = true;
+            while (offset < arguments.Length)
+            {
+                string argument = Encoding.UTF8.GetString(ReadArgument(arguments, ref offset));
+                if (argument.Length == 0) return null;
+                if (first && argument == "exec")
+                {
+                    first = false;
+                    continue;
+                }
+
+                first = false;
+                if (argument is "--runtimeconfig" or "--depsfile" or "--additionalprobingpath" or "--additional-deps" or "--fx-version" or "--roll-forward")
+                {
+                    if (ReadArgument(arguments, ref offset).IsEmpty) return null;
+                    continue;
+                }
+
+                // Stop at the entrypoint: later application arguments may contain secrets or DLL-like values.
+                return argument[0] != '-' && argument.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                    ? Path.GetFileNameWithoutExtension(argument)
+                    : null;
+            }
+        }
+        catch (Exception exception) when (IsDiagnosticFailure(exception))
+        {
+        }
+
+        return null;
+    }
+
+    private static ReadOnlySpan<byte> ReadArgument(ReadOnlySpan<byte> arguments, ref int offset)
+    {
+        ReadOnlySpan<byte> remaining = arguments[offset..];
+        int length = remaining.IndexOf((byte)0);
+        if (length < 0)
+        {
+            offset = arguments.Length;
+            return default;
+        }
+
+        offset += length + 1;
+        return remaining[..length];
+    }
+
+    private SelectionException Fail(string message, Exception? innerException = null)
     {
         lock (this.stateGate)
         {
             this.error = message;
         }
 
-        return this.GetState();
+        return new SelectionException(message, innerException);
     }
 
     private void Record(Attachment attachment, TraceEvent data)
@@ -339,6 +431,10 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
     private static bool IsDiagnosticFailure(Exception exception) => exception is
         DiagnosticsClientException or IOException or UnauthorizedAccessException or InvalidOperationException or
         Win32Exception or TimeoutException or System.Security.SecurityException;
+
+    private sealed class SelectionException(string message, Exception? innerException) : InvalidOperationException(message, innerException)
+    {
+    }
 
     private sealed class Attachment(RunningApplication application, EventPipeSession session)
     {
