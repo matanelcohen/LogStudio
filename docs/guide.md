@@ -113,7 +113,7 @@ PATH, use the command printed by the installer. No sudo or shell-profile edits a
 ```bash
 # Pin a release or choose user-writable directories:
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.sh \
-  | bash -s -- --version 1.4.0 --install-dir "$HOME/.local/share/logstudio" --bin-dir "$HOME/.local/bin"
+  | bash -s -- --version 1.5.1 --install-dir "$HOME/.local/share/logstudio" --bin-dir "$HOME/.local/bin"
 logstudio --open -- dotnet run --project ./path/to/App.csproj
 ```
 
@@ -126,7 +126,7 @@ Invoke-WebRequest -UseBasicParsing https://github.com/matanelcohen/LogStudio/rel
 logstudio --open -- dotnet run --project .\path\to\App.csproj
 ```
 
-Use `& $installer -Version 1.4.0 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
+Use `& $installer -Version 1.5.1 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
 version or choose a directory. If execution policy blocks the script, use the process-only
 override described below; when launching a separate PowerShell process, add the printed
 `bin` directory to PATH in your current terminal yourself. The installer otherwise updates
@@ -234,7 +234,7 @@ does not verify Windows-specific execution.
 ### Publishing compiled releases
 
 Set and commit the package version in `Directory.Build.props`, then push a matching tag
-on that commit, such as `1.4.0` (or `1.4.0-rc.1` for a prerelease). Versions and tags
+on that commit, such as `1.5.1` (or `1.5.1-rc.1` for a prerelease). Versions and tags
 must not have a `v` prefix. The
 [compiled-release workflow](../.github/workflows/release.yml) validates the tag, restores,
 builds, tests the frontend/backend and installer contracts, and verifies a source install.
@@ -743,10 +743,10 @@ remove the reported folder if necessary. Download JSONL before closing if you wa
 - Alternating row shades help track each entry across the table. Red edge markers identify errors
   and critical entries; amber markers identify warnings, even when the Level column is hidden.
   Selection highlights preserve these severity markers.
-- Messages use a single-line preview by default. A **+N lines** hint identifies additional lines in
-  the original message; select the row to inspect the complete message and stack trace. Explorer
-  options can enable **Wrap long lines** (which hides the hint), toggle following, refresh disk
-  history, or clear this tab's view.
+- **Wrap long lines** is enabled by default, so message previews preserve line breaks and wrap
+  within the column. Disable it in **Explorer options** for single-line previews with a **+N lines**
+  hint for multiline messages. Select a row to inspect the complete message and stack trace.
+  Explorer options can also toggle following, refresh disk history, or clear this tab's view.
 
 ### Professional include / exclude conditions
 

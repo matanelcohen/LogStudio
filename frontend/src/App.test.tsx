@@ -236,12 +236,17 @@ describe("log-first workspace", () => {
       });
       return render(<><style>{styles}</style><App /></>);
     }
+    async function toggleWrap() {
+      fireEvent.keyDown(screen.getByRole("button", { name: "Explorer options" }), { key: "Enter" });
+      fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Wrap long lines" }));
+    }
     afterEach(() => {
       vi.mocked(useLogPage).mockReturnValue({ page: fixturePage(), loading: false, error: null, refresh: vi.fn() });
     });
 
-    it("shows one compact error row before the next log and keeps its full text in the inspector", () => {
+    it("shows a compact error row when wrapping is disabled and keeps its full text in the inspector", async () => {
       renderRows();
+      await toggleWrap();
       const table = screen.getByRole("table", { name: "Captured logs" });
       const rows = table.querySelectorAll("tbody tr");
       expect(rows).toHaveLength(2);
@@ -263,20 +268,28 @@ describe("log-first workspace", () => {
       expect(getComputedStyle(details).whiteSpace).toBe("pre-wrap");
     });
 
-    it("only displays message line breaks when wrapping is explicitly enabled", async () => {
+    it("wraps messages by default and lets users disable and re-enable wrapping", async () => {
       renderRows();
-      expect(screen.getByText("+4 lines")).toBeDefined();
-      fireEvent.keyDown(screen.getByRole("button", { name: "Explorer options" }), { key: "Enter" });
-      fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Wrap long lines" }));
       const preview = screen.getByText(/fail: App.Skill/, { selector: "pre" });
       expect(getComputedStyle(preview).whiteSpace).toBe("pre-wrap");
       expect(preview.textContent).toBe(error.message);
       expect(screen.queryByText("+4 lines")).toBeNull();
+      const rows = screen.getByRole("table", { name: "Captured logs" }).querySelectorAll("tbody tr");
+      expect(rows).toHaveLength(2);
+      expect(rows[1]?.textContent).toContain(next.message);
 
       fireEvent.keyDown(screen.getByRole("button", { name: "Explorer options" }), { key: "Enter" });
-      fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Wrap long lines" }));
+      const wrapOption = await screen.findByRole("menuitemcheckbox", { name: "Wrap long lines" });
+      expect(wrapOption.getAttribute("aria-checked")).toBe("true");
+      fireEvent.click(wrapOption);
       expect(getComputedStyle(screen.getByText(/fail: App.Skill/, { selector: "pre" })).whiteSpace).toBe("nowrap");
       expect(screen.getByText("+4 lines")).toBeDefined();
+
+      await toggleWrap();
+      const wrappedPreview = screen.getByText(/fail: App.Skill/, { selector: "pre" });
+      expect(getComputedStyle(wrappedPreview).whiteSpace).toBe("pre-wrap");
+      expect(wrappedPreview.textContent).toBe(error.message);
+      expect(screen.queryByText("+4 lines")).toBeNull();
     });
 
     it.each([
@@ -286,8 +299,9 @@ describe("log-first workspace", () => {
       ["CRLF", "First\r\nSecond\r\nThird", 2],
       ["CR", "First\rSecond", 1],
       ["mixed line endings", "First\r\nSecond\nThird\rFourth", 3]
-    ])("counts additional lines for %s without changing the original text", (_, message, extraLines) => {
+    ])("counts additional lines for %s without changing the original text", async (_, message, extraLines) => {
       renderRows([{ ...Entry, message }]);
+      await toggleWrap();
       const row = screen.getByRole("table", { name: "Captured logs" }).querySelector("tbody tr");
       expect(row?.querySelector("pre")?.textContent).toBe(message);
       if (extraLines === 0) {
@@ -323,8 +337,9 @@ describe("log-first workspace", () => {
       expect([...rows].map(row => row.getAttribute("data-severity"))).toEqual(entries.map(entry => entry.severity));
     });
 
-    it("updates the multiline hint when a live entry receives additional stack frames", () => {
+    it("updates the multiline hint when a live entry receives additional stack frames", async () => {
       const { rerender } = renderRows();
+      await toggleWrap();
       const updated = { ...error, message: `${error.message}\n         at Example.Finish()` };
       vi.mocked(useLogPage).mockReturnValue({
         page: { ...fixturePage(updated), entries: [updated, next], matchCount: 2, errorCount: 1, highlightTerms: ["AgentId"] },

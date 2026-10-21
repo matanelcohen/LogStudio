@@ -31,7 +31,7 @@ export default function App() {
   const [cursor, setCursor] = useState<PageCursor>({ before: null, after: null });
   const [pause, setPause] = useState<PauseSnapshot | null>(null);
   const [follow, setFollow] = useState(true);
-  const [wrap, setWrap] = useState(false);
+  const [wrap, setWrap] = useState(true);
   const [selected, setSelected] = useState<LogEntry | null>(null);
   const [inspector, setInspector] = useState(false);
   const [fields, setFields] = useState(false);
