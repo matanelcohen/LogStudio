@@ -248,6 +248,7 @@ html[data-theme="dark"] {
   --cp-material-border: color-mix(in srgb, var(--cp-border) 80%, transparent);
   --cp-separator: color-mix(in srgb, var(--cp-border) 68%, transparent);
   --cp-secondary-text: var(--cp-text-muted);
+  --cp-selected-secondary-text: var(--cp-text-muted);
   --cp-warning-text: var(--cp-warning);
   --cp-information-text: color-mix(in srgb, var(--cp-link) 90%, var(--cp-text) 10%);
   --cp-chrome-blur: 14px;
@@ -638,14 +639,20 @@ th:hover .column-menu, .column-menu:focus-visible, .column-menu[data-state="open
 .danger-button:hover:not(:disabled) { background: color-mix(in srgb, var(--cp-danger) 85%, var(--cp-text)); border-color: var(--cp-danger); }
 .panel-footer { flex-wrap: wrap; }
 td { padding: 8px 12px; vertical-align: top; border-bottom: 1px solid var(--cp-separator); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-tr[data-log-id] { cursor: pointer; }
-tr[data-log-id]:hover { background: var(--cp-surface-soft); }
-tr.selected, tr.selected:hover { background: var(--cp-native-selection); }
-tr.selected td:first-child { box-shadow: inset 3px 0 var(--cp-native-accent); }
+tr[data-log-id] { cursor: pointer; background: var(--cp-surface); }
+tr[data-log-id]:nth-child(even) { background: color-mix(in srgb, var(--cp-surface-soft) 75%, var(--cp-surface)); }
+tr[data-log-id][data-severity="warning"] { --cp-log-severity: var(--cp-warning); }
+tr[data-log-id][data-severity="error"], tr[data-log-id][data-severity="critical"] { --cp-log-severity: var(--cp-danger); }
+tr[data-log-id]:hover { background: color-mix(in srgb, var(--cp-native-accent) 8%, var(--cp-surface-soft)); }
+tr[data-log-id].selected, tr[data-log-id].selected:hover { --cp-secondary-text: var(--cp-selected-secondary-text); background: color-mix(in srgb, var(--cp-native-accent) 18%, var(--cp-surface)); }
+tr[data-log-id] td:first-child { box-shadow: inset 3px 0 var(--cp-log-severity, var(--cp-clear)); }
+tr[data-log-id].selected td:first-child { box-shadow: inset 3px 0 var(--cp-log-severity, var(--cp-native-accent)); }
 .sequence, .timestamp, .stream-cell, .category-cell { color: var(--cp-secondary-text); }
 .category-cell { font-family: Consolas, "Courier New", Courier, monospace; font-size: calc(11px * var(--ui-font-scale, 1)); }
 .message, #detailMessage, .settings-log-preview { font-family: var(--log-font-family, Consolas, "Courier New", Courier, monospace); font-size: var(--log-font-size, 12px); line-height: var(--log-line-height, 1.6); }
-.message { margin: 0; white-space: pre; overflow: hidden; text-overflow: ellipsis; max-height: calc(4em * var(--log-line-height, 1.6)); }
+.message-preview { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.message { flex: 1; min-width: 0; margin: 0; color: var(--cp-text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-height: calc(4em * var(--log-line-height, 1.6)); }
+.message-lines { flex-shrink: 0; padding: 1px 6px; border: 1px solid var(--cp-border); border-radius: 4px; background: var(--cp-bg-elevated); color: var(--cp-secondary-text); font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.4; font-weight: 500; }
 .wrapped .message { white-space: pre-wrap; overflow-wrap: anywhere; }
 mark { background: var(--cp-highlight); color: var(--cp-text); border-radius: 2px; }
 .severity { font-size: calc(11px * var(--ui-font-scale, 1)); font-weight: 600; }
@@ -732,6 +739,7 @@ mark { background: var(--cp-highlight); color: var(--cp-text); border-radius: 2p
     --cp-material-border: var(--cp-text-muted);
     --cp-separator: var(--cp-text-muted);
     --cp-secondary-text: var(--cp-text);
+    --cp-selected-secondary-text: var(--cp-text);
     --cp-card-shadow: none;
     --cp-control-shadow: none;
     --cp-native-toolbar: var(--cp-surface-soft);

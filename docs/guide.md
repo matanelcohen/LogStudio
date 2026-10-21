@@ -705,7 +705,13 @@ remove the reported folder if necessary. Download JSONL before closing if you wa
 - **Appearance** offers Light, Dark, or automatic system appearance.
 - **Fields**, **Timeline**, and the inspector icon toggle their panels. Inline error/warning
   counts are shortcuts to severity filters. The timeline is visible-page-only.
-- Explorer options set line wrapping and following, refresh disk history, or clear this tab's view.
+- Alternating row shades help track each entry across the table. Red edge markers identify errors
+  and critical entries; amber markers identify warnings, even when the Level column is hidden.
+  Selection highlights preserve these severity markers.
+- Messages use a single-line preview by default. A **+N lines** hint identifies additional lines in
+  the original message; select the row to inspect the complete message and stack trace. Explorer
+  options can enable **Wrap long lines** (which hides the hint), toggle following, refresh disk
+  history, or clear this tab's view.
 
 ### Professional include / exclude conditions
 

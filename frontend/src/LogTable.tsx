@@ -88,9 +88,20 @@ export function LogTable({ page, loading, error, selected, matchCase, follow, wr
     { accessorKey: "stream", header: "Stream", size: 80, minSize: 66, cell: info => <span className="stream-cell">{info.row.original.stream}</span> },
     { accessorKey: "category", header: "Category", size: 180, minSize: 90, cell: info =>
       <span className="category-cell" title={info.row.original.category ?? "Uncategorized"}>{info.row.original.category ?? "—"}</span> },
-    { accessorKey: "message", header: "Message", size: messageWidth, minSize: MinimumMessageWidth, enableHiding: false, cell: info =>
-      <pre className="message"><Highlight message={info.row.original.message} terms={page?.highlightTerms ?? []} matchCase={matchCase} /></pre> }
-  ], [page?.highlightTerms, matchCase, messageWidth]);
+    { accessorKey: "message", header: "Message", size: messageWidth, minSize: MinimumMessageWidth, enableHiding: false, cell: info => {
+      const message = info.row.original.message;
+      const extraLines = message.match(/\r\n|\r|\n/g)?.length ?? 0;
+      const lineLabel = extraLines === 1 ? "line" : "lines";
+      const lineHint = `${NumberFormatter.format(extraLines)} additional ${lineLabel}. Select this row to inspect the full message.`;
+      return <div className="message-preview">
+        <pre className="message"><Highlight message={message} terms={page?.highlightTerms ?? []} matchCase={matchCase} /></pre>
+        {!wrap && extraLines > 0 && <span className="message-lines" title={lineHint}>
+          <span aria-hidden="true">+{NumberFormatter.format(extraLines)} {lineLabel}</span>
+          <span className="visually-hidden">{lineHint}</span>
+        </span>}
+      </div>;
+    } }
+  ], [page?.highlightTerms, matchCase, messageWidth, wrap]);
 
   const table = useReactTable({
     data: entries, columns, getCoreRowModel: getCoreRowModel(),
@@ -196,7 +207,7 @@ export function LogTable({ page, loading, error, selected, matchCase, follow, wr
           </SortableContext>
           <tbody id="rows" data-loaded-entries={entries.length}>
             {table.getRowModel().rows.map(row => (
-              <tr key={row.id} data-log-id={row.id} tabIndex={0} className={selected?.id === row.original.id ? "selected" : ""}
+              <tr key={row.id} data-log-id={row.id} data-severity={row.original.severity} tabIndex={0} className={selected?.id === row.original.id ? "selected" : ""}
                 onClick={() => onSelect(row.original)} onKeyDown={event => {
                   if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(row.original); }
                   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
