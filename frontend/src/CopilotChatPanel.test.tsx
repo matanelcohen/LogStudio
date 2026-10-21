@@ -156,6 +156,7 @@ describe("full-session log chat panel", () => {
     await screen.findByText("Install Copilot CLI");
     fireEvent.change(screen.getByLabelText("Message Copilot"), { target: { value: "An unsent draft" } });
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    await waitFor(() => expect((screen.getByLabelText("Message Copilot") as HTMLTextAreaElement).value).toBe(""));
     expect(screen.getByRole("alert").textContent).toContain("Install Copilot CLI");
     expect(screen.getByRole("button", { name: "Retry Copilot setup" })).toBeDefined();
     connect.mockResolvedValue(Setup);
@@ -197,9 +198,23 @@ describe("full-session log chat panel", () => {
     fireEvent.change(input, { target: { value: "Unsent draft" } });
     expect(screen.getByRole("button", { name: "New chat" }).hasAttribute("disabled")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
-    expect(input.value).toBe("");
+    await waitFor(() => expect(input.value).toBe(""));
     expect(document.activeElement).toBe(input);
     expect(chat).not.toHaveBeenCalled();
+  });
+
+  it("resets server history even when an interrupted first response left the local transcript empty", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
+    vi.spyOn(api, "askCopilot").mockRejectedValue(new Error("Response interrupted"));
+    render(<CopilotChatPanel status={Status} sessionId="saved" onClose={vi.fn()} returnFocus={vi.fn()} />);
+    await connectCli();
+    ask("Question committed before interruption");
+    await screen.findByText("Response interrupted");
+    expect(screen.getByRole("log").textContent).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    await waitFor(() => expect(api.clearCopilotHistory).toHaveBeenCalledWith("saved"));
+    await waitFor(() => expect((screen.getByLabelText("Message Copilot") as HTMLTextAreaElement).value).toBe(""));
+    expect(screen.queryByText("Response interrupted")).toBeNull();
   });
 
   it("prevents duplicate requests and closing while the owned process is running", async () => {

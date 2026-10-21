@@ -227,6 +227,34 @@ public sealed class SessionCatalogTests
     }
 
     [Fact]
+    public void SubsequentSavesPreserveChatChangesMadeThroughAnotherViewer()
+    {
+        string root = Directory.CreateTempSubdirectory("logstudio-shared-chat-test-").FullName;
+        try
+        {
+            ViewerSettings settings = new ConsoleLogViewerOptions { SaveSession = true, SessionsDirectory = root }.Validate();
+            using LogBuffer logs = new(settings);
+            logs.Append("retained log", LogStream.Stdout);
+            SessionCatalog original = new(settings);
+            original.AppendChat(null, "Before completion", "Original answer");
+            original.Save(logs, closing: true);
+            SessionCatalog other = new(settings);
+            other.AppendChat(original.Id, "Another viewer's question", "Another viewer's answer");
+            ChatMessage[] expected = other.ReadChatHistory(original.Id);
+            original.Save(logs);
+            Assert.Equal(expected, other.ReadChatHistory(original.Id));
+            Assert.Equal(expected, original.ReadChatHistory(null));
+            original.AppendChat(null, "Original viewer's follow-up", "Follow-up answer");
+            Assert.Equal(6, other.ReadChatHistory(original.Id).Length);
+            other.ClearChatHistory(original.Id);
+            original.Save(logs);
+            Assert.Empty(original.ReadChatHistory(null));
+            Assert.Empty(new SessionCatalog(settings).ReadChatHistory(original.Id));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public void OlderSessionsWithoutChatHistoryCanBeReadAndReceiveNewConversations()
     {
         string root = Directory.CreateTempSubdirectory("logstudio-legacy-chat-test-").FullName;

@@ -129,7 +129,7 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
     inFlight.current = true;
     setBusy(true);
     try {
-      if (messages.length) await clearCopilotHistory(sessionId);
+      await clearCopilotHistory(sessionId);
       setMessages([]); setQuestion(""); if (connection) setError(null);
       setCopied(null); setCopyError(null); followMessages.current = true; setFollowing(true);
     } catch (error) {

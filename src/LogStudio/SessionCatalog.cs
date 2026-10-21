@@ -57,7 +57,12 @@ internal sealed class SessionCatalog
     internal ChatMessage[] ReadChatHistory(string? id)
     {
         lock (this.gate)
-            return string.IsNullOrEmpty(id) || id == this.Id ? this.chatHistory.ToArray() : this.Read(id).ChatHistory ?? Array.Empty<ChatMessage>();
+        {
+            bool current = string.IsNullOrEmpty(id) || id == this.Id;
+            if (current && (!this.settings.SaveSession || !File.Exists(Path.Combine(this.DirectoryFor(this.Id), MetadataFile))))
+                return this.chatHistory.ToArray();
+            return this.Read(current ? this.Id : id!).ChatHistory ?? Array.Empty<ChatMessage>();
+        }
     }
 
     internal void AppendChat(string? id, string question, string answer)
@@ -172,7 +177,8 @@ internal sealed class SessionCatalog
                 if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(Path.Combine(destination, file), FilePermissions);
             ViewerStatus status = history.Status with { HistoryDirectory = destination };
             if (closing && !status.IsCompleted) status = status with { IsCompleted = true, CompletedAt = DateTimeOffset.UtcNow };
-            this.Write(destination, new SavedSession(this.Describe(status, false), status, history.Categories, this.chatHistory));
+            ChatMessage[] messages = this.ReadChatHistory(null);
+            this.Write(destination, new SavedSession(this.Describe(status, false), status, history.Categories, messages));
         }
     }
 
