@@ -22,6 +22,66 @@ function ask(question = "Why did this fail?") {
 }
 
 describe("full-session log chat panel", () => {
+  it("shows only discovered reasoning levels and clears the effort when changing models", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
+    const chat = vi.spyOn(api, "askCopilot").mockResolvedValue({ answer: "Selected model answer", contextEntryCount: 1, contextTruncated: false });
+    render(<CopilotChatPanel status={Status} sessionId="" onClose={vi.fn()} returnFocus={vi.fn()} />);
+    await connectCli();
+    async function choose(label: string, option: string) {
+      fireEvent.keyDown(screen.getByRole("combobox", { name: label }), { key: "Enter" });
+      fireEvent.keyDown(await screen.findByRole("option", { name: option }), { key: "Enter" });
+    }
+    expect(screen.queryByRole("combobox", { name: "Reasoning effort" })).toBeNull();
+    await choose("AI model", "Reasoning model");
+    await choose("Reasoning effort", "High");
+    ask("Think carefully");
+    await screen.findByText("Selected model answer");
+    expect(chat.mock.calls[0]?.[3]).toEqual({ model: "reasoner", reasoningEffort: "high" });
+    await choose("AI model", "Fast model");
+    expect(screen.queryByRole("combobox", { name: "Reasoning effort" })).toBeNull();
+    ask("A quick follow-up");
+    await waitFor(() => expect(chat).toHaveBeenCalledTimes(2));
+    expect(chat.mock.calls[1]?.[3]).toEqual({ model: "fast" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "New chat" }).hasAttribute("disabled")).toBe(false));
+    await choose("AI model", "Reasoning model");
+    expect(screen.getByRole("combobox", { name: "Reasoning effort" }).textContent).toContain("Default reasoning");
+  });
+
+  it("renders safe Markdown, highlighted code and tables without fetching generated images", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
+    vi.spyOn(api, "askCopilot").mockResolvedValue({
+      answer: "## Diagnosis\n\n**Timeout** in `Worker`.\n\n```js\nconst retries = 3;\n```\n\n| Key | Value |\n| --- | --- |\n| Retries | 3 |\n\n![tracking](https://example.com/pixel)\n\n[unsafe](javascript:alert%281%29)\n\n<script>alert('x')</script>",
+      contextEntryCount: 1, contextTruncated: false
+    });
+    const { container } = render(<CopilotChatPanel status={Status} sessionId="" onClose={vi.fn()} returnFocus={vi.fn()} />);
+    await connectCli();
+    ask();
+    await screen.findByRole("heading", { name: "Diagnosis" });
+    expect(container.querySelector("strong")?.textContent).toBe("Timeout");
+    expect(container.querySelector("pre code .hljs-keyword")?.textContent).toBe("const");
+    expect(screen.getByRole("table")).toBeDefined();
+    expect(container.querySelector("img, script")).toBeNull();
+    expect(screen.getByText("unsafe").closest("a")?.getAttribute("href") ?? "").not.toContain("javascript:");
+  });
+
+  it("renders partial responses while writing and restores the draft after a stream failure", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
+    let reject!: (error: Error) => void;
+    vi.spyOn(api, "askCopilot").mockImplementation((_session, _question, _messages, _options, update) => {
+      update?.("Partial diagnosis\n\n```js\nconst");
+      return new Promise((_resolve, fail) => { reject = fail; });
+    });
+    render(<CopilotChatPanel status={Status} sessionId="" onClose={vi.fn()} returnFocus={vi.fn()} />);
+    await connectCli();
+    ask("Preserve my question");
+    expect(screen.getByRole("log").textContent).toContain("Partial diagnosis");
+    expect(screen.getByRole("status").textContent).toBe("Writing…");
+    await act(async () => reject(new Error("Stream interrupted")));
+    expect(screen.getByRole("alert").textContent).toBe("Stream interrupted");
+    expect(screen.getByRole("log").textContent).toBe("");
+    expect((screen.getByLabelText("Message Copilot") as HTMLTextAreaElement).value).toBe("Preserve my question");
+  });
+
   it("prepares the CLI automatically without sending logs until an explicit question", async () => {
     const connect = vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
     const chat = vi.spyOn(api, "askCopilot").mockResolvedValue({ answer: "Check #1", contextEntryCount: 1, contextTruncated: false });

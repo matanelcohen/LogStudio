@@ -105,6 +105,12 @@ internal sealed class CopilotCliClient
             (OperatingSystem.IsWindows() ? "copilot.exe" : "copilot");
     }
 
+    internal CopilotCliClient(Func<ProcessStartInfo, string?, CancellationToken, Func<string, Task>?, Task<string>> run,
+        Func<ProcessStartInfo, CancellationToken, Task<CopilotModel[]>> discoverModels) : this(discoverModels: discoverModels)
+    {
+        this.run = run;
+    }
+
     internal bool IsConnected { get; private set; }
     internal CopilotModel[] Models { get; private set; } = Array.Empty<CopilotModel>();
 
@@ -180,7 +186,7 @@ internal sealed class CopilotCliClient
         {
             foreach (string argument in new[]
             {
-                "--silent", "--stream=off", "--no-ask-user", "--no-custom-instructions",
+                "--silent", "--stream=off", "--output-format=text", "--no-color", "--no-ask-user", "--no-custom-instructions",
                 suggestions ? "--available-tools=" : "--available-tools=view",
                 sessionFile && !suggestions ? "--allow-tool=read" : "--deny-tool=read",
                 "--disallow-temp-dir", "--disable-builtin-mcps",

@@ -254,11 +254,11 @@ commit a new package version and create a new matching tag instead.
 ## Optional Copilot log chat
 
 Click **Ask Copilot** in the header to open a chat panel on the left, alongside the log results.
-The panel focuses on the conversation: your messages, Copilot's replies, and a composer fixed
-at the bottom, without introductory or context-report paragraphs. Press **Enter** to send,
+The panel includes starter prompts, streamed Markdown replies, locally highlighted fenced code,
+tables, and a copy-answer action. The expanding composer stays at the bottom. Press **Enter** to send,
 or **Shift+Enter** for a new line.
 Chat uses the **full selected session**, including saved/imported sessions, regardless of visible
-filters or paging. The feature is off until you explicitly connect and send a question.
+filters or paging. Logs are not sent until you send a question.
 
 1. Install the current [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli)
    on the **machine running Log Studio**, and run `copilot login` in a terminal. A Copilot entitlement
@@ -266,9 +266,18 @@ filters or paging. The feature is off until you explicitly connect and send a qu
 2. Ensure `copilot` is on Log Studio's `PATH` (`copilot.exe` on Windows). Alternatively, set
    `LOG_STUDIO_COPILOT_PATH` to the absolute executable path before launching Log Studio.
    Windows requires the native executable, not a `.cmd`/PowerShell shim. Restart Log Studio after changing it.
-3. Select the session you want to discuss, open **Ask Copilot**, and click
-   **Connect local Copilot**. Connecting only checks the CLI version; it does not send logs.
-4. Ask your question—there is no approval checkbox. The full conversation stays visible; follow-up
+3. Select the session you want to discuss and open **Ask Copilot**. The panel automatically checks
+   the CLI and discovers the account's enabled models; there is no Connect button. This preparation
+   does not send logs or start a model conversation. If it fails, follow the displayed installation
+   or login guidance and use **Retry**; you can keep typing your draft.
+4. Choose **AI model** in the composer, or leave **CLI default** selected. Models come from the local
+   CLI's `models.list` metadata, not a hard-coded list. For models advertising reasoning support,
+   **Reasoning effort** offers only their reported levels (for example Low, Medium, or High).
+   **Default reasoning** leaves the model's default unchanged. Changing models resets the reasoning
+   choice; models without reported support have no reasoning control. Both choices are passed as
+   validated CLI arguments, not prompt instructions. Account policy changes may require reopening
+   chat to refresh the catalog; provider-side access or quota errors are shown without losing the draft.
+5. Ask your question—there is no approval checkbox. The full conversation stays visible; follow-up
    questions include up to three recent question/answer pairs. **New chat** clears the conversation and draft;
    closing and reopening chat starts over. Switching sessions resets the conversation.
 
@@ -303,8 +312,20 @@ Remote session/export features are disabled (inference still uses Copilot's serv
 Browser requests cannot choose an executable or a file path. Current CLI support for these read-only
 flags is required; unsupported versions fail closed.
 These are Copilot CLI permission controls, not an operating-system sandbox.
-Only one Copilot request runs at a time. Connection checks time out after 10 seconds; questions after
-two minutes. Closing is disabled while a request runs; stopping Log Studio cancels its owned CLI process.
+Only one Copilot request runs at a time. CLI version checks time out after 10 seconds, model discovery
+after 20 seconds, and questions after two minutes. Closing is disabled while a question runs; stopping
+Log Studio cancels its owned CLI process. The chat endpoint retains its JSON response for non-streaming
+clients; the viewer requests newline-delimited JSON updates and requires a final completion event.
+
+The renderer uses [react-markdown](https://github.com/remarkjs/react-markdown), with
+[remark-gfm](https://github.com/remarkjs/remark-gfm) for tables/lists and
+[rehype-highlight](https://github.com/rehypejs/rehype-highlight) for local syntax highlighting.
+These mature, MIT-licensed unified ecosystem packages support the existing React 19/Vite setup without
+replacing the Radix controls or local HTTP transport. Streamdown was considered for incomplete-Markdown
+handling, but its Tailwind-oriented presentation/code plugin would add more integration and bundle
+complexity; a full assistant-ui runtime would duplicate this panel's existing state and transport.
+The chosen renderer displays raw HTML as text, blocks unsafe link protocols, omits generated images,
+and bundles its grammars/styles locally, without fetching fonts, themes, or other runtime assets.
 
 ## Saved session manager
 

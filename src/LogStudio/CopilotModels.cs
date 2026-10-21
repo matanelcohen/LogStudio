@@ -62,9 +62,12 @@ internal static class CopilotModels
     {
         JsonElement connected = await RequestAsync(input, output, 1, "connect", cancellationToken).ConfigureAwait(false);
         if (connected.TryGetProperty("error", out JsonElement error) &&
-            error.TryGetProperty("code", out JsonElement code) && code.GetInt32() == -32601)
+            ((error.TryGetProperty("code", out JsonElement code) && code.GetInt32() == -32601) ||
+             (error.TryGetProperty("message", out JsonElement message) && message.GetString() == "Unhandled method connect")))
             connected = await RequestAsync(input, output, 2, "ping", cancellationToken).ConfigureAwait(false);
-        if (!connected.TryGetProperty("result", out _)) throw new JsonException("Copilot protocol handshake failed.");
+        if (!connected.TryGetProperty("result", out JsonElement handshake) ||
+            !handshake.TryGetProperty("protocolVersion", out JsonElement version) || !version.TryGetInt32(out int protocol) || protocol is < 2 or > 3)
+            throw new JsonException("Copilot protocol handshake failed.");
         JsonElement response = await RequestAsync(input, output, 3, "models.list", cancellationToken).ConfigureAwait(false);
         if (!response.TryGetProperty("result", out JsonElement result) || !result.TryGetProperty("models", out JsonElement models) ||
             models.ValueKind != JsonValueKind.Array || models.GetArrayLength() > 256)
