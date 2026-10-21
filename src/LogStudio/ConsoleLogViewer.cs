@@ -129,7 +129,7 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
         }
     }
 
-    /// <summary>Records text without writing it to the terminal. Multiline text is split into entries.</summary>
+    /// <summary>Records one message without writing it to the terminal, preserving multiline text.</summary>
     /// <param name="message">The text to record.</param>
     /// <param name="stream">The origin of the text.</param>
     /// <param name="severity">An optional explicit severity instead of text inference.</param>
@@ -150,27 +150,7 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
         lock (this.lifecycleGate)
         {
             ObjectDisposedException.ThrowIf(this.disposeTask is not null, this);
-            int start = 0;
-            for (int index = 0; index < message.Length; index++)
-            {
-                if (message[index] is not ('\r' or '\n'))
-                {
-                    continue;
-                }
-
-                this.logs.Append(message[start..index], stream, severity: severity, category: category);
-                if (message[index] == '\r' && index + 1 < message.Length && message[index + 1] == '\n')
-                {
-                    index++;
-                }
-
-                start = index + 1;
-            }
-
-            if (start < message.Length || message.Length == 0)
-            {
-                this.logs.Append(message[start..], stream, severity: severity, category: category);
-            }
+            this.logs.Append(message, stream, severity: severity, category: category);
         }
     }
 

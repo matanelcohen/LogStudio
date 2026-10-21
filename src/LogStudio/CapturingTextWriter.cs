@@ -15,6 +15,13 @@ internal sealed class CapturingTextWriter : TextWriter
     private readonly LogStream stream;
     private readonly int maxLineLength;
     private readonly StringBuilder pending = new();
+    private readonly StringBuilder entry = new();
+    private LogSeverity entrySeverity;
+    private string? entryCategory;
+    private bool hasEntry;
+    private bool entryHasLine;
+    private bool entryIsPartial;
+    private bool acceptsException;
     private long lastWrite;
     private bool previousWasCarriageReturn;
     private bool partialWasPublished;
@@ -109,6 +116,7 @@ internal sealed class CapturingTextWriter : TextWriter
         {
             this.original.Flush();
             this.PublishPartial();
+            this.PublishEntry();
         }
     }
 
@@ -122,10 +130,11 @@ internal sealed class CapturingTextWriter : TextWriter
     {
         lock (this.gate)
         {
-            if (this.pending.Length > 0 &&
+            if ((this.pending.Length > 0 || this.hasEntry) &&
                 Stopwatch.GetElapsedTime(this.lastWrite) >= ViewerConstants.PartialLineInterval)
             {
                 this.PublishPartial();
+                this.PublishEntry();
             }
         }
     }
@@ -137,6 +146,7 @@ internal sealed class CapturingTextWriter : TextWriter
             lock (this.gate)
             {
                 this.PublishPartial();
+                this.PublishEntry();
                 this.closed = true;
             }
         }
@@ -164,7 +174,7 @@ internal sealed class CapturingTextWriter : TextWriter
             {
                 if (this.pending.Length > 0 || !this.partialWasPublished)
                 {
-                    this.logs.Append(this.pending.ToString(), this.stream);
+                    this.CaptureLine(this.pending.ToString(), isPartial: false);
                 }
 
                 this.pending.Clear();
@@ -189,8 +199,66 @@ internal sealed class CapturingTextWriter : TextWriter
             return;
         }
 
-        this.logs.Append(this.pending.ToString(), this.stream, isPartial: true);
+        this.CaptureLine(this.pending.ToString(), isPartial: true);
         this.pending.Clear();
         this.partialWasPublished = true;
+    }
+
+    private void CaptureLine(string line, bool isPartial)
+    {
+        string clean = LogParser.StripTerminalEscapes(line);
+        bool header = LogParser.TryParseHeader(clean, out LogSeverity severity, out string? category);
+        bool exception = LogParser.IsExceptionStart(clean);
+        bool continuation = LogParser.IsContinuation(clean);
+        if (this.hasEntry && !this.partialWasPublished &&
+            !((!header && continuation) || (exception && (continuation || this.acceptsException))))
+        {
+            this.PublishEntry();
+        }
+
+        if (!this.hasEntry)
+        {
+            if (!header && !continuation)
+            {
+                this.logs.Append(clean, this.stream, isPartial);
+                return;
+            }
+
+            this.hasEntry = true;
+            this.entrySeverity = header ? severity : this.stream == LogStream.Stderr ? LogSeverity.Error :
+                this.stream == LogStream.Viewer ? LogSeverity.Information : LogSeverity.Output;
+            this.entryCategory = category;
+            this.acceptsException = header && !exception;
+        }
+
+        if (this.entryHasLine && !this.partialWasPublished) this.entry.Append('\n');
+        this.entry.Append(clean);
+        this.entryHasLine = true;
+        this.entryIsPartial |= isPartial;
+        if (exception) this.acceptsException = false;
+        if (this.entry.Length >= this.maxLineLength) this.PublishEntry(isPartial: true, reset: false);
+    }
+
+    private void PublishEntry(bool isPartial = false, bool reset = true)
+    {
+        if (this.entry.Length > 0)
+        {
+            this.logs.Append(this.entry.ToString(), this.stream, isPartial || this.entryIsPartial,
+                this.entrySeverity, this.entryCategory);
+            this.entry.Clear();
+        }
+
+        if (reset)
+        {
+            this.hasEntry = false;
+            this.entryHasLine = false;
+            this.entryIsPartial = false;
+            this.entryCategory = null;
+            this.acceptsException = false;
+        }
+        else
+        {
+            this.entryIsPartial = true;
+        }
     }
 }

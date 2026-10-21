@@ -19,7 +19,7 @@ public sealed class ConsoleLogViewerOptions
     /// <remarks>Reads, completion and shutdown also flush pending data. I/O buffer sizes do not grow with this value.</remarks>
     public int FlushEveryEntries { get; set; } = ViewerConstants.DefaultFlushEveryEntries;
 
-    /// <summary>Gets or sets the line chunk limit. Longer output is split, not discarded.</summary>
+    /// <summary>Gets or sets the entry chunk limit, including multiline messages. Longer output is split, not discarded.</summary>
     public int MaxLineLength { get; set; } = ViewerConstants.DefaultMaxLineLength;
 
     /// <summary>Gets or sets whether to tee Console.Out and Console.Error at startup.</summary>
