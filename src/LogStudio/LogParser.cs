@@ -99,7 +99,9 @@ internal sealed class LogParser
         if (trimmed.StartsWith('{') && TryParseJson(trimmed, out LogSeverity jsonSeverity, out string? jsonCategory))
         {
             severity = jsonSeverity;
-            category = jsonCategory;
+            category = jsonCategory?.Length > ViewerConstants.MaximumCategoryLength
+                ? jsonCategory[..ViewerConstants.MaximumCategoryLength]
+                : jsonCategory;
             return true;
         }
 

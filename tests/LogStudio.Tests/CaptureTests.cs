@@ -76,6 +76,223 @@ public sealed class CaptureTests
         Assert.Equal(text + Environment.NewLine, original.ToString());
     }
 
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    [InlineData("\r")]
+    public void MultilineErrorsAreOneEntryAcrossWriteAndLineEndingBoundaries(string newline)
+    {
+        using ConsoleLogViewer viewer = StartServer();
+        using StringWriter original = new();
+        using TextWriter writer = viewer.CreateCaptureWriter(original, LogStream.Stdout);
+        string[] lines =
+        {
+            "\u001b[31m12:20:33.123 fail: My.Category[42]\u001b[0m",
+            "      Request failed",
+            "      System.InvalidOperationException: outer failure",
+            "       ---> System.ArgumentException: inner failure",
+            "         at Example.Run()",
+            "         --- End of inner exception stack trace ---",
+            "         at Example.Main()",
+        };
+        string text = string.Join(newline, lines) + newline;
+        foreach (char character in text) writer.Write(character);
+        writer.Flush();
+
+        LogEntry entry = Assert.Single(viewer.GetLogs());
+        Assert.Equal("12:20:33.123 fail: My.Category[42]\n" + string.Join("\n", lines.Skip(1)), entry.Message);
+        Assert.Equal(LogSeverity.Error, entry.Severity);
+        Assert.Equal("My.Category", entry.Category);
+        Assert.False(entry.IsPartial);
+        Assert.Equal(text, original.ToString());
+    }
+
+    [Fact]
+    public void NewHeadersAndOrdinaryOutputDoNotMergeWithPreviousEntries()
+    {
+        using ConsoleLogViewer viewer = StartServer();
+        using TextWriter writer = viewer.CreateCaptureWriter(TextWriter.Null, LogStream.Stdout);
+        writer.Write("[ERR] first\n  details\n[ERR] second\n\tmore details\nordinary output\nanother line\n\n");
+        writer.Flush();
+
+        Assert.Equal(new[] { "[ERR] first\n  details", "[ERR] second\n\tmore details", "ordinary output", "another line", "" },
+            viewer.GetLogs().Select(entry => entry.Message));
+    }
+
+    [Theory]
+    [InlineData("trce: My.Category[0]", LogSeverity.Trace, "My.Category")]
+    [InlineData("dbug: My.Category[0]", LogSeverity.Debug, "My.Category")]
+    [InlineData("info: My.Category[0]", LogSeverity.Information, "My.Category")]
+    [InlineData("warn: My.Category[0]", LogSeverity.Warning, "My.Category")]
+    [InlineData("fail: My.Category[0]", LogSeverity.Error, "My.Category")]
+    [InlineData("crit: My.Category[0]", LogSeverity.Critical, "My.Category")]
+    [InlineData("[INF] information", LogSeverity.Information, null)]
+    [InlineData("[WRN] warning", LogSeverity.Warning, null)]
+    public void MultilineMessagesAreGroupedAtEveryLogLevel(string header, LogSeverity severity, string? category)
+    {
+        using ConsoleLogViewer viewer = StartServer();
+        using TextWriter writer = viewer.CreateCaptureWriter(TextWriter.Null, LogStream.Stdout);
+        writer.Write(header + "\n  first detail\n\tsecond detail\n" + header + "\n  next event\n");
+        writer.Flush();
+
+        LogEntry[] entries = viewer.GetLogs().ToArray();
+        Assert.Equal(new[] { header + "\n  first detail\n\tsecond detail", header + "\n  next event" },
+            entries.Select(entry => entry.Message));
+        Assert.All(entries, entry =>
+        {
+            Assert.Equal(severity, entry.Severity);
+            Assert.Equal(category, entry.Category);
+            Assert.False(entry.IsPartial);
+        });
+    }
+
+    [Theory]
+    [InlineData("System.InvalidOperationException: failure")]
+    [InlineData("Unhandled exception. System.InvalidOperationException: failure")]
+    public void RawExceptionStacksAndMarkersAreGrouped(string header)
+    {
+        using ConsoleLogViewer viewer = StartServer();
+        using TextWriter writer = viewer.CreateCaptureWriter(TextWriter.Null, LogStream.Stdout);
+        writer.WriteLine(header);
+        writer.WriteLine("---> System.ArgumentException: inner");
+        writer.WriteLine("at Example.Run()");
+        writer.WriteLine("--- End of stack trace from previous location ---");
+        writer.WriteLine("   at Example.Main()");
+        writer.Flush();
+
+        LogEntry entry = Assert.Single(viewer.GetLogs());
+        Assert.Equal(header + "\n---> System.ArgumentException: inner\nat Example.Run()\n" +
+            "--- End of stack trace from previous location ---\n   at Example.Main()", entry.Message);
+        Assert.Equal(LogSeverity.Error, entry.Severity);
+    }
+
+    [Fact]
+    public void UnindentedExceptionBelongsToLoggerHeaderButSeparateExceptionsStaySeparate()
+    {
+        using ConsoleLogViewer viewer = StartServer();
+        using TextWriter writer = viewer.CreateCaptureWriter(TextWriter.Null, LogStream.Stderr);
+        writer.Write("[ERR] request failed\nSystem.Exception: first\n   at Example.First()\n" +
+            "System.Exception: second\n   at Example.Second()\n");
+        writer.Flush();
+
+        Assert.Equal(new[] { "[ERR] request failed\nSystem.Exception: first\n   at Example.First()",
+            "System.Exception: second\n   at Example.Second()" }, viewer.GetLogs().Select(entry => entry.Message));
+    }
+
+    [Fact]
+    public void MultilineStateIsIsolatedBetweenStreamsAndIndependentWriters()
+    {
+        using ConsoleLogViewer viewer = StartServer();
+        using TextWriter stdout = viewer.CreateCaptureWriter(TextWriter.Null, LogStream.Stdout);
+        using TextWriter stderr = viewer.CreateCaptureWriter(TextWriter.Null, LogStream.Stderr);
+        using TextWriter other = viewer.CreateCaptureWriter(TextWriter.Null, LogStream.Stdout);
+        stdout.Write("fail: First.Category[0]\n");
+        stderr.Write("crit: Second.Category[0]\n");
+        other.Write("warn: Third.Category[0]\n");
+        stdout.Write("  first stack\n");
+        stderr.Write("  second stack\n");
+        other.Write("  third detail\n");
+        stdout.Flush();
+        stderr.Flush();
+        other.Flush();
+
+        LogEntry[] entries = viewer.GetLogs().ToArray();
+        Assert.Equal(new[] { "fail: First.Category[0]\n  first stack", "crit: Second.Category[0]\n  second stack",
+            "warn: Third.Category[0]\n  third detail" }, entries.Select(entry => entry.Message));
+        Assert.Equal(new[] { "First.Category", "Second.Category", "Third.Category" }, entries.Select(entry => entry.Category));
+        Assert.Equal(new[] { LogStream.Stdout, LogStream.Stderr, LogStream.Stdout }, entries.Select(entry => entry.Stream));
+        Assert.Equal(new[] { LogSeverity.Error, LogSeverity.Critical, LogSeverity.Warning }, entries.Select(entry => entry.Severity));
+    }
+
+    [Fact]
+    public async Task IdleFlushPublishesFinalMultilineEntryWithoutAnotherHeader()
+    {
+        await using ConsoleLogViewer viewer = StartServer();
+        using TextWriter writer = viewer.CreateCaptureWriter(TextWriter.Null, LogStream.Stdout);
+        writer.Write("fail: My.Category[0]\n  failure\n   at Example.Run()\n");
+        await WaitUntilAsync(() => viewer.GetLogs().Count > 0);
+
+        LogEntry entry = Assert.Single(viewer.GetLogs());
+        Assert.Equal("fail: My.Category[0]\n  failure\n   at Example.Run()", entry.Message);
+        Assert.False(entry.IsPartial);
+        writer.Flush();
+        Assert.Single(viewer.GetLogs());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CompletionAndWriterDisposalFlushMultilineEntries(bool disposeWriter)
+    {
+        using ConsoleLogViewer viewer = StartServer();
+        using TextWriter writer = viewer.CreateCaptureWriter(TextWriter.Null, LogStream.Stdout);
+        writer.Write("[ERR] failure\n   at Example.Run()");
+        if (disposeWriter) writer.Dispose();
+        else viewer.Complete();
+
+        LogEntry entry = Assert.Single(viewer.GetLogs());
+        Assert.Equal("[ERR] failure\n   at Example.Run()", entry.Message);
+        Assert.True(entry.IsPartial);
+    }
+
+    [Fact]
+    public void ClearingHistoryFlushesAndResetsPendingMultilineState()
+    {
+        using ConsoleLogViewer viewer = StartServer();
+        using TextWriter writer = viewer.CreateCaptureWriter(TextWriter.Null, LogStream.Stdout);
+        writer.Write("fail: Old.Category[0]\n  remove this stack\n");
+        Assert.Equal(1, viewer.ClearLogs());
+        writer.Write("info: New.Category[0]\n  keep this message\n");
+        writer.Flush();
+
+        LogEntry entry = Assert.Single(viewer.GetLogs());
+        Assert.Equal("info: New.Category[0]\n  keep this message", entry.Message);
+        Assert.Equal(LogSeverity.Information, entry.Severity);
+        Assert.Equal("New.Category", entry.Category);
+    }
+
+    [Fact]
+    public void OversizedMultilineEntriesPreserveTextMetadataAndSurrogatePairs()
+    {
+        using ConsoleLogViewer viewer = StartServer(maxLineLength: 64);
+        using TextWriter writer = viewer.CreateCaptureWriter(TextWriter.Null, LogStream.Stdout);
+        string message = "fail: My.Category[0]\n  " + new string('x', 63) + "\U0001F642" + new string('y', 200) +
+            "\n   at Example.Run()\n   at Example.Main()";
+        writer.Write(message + "\n");
+        writer.Flush();
+
+        Assert.Equal(message, string.Concat(viewer.GetLogs().Select(entry => entry.Message)));
+        Assert.All(viewer.GetLogs(), entry =>
+        {
+            Assert.InRange(entry.Message.Length, 1, 64);
+            Assert.False(char.IsHighSurrogate(entry.Message[^1]));
+            Assert.Equal(LogSeverity.Error, entry.Severity);
+            Assert.Equal("My.Category", entry.Category);
+            Assert.True(entry.IsPartial);
+        });
+    }
+
+    [Theory]
+    [InlineData(LogSeverity.Trace)]
+    [InlineData(LogSeverity.Debug)]
+    [InlineData(LogSeverity.Information)]
+    [InlineData(LogSeverity.Warning)]
+    [InlineData(LogSeverity.Error)]
+    [InlineData(LogSeverity.Critical)]
+    public void RecordPreservesOneMultilineEventAndExplicitMetadata(LogSeverity severity)
+    {
+        using ConsoleLogViewer viewer = StartServer();
+        viewer.Record("\u001b[31mFailure\u001b[0m\r\n\r\n  at Example.Run()\rtail",
+            LogStream.Stderr, severity, "Recorded.Category");
+
+        LogEntry entry = Assert.Single(viewer.GetLogs());
+        Assert.Equal("Failure\n\n  at Example.Run()\ntail", entry.Message);
+        Assert.Equal(LogStream.Stderr, entry.Stream);
+        Assert.Equal(severity, entry.Severity);
+        Assert.Equal("Recorded.Category", entry.Category);
+        Assert.False(entry.IsPartial);
+    }
+
     [Fact]
     public async Task CapturesRealDotnetConsoleLoggerCategoriesScopesAndSeverity()
     {
@@ -100,6 +317,8 @@ public sealed class CaptureTests
             LogEntry entry = Assert.Single(viewer.GetLogs(), entry => entry.Message.Contains(LoggerMessage, StringComparison.Ordinal));
             Assert.Equal(LogSeverity.Warning, entry.Severity);
             Assert.Equal(LoggerCategory, entry.Category);
+            Assert.Single(viewer.GetLogs());
+            Assert.Contains(SyntheticScope, entry.Message, StringComparison.Ordinal);
             Assert.Contains(SyntheticScope, stdout.ToString(), StringComparison.Ordinal);
             Assert.Throws<InvalidOperationException>(() => ConsoleLogViewer.Start());
         }

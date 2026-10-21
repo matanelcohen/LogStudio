@@ -24,7 +24,7 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
     private const string StartupHooksEnvironmentVariable = "DOTNET_STARTUP_HOOKS";
     private const string UrlPrefix = "Log Studio: ";
     private const string Payload = "argument with spaces = quoted value";
-    private const int LongRunStepCount = 4000;
+    private const int LongRunStepCount = 10_001;
     private static readonly TimeSpan ProcessTimeout = TimeSpan.FromSeconds(20);
     private static readonly ConcurrentDictionary<int, string> HistoryDirectories = new();
     private static readonly string[] HistoryFileNames = { "entries.jsonl", "entries.idx" };

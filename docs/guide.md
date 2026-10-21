@@ -739,9 +739,14 @@ opening control after closing the editor.
 Severity and category are best-effort metadata inferred from .NET console logger headers /
 continuations, JSON console logs, bracket-style levels, and explicit error prefixes.
 Plain stdout is `output`; plain stderr is `error`. Capture timestamps are UTC, with local-time
-display in the table. A console line can produce a partial entry after roughly 250-500 ms idle;
-long lines are split into bounded chunks rather than silently truncated. Adjacent partial chunks
-can be reassembled by concatenating their message text, but line grouping is not inferred.
+display in the table. Recognized log headers and exception messages are grouped with their
+indented continuations, stack frames, and inner-exception markers into one entry. New headers,
+unrelated ordinary lines, and blank separators start separate entries; arbitrary unmarked
+multiline prose cannot be reliably grouped. Grouping is independent for each capture writer.
+Pending entries appear after roughly 250-500 ms idle, or on flush, completion, or shutdown.
+Unterminated lines are marked partial. Messages exceeding `MaxLineLength`, including multiline
+messages, are split into bounded partial chunks rather than silently truncated; concatenate
+their message text to reassemble them. Newlines and indentation are preserved in the inspector.
 
 ## Optional NuGet library attachment
 
@@ -765,7 +770,8 @@ await using ConsoleLogViewer viewer = ConsoleLogViewer.Start(
 `ConsoleLogViewerOptions` also exposes `Port`, `Capacity` (zero / unlimited by default),
 `FlushEveryEntries` (1000 by default), `MaxLineLength` (64-65536), and `CaptureConsole`.
 A positive `Capacity` opts into bounded visible retention.
-`Record` accepts explicit severity and category when available.
+`Record` preserves each call as one message, including multiline text, and accepts explicit
+severity and category when available. The same chunk limit applies to recorded messages.
 `CreateCaptureWriter` supports other text sources without taking ownership of the original
 writer. `Complete(exitCode)` marks a run complete without closing the server.
 

@@ -107,7 +107,7 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
     /// <summary>Creates a tee writer for a redirected process or another text source.</summary>
     /// <param name="output">The destination to mirror unchanged. It is never disposed by the viewer.</param>
     /// <param name="stream">The origin to attach to captured entries.</param>
-    /// <returns>A writer owned by this viewer. Disposing it flushes any final partial line.</returns>
+    /// <returns>A writer owned by this viewer. Disposing it flushes pending messages and any final partial line.</returns>
     public TextWriter CreateCaptureWriter(TextWriter output, LogStream stream)
     {
         ArgumentNullException.ThrowIfNull(output);

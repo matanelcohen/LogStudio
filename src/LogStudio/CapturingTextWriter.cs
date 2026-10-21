@@ -210,8 +210,9 @@ internal sealed class CapturingTextWriter : TextWriter
         bool header = LogParser.TryParseHeader(clean, out LogSeverity severity, out string? category);
         bool exception = LogParser.IsExceptionStart(clean);
         bool continuation = LogParser.IsContinuation(clean);
-        if (this.hasEntry && !this.partialWasPublished &&
-            !((!header && continuation) || (exception && (continuation || this.acceptsException))))
+        bool continuesEntry = this.partialWasPublished || (!header && continuation) ||
+            (exception && (continuation || this.acceptsException));
+        if (this.hasEntry && !continuesEntry)
         {
             this.PublishEntry();
         }
