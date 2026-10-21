@@ -11,15 +11,16 @@ export interface Choice {
   label: string;
 }
 
-export function SelectControl({ id, label, value, choices, onChange }: {
+export function SelectControl({ id, label, value, choices, disabled, onChange }: {
   id?: string;
   label: string;
   value: string;
   choices: readonly Choice[];
+  disabled?: boolean;
   onChange(value: string): void;
 }) {
   return (
-    <Select.Root value={value || EmptySelectValue} onValueChange={value => onChange(value === EmptySelectValue ? "" : value)}>
+    <Select.Root disabled={disabled} value={value || EmptySelectValue} onValueChange={value => onChange(value === EmptySelectValue ? "" : value)}>
       <Select.Trigger id={id} className="select-trigger" aria-label={label}>
         <Select.Value />
         <Select.Icon><ChevronDown size={13} /></Select.Icon>

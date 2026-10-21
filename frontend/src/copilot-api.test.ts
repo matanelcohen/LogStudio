@@ -4,10 +4,10 @@ import { ApiRoutes, ClearActionHeader } from "./model";
 
 describe("Copilot API", () => {
   it("requires explicit actions and sends questions and bounded history, not visible record IDs", async () => {
-    const fetch = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ version: "test CLI" }) })
+    const fetch = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ version: "test CLI", models: [] }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ answer: "Answer #1", contextEntryCount: 1, contextTruncated: false }) });
     vi.stubGlobal("fetch", fetch);
-    expect(await connectCopilot()).toBe("test CLI");
+    expect(await connectCopilot()).toEqual({ version: "test CLI", models: [] });
     expect(fetch.mock.calls[0]).toEqual([ApiRoutes.CopilotConnect, { method: "POST", headers: { [ClearActionHeader]: "copilot-connect" } }]);
     expect(await askCopilot("saved", "Why?", [])).toEqual({ answer: "Answer #1", contextEntryCount: 1, contextTruncated: false });
     expect(fetch.mock.calls[1]?.[0]).toBe(`${ApiRoutes.CopilotChat}?sessionId=saved`);

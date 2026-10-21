@@ -116,12 +116,12 @@ describe("log-first workspace", () => {
   });
 
   it("preserves Copilot conversation and drafts while searching logs", async () => {
-    vi.spyOn(api, "connectCopilot").mockResolvedValue("test CLI");
+    vi.spyOn(api, "connectCopilot").mockResolvedValue({ version: "test CLI", models: [] });
     vi.spyOn(api, "askCopilot").mockResolvedValue({ answer: "Existing answer", contextEntryCount: 1, contextTruncated: false });
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Ask Copilot" }));
     const panel = screen.getByRole("complementary", { name: "Ask Copilot about logs" });
-    fireEvent.click(screen.getByRole("button", { name: "Connect local Copilot" }));
+    await screen.findByRole("combobox", { name: "AI model" });
     const input = screen.getByLabelText("Message Copilot") as HTMLTextAreaElement;
     await waitFor(() => expect(input.hasAttribute("disabled")).toBe(false));
     fireEvent.change(input, { target: { value: "First question" } });
@@ -139,13 +139,13 @@ describe("log-first workspace", () => {
   });
 
   it("retains an in-flight Copilot response while inspecting a log", async () => {
-    vi.spyOn(api, "connectCopilot").mockResolvedValue("test CLI");
+    vi.spyOn(api, "connectCopilot").mockResolvedValue({ version: "test CLI", models: [] });
     let finish!: (value: ChatResponse) => void;
     const ask = vi.spyOn(api, "askCopilot").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Ask Copilot" }));
     const panel = screen.getByRole("complementary", { name: "Ask Copilot about logs" });
-    fireEvent.click(screen.getByRole("button", { name: "Connect local Copilot" }));
+    await screen.findByRole("combobox", { name: "AI model" });
     const input = screen.getByLabelText("Message Copilot");
     await waitFor(() => expect(input.hasAttribute("disabled")).toBe(false));
     fireEvent.change(input, { target: { value: "In-flight question" } });
@@ -222,7 +222,7 @@ describe("log-first workspace", () => {
     expect(screen.queryByRole("heading", { name: "Ask Copilot about logs" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Ask Copilot" }));
     expect(screen.getByRole("heading", { name: "Ask Copilot about logs" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "Connect local Copilot" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Connect local Copilot" })).toBeNull();
     const panel = screen.getByRole("complementary", { name: "Ask Copilot about logs" });
     expect(panel.parentElement).toBe(screen.getByRole("main", { name: "Log exploration workspace" }));
     expect(panel.nextElementSibling?.className).toBe("workspace");

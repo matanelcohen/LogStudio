@@ -696,7 +696,8 @@ internal sealed class HttpLogServer : IAsyncDisposable
             if (connect)
             {
                 string version = await this.copilot.ConnectAsync(cancellationToken).ConfigureAwait(false);
-                await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(new { version }, ViewerConstants.JsonOptions),
+                CopilotModel[] models = await this.copilot.ListModelsAsync(cancellationToken).ConfigureAwait(false);
+                await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(new { version, models }, ViewerConstants.JsonOptions),
                     ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
                 return;
             }
@@ -711,16 +712,36 @@ internal sealed class HttpLogServer : IAsyncDisposable
                 throw new ArgumentException("The chat request must contain valid JSON.", exception);
             }
             CopilotChat.Validate(chat);
+            this.copilot.ValidateOptions(chat);
             ChatContext snapshot;
             string? selected = request.QueryString[ViewerConstants.SessionIdQuery];
             using (LogHistoryReader history = string.IsNullOrEmpty(selected) || selected == this.sessions.Id ? this.logs.OpenHistory() : this.sessions.Open(selected))
                 snapshot = CopilotChat.BuildContext(chat, history, cancellationToken);
             ChatResponse result;
             using (snapshot)
-                result = await this.copilot.AskAsync(snapshot, cancellationToken).ConfigureAwait(false);
+            {
+                if (request.AcceptTypes?.Contains("application/x-ndjson", StringComparer.Ordinal) == true)
+                {
+                    response.ContentType = "application/x-ndjson; charset=utf-8";
+                    response.SendChunked = true;
+                    try
+                    {
+                        result = await this.copilot.AskAsync(snapshot, cancellationToken, chat,
+                            content => WriteChatEventAsync(response, new { content }, cancellationToken)).ConfigureAwait(false);
+                        await WriteChatEventAsync(response, result, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (CopilotException exception)
+                    {
+                        await WriteChatEventAsync(response, new { error = exception.Message }, cancellationToken).ConfigureAwait(false);
+                    }
+                    return;
+                }
+                result = await this.copilot.AskAsync(snapshot, cancellationToken, chat).ConfigureAwait(false);
+            }
             await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(result, ViewerConstants.JsonOptions),
                 ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
         }
+
         catch (CopilotException exception)
         {
             await WriteErrorAsync(response, HttpStatusCode.ServiceUnavailable, exception.Message, cancellationToken).ConfigureAwait(false);
@@ -733,6 +754,14 @@ internal sealed class HttpLogServer : IAsyncDisposable
         {
             this.copilotSlot.Release();
         }
+    }
+
+    private static async Task WriteChatEventAsync(HttpListenerResponse response, object value, CancellationToken cancellationToken)
+    {
+        byte[] data = JsonSerializer.SerializeToUtf8Bytes(value, ViewerConstants.JsonOptions);
+        await response.OutputStream.WriteAsync(data, cancellationToken).ConfigureAwait(false);
+        await response.OutputStream.WriteAsync("\n"u8.ToArray(), cancellationToken).ConfigureAwait(false);
+        await response.OutputStream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task ReadHistoryAsync(HttpListenerContext context, string route, CancellationToken cancellationToken)

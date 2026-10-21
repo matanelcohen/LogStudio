@@ -1,7 +1,7 @@
 import {
   ApiRoutes, ClearActionHeader, ClearActionValue, CopilotChatActionValue, CopilotConnectActionValue, DeleteSessionActionValue, ImportActionValue, importFormat, MaximumCategorySuggestions, MaximumChatAnswerLength, MaximumChatRequestBytes, MaximumHighlights, MaximumPageSize, PageSize, QueryKeys, RenameActionValue, Severities, Streams, UploadContentType, validateImportFile,
   SelectApplicationActionValue, type RunningApplication, type RunningApplicationsState,
-  type ChatMessage, type ChatResponse, type ClearResult, type LogEntry, type LogPage, type SessionInfo, type ViewerStatus
+  type ChatMessage, type ChatOptions, type ChatResponse, type CopilotConnection, type ClearResult, type LogEntry, type LogPage, type SessionInfo, type ViewerStatus
 } from "./model";
 
 export class ApiError extends Error {
@@ -246,30 +246,78 @@ export async function deleteSession(id: string): Promise<void> {
   if (result.deleted !== true) throw new Error("The server did not confirm deletion.");
 }
 
-export async function connectCopilot(): Promise<string> {
+export async function connectCopilot(): Promise<CopilotConnection> {
   const response = await fetch(ApiRoutes.CopilotConnect, {
     method: "POST", headers: { [ClearActionHeader]: CopilotConnectActionValue }
   });
   const data = object(await response.json());
   if (!response.ok) throw new ApiError(text(data.error, "Copilot connection error"), response.status);
-  return text(data.version, "Copilot version");
+  if (!Array.isArray(data.models)) throw new Error("The server returned an invalid Copilot model list.");
+  return {
+    version: text(data.version, "Copilot version"),
+    models: data.models.map(value => {
+      const model = object(value);
+      if (!Array.isArray(model.reasoningEfforts) || model.reasoningEfforts.some(effort => typeof effort !== "string"))
+        throw new Error("The server returned invalid reasoning levels.");
+      return { id: text(model.id, "model ID"), name: text(model.name, "model name"), reasoningEfforts: model.reasoningEfforts as string[] };
+    })
+  };
 }
 
-export async function askCopilot(sessionId: string, question: string, messages: ChatMessage[]): Promise<ChatResponse> {
+export async function askCopilot(sessionId: string, question: string, messages: ChatMessage[], options: ChatOptions = {},
+  onUpdate?: (answer: string) => void): Promise<ChatResponse> {
   const query = sessionId ? `?${new URLSearchParams({ [QueryKeys.SessionId]: sessionId })}` : "";
   let history = messages;
-  let body = JSON.stringify({ question, messages: history });
+  let body = JSON.stringify({ question, messages: history, ...options });
   while (history.length > 0 && new TextEncoder().encode(body).length > MaximumChatRequestBytes) {
     history = history.slice(2);
-    body = JSON.stringify({ question, messages: history });
+    body = JSON.stringify({ question, messages: history, ...options });
   }
   const response = await fetch(ApiRoutes.CopilotChat + query, {
     method: "POST",
-    headers: { [ClearActionHeader]: CopilotChatActionValue, "Content-Type": "application/json" },
+    headers: { [ClearActionHeader]: CopilotChatActionValue, "Content-Type": "application/json", ...(onUpdate ? { Accept: "application/x-ndjson" } : {}) },
     body
   });
-  const data = object(await response.json());
-  if (!response.ok) throw new ApiError(text(data.error, "Copilot chat error"), response.status);
+  if (!response.ok) throw new ApiError(text(object(await response.json()).error, "Copilot chat error"), response.status);
+  if (onUpdate && response.headers?.get("Content-Type")?.startsWith("application/x-ndjson")) {
+    if (!response.body) throw new Error("Copilot returned an empty response stream.");
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = "";
+    let result: ChatResponse | null = null;
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        pending += decoder.decode(chunk.value, { stream: !chunk.done });
+        let newline;
+        while ((newline = pending.indexOf("\n")) >= 0) {
+          if (newline > MaximumChatAnswerLength * 8) throw new Error("Copilot returned an oversized stream event.");
+          const line = pending.slice(0, newline);
+          pending = pending.slice(newline + 1);
+          if (!line.trim()) continue;
+          const event = object(JSON.parse(line));
+          if (event.error !== undefined) throw new Error(text(event.error, "Copilot chat error"));
+          if (event.answer !== undefined) result = readChatResponse(event);
+          else {
+            const answer = text(event.content, "Copilot streamed answer");
+            if (answer.length > MaximumChatAnswerLength) throw new Error("Copilot's response exceeded the character limit.");
+            onUpdate(answer);
+          }
+          if (pending.length > MaximumChatAnswerLength * 8) throw new Error("Copilot returned an oversized stream event.");
+        }
+        if (chunk.done) break;
+      }
+      if (!result || pending.trim()) throw new Error("The Copilot response stream was interrupted. Try again.");
+      return result;
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+  }
+  return readChatResponse(object(await response.json()));
+}
+
+function readChatResponse(data: Record<string, unknown>): ChatResponse {
   const answer = text(data.answer, "Copilot answer");
   const contextEntryCount = count(data.contextEntryCount, "Copilot context count");
   if (!answer.trim() || answer.length > MaximumChatAnswerLength || contextEntryCount < 1)

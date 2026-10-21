@@ -165,6 +165,101 @@ public sealed class CopilotChatTests
     }
 
     [Fact]
+    public async Task ModelDiscoveryUsesFramedRpcAndOnlyExposesEnabledModelsAndReportedEfforts()
+    {
+        string Frame(object value)
+        {
+            string json = JsonSerializer.Serialize(value);
+            return $"Content-Length: {Encoding.UTF8.GetByteCount(json)}\r\n\r\n{json}";
+        }
+        string payload = Frame(new { jsonrpc = "2.0", method = "notification" }) +
+            Frame(new { jsonrpc = "2.0", id = 1, result = new { protocolVersion = 3 } }) +
+            Frame(new { jsonrpc = "2.0", id = 3, result = new { models = new object[]
+            {
+                new { id = "reasoner", name = "Reasoning model", policy = new { state = "enabled" },
+                    capabilities = new { supports = new { reasoningEffort = true } }, supportedReasoningEfforts = new[] { "low", "high" } },
+                new { id = "disabled", name = "Unavailable", policy = new { state = "disabled" } },
+                new { id = "fast", name = "Fast model", capabilities = new { supports = new { reasoningEffort = false } },
+                    supportedReasoningEfforts = new[] { "high" } }
+            } } });
+        using MemoryStream input = new(Encoding.UTF8.GetBytes(payload));
+        using MemoryStream output = new();
+        CopilotModel[] models = await CopilotModels.ReadModelsAsync(input, output, default);
+        Assert.Equal(new[] { "reasoner", "fast" }, models.Select(model => model.Id));
+        Assert.Equal(new[] { "low", "high" }, models[0].ReasoningEfforts);
+        Assert.Empty(models[1].ReasoningEfforts);
+        string sent = Encoding.UTF8.GetString(output.ToArray());
+        Assert.Contains("\"method\":\"connect\"", sent, StringComparison.Ordinal);
+        Assert.Contains("\"method\":\"models.list\"", sent, StringComparison.Ordinal);
+        Assert.DoesNotContain("session.create", sent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ModelDiscoverySupportsLegacyHandshakeAndRejectsUnboundedFrames()
+    {
+        static string Frame(string json) => $"Content-Length: {Encoding.UTF8.GetByteCount(json)}\r\n\r\n{json}";
+        using MemoryStream input = new(Encoding.UTF8.GetBytes(
+            Frame("""{"id":1,"error":{"code":-32601}}""") +
+            Frame("""{"id":2,"result":{"protocolVersion":2}}""") +
+            Frame("""{"id":3,"result":{"models":[]}}""")));
+        using MemoryStream output = new();
+        Assert.Empty(await CopilotModels.ReadModelsAsync(input, output, default));
+        Assert.Contains("\"method\":\"ping\"", Encoding.UTF8.GetString(output.ToArray()), StringComparison.Ordinal);
+        using MemoryStream oversized = new(Encoding.UTF8.GetBytes("Content-Length: 1048577\r\n\r\n"));
+        await Assert.ThrowsAsync<JsonException>(() => CopilotModels.ReadModelsAsync(oversized, output, default));
+    }
+
+    [Fact]
+    public async Task ModelAndReasoningSelectionsAreValidatedAndForwardedAsArguments()
+    {
+        int questions = 0;
+        CopilotCliClient client = new((start, input, _) =>
+        {
+            if (input is null) return Task.FromResult("version");
+            questions++;
+            Assert.Contains("--model=reasoner", start.ArgumentList);
+            Assert.Contains("--reasoning-effort=high", start.ArgumentList);
+            return Task.FromResult("answer");
+        }, discoverModels: (_, _) => Task.FromResult(new[]
+        {
+            new CopilotModel("reasoner", "Reasoner", new[] { "low", "high" }),
+            new CopilotModel("fast", "Fast", Array.Empty<string>())
+        }));
+        await client.ConnectAsync(default);
+        await client.ListModelsAsync(default);
+        foreach (ChatRequest request in new[]
+        {
+            Request() with { Model = "--unsafe" },
+            Request() with { ReasoningEffort = "high" },
+            Request() with { Model = "fast", ReasoningEffort = "high" },
+            Request() with { Model = "reasoner", ReasoningEffort = "medium" }
+        })
+            await Assert.ThrowsAsync<ArgumentException>(() => client.AskAsync(new ChatContext("question", 1, false), default, request));
+        Assert.Equal(0, questions);
+        await client.AskAsync(new ChatContext("question", 1, false), default, Request() with { Model = "reasoner", ReasoningEffort = "high" });
+        Assert.Equal(1, questions);
+    }
+
+    [Fact]
+    public async Task SubprocessStreamsBoundedTerminalEscapeFreeUpdates()
+    {
+        string answer = "\u001b[32m" + new string('x', 4000) + "\u001b[0m";
+        using StringReader reader = new(answer);
+        int updates = 0;
+        string latest = "";
+        string output = await CopilotCliClient.ReadBoundedAsync(reader, default, content =>
+        {
+            updates++;
+            Assert.DoesNotContain("\u001b", content, StringComparison.Ordinal);
+            latest = content;
+            return Task.CompletedTask;
+        });
+        Assert.True(updates > 1);
+        Assert.Equal(new string('x', 4000), latest);
+        Assert.Equal(answer, output);
+    }
+
+    [Fact]
     public void SubprocessConfigReusesOnlyAuthAndDisablesHooksProvidersAndOptIns()
     {
         string root = Directory.CreateTempSubdirectory("logstudio-copilot-config-test-").FullName;
@@ -270,7 +365,7 @@ public sealed class CopilotChatTests
                     file = File.ReadAllText(Path.Combine(directory, "session.jsonl"));
                 }
                 return Task.FromResult(input is null ? "version" : "Answer #1");
-            });
+            }, discoverModels: (_, _) => Task.FromResult(Array.Empty<CopilotModel>()));
             await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, sessions, UnusedRename, copilot);
             using HttpClient client = new();
             using HttpRequestMessage connect = Post(server.Url, ViewerConstants.CopilotConnectRoute, ViewerConstants.CopilotConnectAction);
@@ -317,7 +412,8 @@ public sealed class CopilotChatTests
     {
         TaskCompletionSource<string> pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
         TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        CopilotCliClient copilot = new((_, _, token) => { entered.SetResult(); return pending.Task.WaitAsync(token); });
+        CopilotCliClient copilot = new((_, _, token) => { entered.SetResult(); return pending.Task.WaitAsync(token); },
+            discoverModels: (_, _) => Task.FromResult(Array.Empty<CopilotModel>()));
         ViewerSettings settings = new ConsoleLogViewerOptions().Validate();
         using LogBuffer logs = new(settings);
         await using HttpLogServer server = new(settings, logs, TextWriter.Null, logs.Clear, new SessionCatalog(settings), UnusedRename, copilot);
