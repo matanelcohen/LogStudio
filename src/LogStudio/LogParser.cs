@@ -42,48 +42,12 @@ internal sealed class LogParser
 
     internal (LogSeverity Severity, string? Category) Parse(string message, LogStream stream)
     {
-        string trimmed = message.TrimStart();
-        foreach ((string prefix, LogSeverity severity) in DotnetPrefixes)
+        if (TryParseHeader(message, out LogSeverity severity, out string? category, out _))
         {
-            int position = message.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
-            if (position < 0 || !IsTimestampPrefix(message.AsSpan(0, position)))
-            {
-                continue;
-            }
-
-            string remainder = message[(position + prefix.Length)..];
-            int bracket = remainder.IndexOf('[');
-            int closingBracket = bracket >= 0 ? remainder.IndexOf(']', bracket) : -1;
-            string? category = bracket > 0 && closingBracket > bracket
-                ? remainder[..bracket].Trim()
-                : null;
             return this.SetContext(severity, category);
         }
 
-        foreach ((string prefix, LogSeverity severity) in BracketPrefixes)
-        {
-            int position = message.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
-            if (position >= 0 && IsTimestampPrefix(message.AsSpan(0, position)))
-            {
-                return this.SetContext(severity, null);
-            }
-        }
-
-        if (trimmed.StartsWith('{') && TryParseJson(trimmed, out LogSeverity jsonSeverity, out string? jsonCategory))
-        {
-            return this.SetContext(jsonSeverity, jsonCategory);
-        }
-
-        if (trimmed.StartsWith(ViewerConstants.FatalErrorPrefix, StringComparison.OrdinalIgnoreCase) ||
-            trimmed.StartsWith(ViewerConstants.ErrorPrefix, StringComparison.OrdinalIgnoreCase) ||
-            trimmed.StartsWith(ViewerConstants.ExceptionPrefix, StringComparison.Ordinal))
-        {
-            return this.SetContext(LogSeverity.Error, null);
-        }
-
-        if (this.previousSeverity.HasValue &&
-            (message.StartsWith(ViewerConstants.IndentationPrefix, StringComparison.Ordinal) ||
-             trimmed.StartsWith(ViewerConstants.StackFramePrefix, StringComparison.Ordinal)))
+        if (this.previousSeverity.HasValue && IsContinuation(message))
         {
             return (this.previousSeverity.Value, this.previousCategory);
         }
@@ -94,6 +58,100 @@ internal sealed class LogParser
             stream == LogStream.Viewer ? LogSeverity.Information : LogSeverity.Output, null);
     }
 
+    internal static bool TryParseHeader(string message, out LogSeverity severity, out string? category, out bool structured)
+    {
+        severity = LogSeverity.Output;
+        category = null;
+        structured = false;
+        string trimmed = message.TrimStart();
+        foreach ((string prefix, LogSeverity level) in DotnetPrefixes)
+        {
+            int position = message.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+            if (position < 0 || !IsTimestampPrefix(message.AsSpan(0, position)))
+            {
+                continue;
+            }
+
+            string remainder = message[(position + prefix.Length)..];
+            int bracket = remainder.IndexOf('[');
+            int closingBracket = bracket >= 0 ? remainder.IndexOf(']', bracket) : -1;
+            category = bracket > 0 && closingBracket > bracket
+                ? remainder[..bracket].Trim()
+                : null;
+            if (category?.Length > ViewerConstants.MaximumCategoryLength)
+            {
+                category = category[..ViewerConstants.MaximumCategoryLength];
+            }
+
+            severity = level;
+            structured = true;
+            return true;
+        }
+
+        foreach ((string prefix, LogSeverity level) in BracketPrefixes)
+        {
+            int position = message.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+            if (position >= 0 && IsTimestampPrefix(message.AsSpan(0, position)))
+            {
+                severity = level;
+                structured = true;
+                return true;
+            }
+        }
+
+        if (trimmed.StartsWith('{') && TryParseJson(trimmed, out LogSeverity jsonSeverity, out string? jsonCategory))
+        {
+            severity = jsonSeverity;
+            category = jsonCategory?.Length > ViewerConstants.MaximumCategoryLength
+                ? jsonCategory[..ViewerConstants.MaximumCategoryLength]
+                : jsonCategory;
+            structured = true;
+            return true;
+        }
+
+        if (trimmed.StartsWith(ViewerConstants.FatalErrorPrefix, StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith(ViewerConstants.ErrorPrefix, StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith(ViewerConstants.ExceptionPrefix, StringComparison.Ordinal) ||
+            IsExceptionStart(message))
+        {
+            severity = LogSeverity.Error;
+            return true;
+        }
+
+        return false;
+    }
+
+    internal static bool IsContinuation(string message)
+    {
+        string trimmed = message.TrimStart();
+        return trimmed.Length > 0 &&
+            (char.IsWhiteSpace(message[0]) ||
+             trimmed.StartsWith(ViewerConstants.StackFramePrefix, StringComparison.Ordinal) ||
+             trimmed.StartsWith("--->", StringComparison.Ordinal) ||
+             trimmed.StartsWith("--- End of ", StringComparison.Ordinal));
+    }
+
+    internal static bool IsExceptionStart(string message)
+    {
+        ReadOnlySpan<char> trimmed = message.AsSpan().TrimStart();
+        if (IsUnhandledException(message))
+        {
+            return true;
+        }
+
+        int colon = trimmed.IndexOf(':');
+        ReadOnlySpan<char> type = colon < 0 ? trimmed : trimmed[..colon];
+        return type.EndsWith("Exception", StringComparison.Ordinal) &&
+            !type.Contains(' ') && !type.Contains('\t');
+    }
+
+    internal static bool IsUnhandledException(string message)
+    {
+        ReadOnlySpan<char> trimmed = message.AsSpan().TrimStart();
+        return trimmed.StartsWith("Unhandled exception.", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("Unhandled Exception:", StringComparison.OrdinalIgnoreCase);
+    }
+
     internal static string StripTerminalEscapes(string value)
     {
         StringBuilder result = new(value.Length);
@@ -102,7 +160,12 @@ internal sealed class LogParser
             char character = value[index];
             if (character != Escape)
             {
-                if (character >= ' ' || character == '\t')
+                if (character == '\r')
+                {
+                    result.Append('\n');
+                    if (index + 1 < value.Length && value[index + 1] == '\n') index++;
+                }
+                else if (character >= ' ' || character is '\t' or '\n')
                 {
                     result.Append(character);
                 }

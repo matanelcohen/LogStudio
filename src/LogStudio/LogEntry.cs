@@ -74,7 +74,7 @@ public sealed record LogEntry
     /// <summary>Gets the console text with terminal escape sequences removed.</summary>
     public string Message { get; }
 
-    /// <summary>Gets whether the entry is an idle-flushed or length-limited line chunk.</summary>
+    /// <summary>Gets whether the entry is an unterminated or length-limited message chunk.</summary>
     public bool IsPartial { get; }
 }
 
