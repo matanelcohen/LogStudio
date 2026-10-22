@@ -7,7 +7,6 @@ using System.Diagnostics.Tracing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Diagnostics.NETCore.Client;
@@ -18,19 +17,23 @@ namespace LogStudio.Tool;
 internal sealed class RunningApplicationsCollector : IRunningApplications
 {
     private const string LoggingProvider = "Microsoft-Extensions-Logging";
-    private const int MaximumApplicationNameLength = 128;
-    private const int MaximumCommandLineBytes = 4096;
     private static readonly TimeSpan AttachTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(2);
     private readonly object stateGate = new();
     private readonly SemaphoreSlim selectionGate = new(1, 1);
     private readonly CancellationTokenSource shutdown = new();
-    private readonly ConcurrentDictionary<(int ProcessId, long StartedAtTicks), string> applicationNames = new();
-    private Attachment? selected;
+    private readonly ConcurrentDictionary<(int ProcessId, long StartedAtTicks), ApplicationProcessMetadata> processMetadata = new();
+    private readonly Task monitor;
+    private Selection? selected;
     private string? error;
     private Task? disposeTask;
 
     internal ConsoleLogViewer? Viewer { get; set; }
+
+    internal RunningApplicationsCollector()
+    {
+        this.monitor = Task.Run(this.MonitorAsync);
+    }
 
     public RunningApplicationsState GetState()
     {
@@ -50,14 +53,14 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
 
         lock (this.stateGate)
         {
-            return new RunningApplicationsState(applications, this.selected?.Application, this.error);
+            return new RunningApplicationsState(applications, this.selected?.Snapshot(), this.error ?? this.selected?.Error);
         }
     }
 
-    public async Task<RunningApplicationsState> SelectAsync(int processId, long startedAtTicks, CancellationToken cancellationToken)
+    public async Task<RunningApplicationsState> SelectAsync(int processId, long startedAtTicks, CancellationToken cancellationToken, bool includeRelated = false)
     {
         using CancellationTokenSource cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, this.shutdown.Token);
-        Attachment? candidate = null;
+        Selection? candidate = null;
         bool entered = false;
         try
         {
@@ -66,64 +69,55 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
             cancellation.Token.ThrowIfCancellationRequested();
             ConsoleLogViewer viewer = this.Viewer ?? throw this.Fail("The viewer is still starting. Try again.");
             RunningApplication[] applications = this.Discover();
-            RunningApplication? application = applications.FirstOrDefault(item => item.ProcessId == processId && item.StartedAtTicks == startedAtTicks);
+            RunningApplication? application = applications.FirstOrDefault(item => item.Processes!.Any(process =>
+                process.ProcessId == processId && process.StartedAtTicks == startedAtTicks));
             if (application is null)
             {
                 throw this.Fail("This application exited or its process identity changed. Refresh the application list.");
             }
 
+            if (!includeRelated)
+            {
+                RunningApplicationProcess process = application.Processes!.Single(process =>
+                    process.ProcessId == processId && process.StartedAtTicks == startedAtTicks);
+                application = new(process.ProcessId, process.Name, process.StartedAtTicks, process.Path, Processes: [process]);
+            }
+
+            Selection? current;
             lock (this.stateGate)
             {
-                if (this.selected?.Application is RunningApplication current &&
-                    current.ProcessId == processId && current.StartedAtTicks == startedAtTicks)
-                {
-                    this.error = null;
-                    return new RunningApplicationsState(applications, current, null);
-                }
+                current = this.selected;
+            }
+            if (current is not null && current.IncludeRelated == includeRelated &&
+                (includeRelated ? current.Application.GroupId == application.GroupId :
+                    current.Application.ProcessId == processId && current.Application.StartedAtTicks == startedAtTicks))
+            {
+                await this.AddProcessesAsync(current, application, cancellation.Token, retryClosed: true).ConfigureAwait(false);
+                lock (this.stateGate) this.error = null;
+                return this.GetState();
             }
 
-            using CancellationTokenSource attachCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellation.Token);
-            attachCancellation.CancelAfter(AttachTimeout);
-            EventPipeProvider provider = new(LoggingProvider, EventLevel.Verbose, keywords: 4,
-                arguments: new Dictionary<string, string> { ["FilterSpecs"] = "*:Trace" });
-            EventPipeSession session = await new DiagnosticsClient(processId)
-                .StartEventPipeSessionAsync(provider, requestRundown: false, circularBufferMB: 16, attachCancellation.Token)
-                .ConfigureAwait(false);
-            try
-            {
-                candidate = new Attachment(application, session);
-            }
-            catch
-            {
-                session.Dispose();
-                throw;
-            }
-
-            Attachment attached = candidate;
-            attached.Source.Dynamic.All += data => this.Record(attached, data);
-            attached.Processing = Task.Run(() => this.Process(attached));
-            if (this.ReadApplication(processId)?.StartedAtTicks != startedAtTicks)
-            {
-                throw this.Fail("This application exited or its process identity changed. Refresh the application list.");
-            }
-
+            candidate = new Selection(application, includeRelated);
+            await this.AddProcessesAsync(candidate, application, cancellation.Token).ConfigureAwait(false);
             cancellation.Token.ThrowIfCancellationRequested();
-            Attachment? previous;
+            Selection? previous;
             lock (this.stateGate)
             {
+                if (candidate.Attachments.Count == 0)
+                    throw this.Fail(candidate.Error ?? "The application's diagnostic connection closed. Select an application to try again.");
                 previous = this.selected;
                 this.selected = null;
             }
 
             if (previous is not null)
             {
-                await StopAsync(previous).ConfigureAwait(false);
+                await this.StopSelectionAsync(previous).ConfigureAwait(false);
             }
 
             cancellation.Token.ThrowIfCancellationRequested();
             lock (this.stateGate)
             {
-                if (attached.Ended)
+                if (!candidate.Attachments.Any(attachment => !attachment.Ended))
                 {
                     throw this.Fail("The application's diagnostic connection closed. Select an application to try again.");
                 }
@@ -132,7 +126,9 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
                     // Old callbacks cannot append after this clear, even if their IPC drain timed out.
                     viewer.ClearLogs();
                     viewer.RenameSession(application.Name);
-                    this.selected = attached;
+                    candidate.Attachments.RemoveWhere(attachment => attachment.Ended);
+                    candidate.Activated = true;
+                    this.selected = candidate;
                     this.error = null;
                     candidate = null;
                 }
@@ -163,7 +159,7 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
             {
                 if (candidate is not null)
                 {
-                    await StopAsync(candidate).ConfigureAwait(false);
+                    await this.StopSelectionAsync(candidate).ConfigureAwait(false);
                 }
             }
             finally
@@ -188,19 +184,20 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
     private async Task DisposeCoreAsync()
     {
         this.shutdown.Cancel();
+        await this.monitor.ConfigureAwait(false);
         await this.selectionGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            Attachment? attachment;
+            Selection? selection;
             lock (this.stateGate)
             {
-                attachment = this.selected;
+                selection = this.selected;
                 this.selected = null;
             }
 
-            if (attachment is not null)
+            if (selection is not null)
             {
-                await StopAsync(attachment).ConfigureAwait(false);
+                await this.StopSelectionAsync(selection).ConfigureAwait(false);
             }
         }
         finally
@@ -211,47 +208,39 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
 
     private RunningApplication[] Discover()
     {
-        RunningApplication[] applications = DiagnosticsClient.GetPublishedProcesses()
+        ApplicationProcessMetadata[] processes = DiagnosticsClient.GetPublishedProcesses()
+            .Distinct()
             .Where(processId => processId != Environment.ProcessId)
-            .Select(this.ReadApplication)
-            .OfType<RunningApplication>()
-            .OrderBy(application => application.Name, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(application => application.ProcessId)
+            .Select(this.ReadMetadata)
+            .OfType<ApplicationProcessMetadata>()
             .ToArray();
-        HashSet<(int ProcessId, long StartedAtTicks)> identities = applications
-            .Select(application => (application.ProcessId, application.StartedAtTicks)).ToHashSet();
-        foreach ((int processId, long startedAtTicks) in this.applicationNames.Keys)
+        HashSet<(int ProcessId, long StartedAtTicks)> identities = processes
+            .Select(process => (process.Process.ProcessId, process.Process.StartedAtTicks)).ToHashSet();
+        foreach ((int processId, long startedAtTicks) in this.processMetadata.Keys)
         {
             if (!identities.Contains((processId, startedAtTicks)))
             {
-                this.applicationNames.TryRemove((processId, startedAtTicks), out _);
+                this.processMetadata.TryRemove((processId, startedAtTicks), out _);
             }
         }
 
-        return applications;
+        return RunningApplicationGroups.Create(processes);
     }
 
-    private RunningApplication? ReadApplication(int processId)
+    private ApplicationProcessMetadata? ReadMetadata(int processId)
     {
         try
         {
             using Process process = System.Diagnostics.Process.GetProcessById(processId);
             long startedAtTicks = process.StartTime.ToUniversalTime().Ticks;
-            string? executableName = Path.GetFileNameWithoutExtension(process.MainModule?.FileName);
-            if (process.HasExited || string.IsNullOrWhiteSpace(executableName) || startedAtTicks <= 0)
+            if (process.HasExited || startedAtTicks <= 0) return null;
+            if (!this.processMetadata.TryGetValue((processId, startedAtTicks), out ApplicationProcessMetadata? metadata))
             {
-                return null;
+                metadata = ApplicationProcessMetadata.Read(processId);
+                if (metadata is null || metadata.Process.StartedAtTicks != startedAtTicks) return null;
+                this.processMetadata.TryAdd((processId, startedAtTicks), metadata);
             }
-
-            string name = this.applicationNames.GetOrAdd((processId, startedAtTicks), _ =>
-            {
-                string displayName = OperatingSystem.IsLinux() && executableName == "dotnet"
-                    ? ReadManagedApplicationName(processId) ?? executableName
-                    : executableName;
-                displayName = (string.IsNullOrWhiteSpace(displayName) ? executableName : displayName).Trim();
-                return displayName.Length > MaximumApplicationNameLength ? displayName[..MaximumApplicationNameLength] : displayName;
-            });
-            return process.HasExited ? null : new RunningApplication(processId, name, startedAtTicks);
+            return process.HasExited ? null : metadata;
         }
         catch (Exception exception) when (IsDiagnosticFailure(exception) || exception is ArgumentException)
         {
@@ -259,59 +248,183 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
         }
     }
 
-    private static string? ReadManagedApplicationName(int processId)
+    private async Task AddProcessesAsync(Selection selection, RunningApplication application, CancellationToken cancellationToken, bool retryClosed = false)
     {
+        RunningApplicationProcess[] missing;
+        lock (this.stateGate)
+        {
+            if (selection.Activated && this.selected != selection) return;
+            selection.Pending++;
+            selection.Attempted.IntersectWith(application.Processes!.Select(RunningApplicationGroups.Identity));
+            if (retryClosed)
+                selection.Attempted.IntersectWith(selection.Attachments.Select(attachment => RunningApplicationGroups.Identity(attachment.Application)));
+            missing = application.Processes!.Where(process => !selection.Attempted.Contains(RunningApplicationGroups.Identity(process))).ToArray();
+        }
+
+        Task<AttachmentResult>[] tasks = missing.Select(process => this.AttachAsync(process, cancellationToken)).ToArray();
         try
         {
-            using FileStream commandLine = File.OpenRead($"/proc/{processId.ToString(CultureInfo.InvariantCulture)}/cmdline");
-            byte[] buffer = new byte[MaximumCommandLineBytes];
-            int count = commandLine.Read(buffer);
-            ReadOnlySpan<byte> arguments = buffer.AsSpan(0, count);
-            int offset = 0;
-            ReadArgument(arguments, ref offset);
-            bool first = true;
-            while (offset < arguments.Length)
+            AttachmentResult[] results = await Task.WhenAll(tasks).ConfigureAwait(false);
+            lock (this.stateGate)
             {
-                string argument = Encoding.UTF8.GetString(ReadArgument(arguments, ref offset));
-                if (argument.Length == 0) return null;
-                if (first && argument == "exec")
+                selection.Application = application;
+                selection.Attachments.RemoveWhere(attachment => attachment.Ended);
+                List<string> failures = [];
+                foreach (AttachmentResult result in results)
                 {
-                    first = false;
-                    continue;
+                    if (result.Attachment is { Ended: false } attachment)
+                    {
+                        selection.Attachments.Add(attachment);
+                        selection.Attempted.Add(RunningApplicationGroups.Identity(attachment.Application));
+                    }
+                    else
+                    {
+                        failures.Add(result.Error ?? $"PID {result.Attachment!.Application.ProcessId}'s diagnostic connection closed.");
+                    }
                 }
-
-                first = false;
-                if (argument is "--runtimeconfig" or "--depsfile" or "--additionalprobingpath" or "--additional-deps" or "--fx-version" or "--roll-forward")
-                {
-                    if (ReadArgument(arguments, ref offset).IsEmpty) return null;
-                    continue;
-                }
-
-                // Stop at the entrypoint: later application arguments may contain secrets or DLL-like values.
-                return argument[0] != '-' && argument.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
-                    ? Path.GetFileNameWithoutExtension(argument)
-                    : null;
+                foreach (RunningApplicationProcess process in application.Processes!)
+                    if (selection.Attempted.Contains(RunningApplicationGroups.Identity(process)) &&
+                        !selection.Attachments.Any(attachment => attachment.Application == process))
+                        failures.Add($"PID {process.ProcessId}'s diagnostic connection closed. Retry the app to reconnect.");
+                selection.Error = failures.Count == 0 ? null : string.Join(" ", failures);
             }
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+        catch
+        {
+            Attachment[] unowned;
+            lock (this.stateGate)
+                unowned = tasks.Where(task => task.IsCompletedSuccessfully).Select(task => task.Result.Attachment)
+                    .OfType<Attachment>().Where(attachment => !selection.Attachments.Contains(attachment)).ToArray();
+            await Task.WhenAll(unowned.Select(StopAsync)).ConfigureAwait(false);
+            throw;
+        }
+        finally
+        {
+            lock (this.stateGate)
+            {
+                selection.Pending--;
+                if (this.selected == selection && selection.Attachments.Count == 0 && selection.Pending == 0)
+                {
+                    this.selected = null;
+                    this.error = selection.Error ?? "The application exited or its diagnostic connection closed. Select an application to continue.";
+                }
+            }
+        }
+    }
+
+    private async Task<AttachmentResult> AttachAsync(RunningApplicationProcess application, CancellationToken cancellationToken)
+    {
+        Attachment? candidate = null;
+        try
+        {
+            if (!IsCurrent(application))
+                return new(null, $"PID {application.ProcessId} exited or its process identity changed.");
+            using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(AttachTimeout);
+            EventPipeProvider provider = new(LoggingProvider, EventLevel.Verbose, keywords: 4,
+                arguments: new Dictionary<string, string> { ["FilterSpecs"] = "*:Trace" });
+            EventPipeSession session = await new DiagnosticsClient(application.ProcessId)
+                .StartEventPipeSessionAsync(provider, requestRundown: false, circularBufferMB: 16, timeout.Token).ConfigureAwait(false);
+            try
+            {
+                candidate = new Attachment(application, session);
+            }
+            catch
+            {
+                session.Dispose();
+                throw;
+            }
+            Attachment attached = candidate;
+            attached.Source.Dynamic.All += data => this.Record(attached, data);
+            attached.Processing = Task.Factory.StartNew(() => this.Process(attached), CancellationToken.None,
+                TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            if (!IsCurrent(application))
+                return new(null, $"PID {application.ProcessId} exited or its process identity changed.");
+            lock (this.stateGate)
+            {
+                if (attached.Ended) return new(null, $"PID {application.ProcessId}'s diagnostic connection closed.");
+                candidate = null;
+                return new(attached, null);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return new(null, $"Attaching to PID {application.ProcessId} timed out or was cancelled. Check that the application is responding.");
         }
         catch (Exception exception) when (IsDiagnosticFailure(exception))
         {
+            return new(null, $"Could not attach to PID {application.ProcessId}. Check that diagnostics are enabled and you have permission.");
         }
-
-        return null;
+        finally
+        {
+            if (candidate is not null) await StopAsync(candidate).ConfigureAwait(false);
+        }
     }
 
-    private static ReadOnlySpan<byte> ReadArgument(ReadOnlySpan<byte> arguments, ref int offset)
+    private static bool IsCurrent(RunningApplicationProcess application)
     {
-        ReadOnlySpan<byte> remaining = arguments[offset..];
-        int length = remaining.IndexOf((byte)0);
-        if (length < 0)
+        try
         {
-            offset = arguments.Length;
-            return default;
+            using Process process = System.Diagnostics.Process.GetProcessById(application.ProcessId);
+            return !process.HasExited && process.StartTime.ToUniversalTime().Ticks == application.StartedAtTicks;
         }
+        catch (Exception exception) when (IsDiagnosticFailure(exception) || exception is ArgumentException)
+        {
+            return false;
+        }
+    }
 
-        offset += length + 1;
-        return remaining[..length];
+    private async Task MonitorAsync()
+    {
+        while (!this.shutdown.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), this.shutdown.Token).ConfigureAwait(false);
+                await this.selectionGate.WaitAsync(this.shutdown.Token).ConfigureAwait(false);
+                try
+                {
+                    Selection? selection;
+                    lock (this.stateGate) selection = this.selected;
+                    if (selection is not { IncludeRelated: true }) continue;
+                    RunningApplication[] applications = this.Discover();
+                    RunningApplication? application = applications.FirstOrDefault(app => app.GroupId == selection.Application.GroupId);
+                    if (application is null)
+                    {
+                        lock (this.stateGate)
+                            application = applications.FirstOrDefault(app => app.Processes!.Any(process =>
+                                selection.Attachments.Any(attachment => attachment.Application.ProcessId == process.ProcessId &&
+                                    attachment.Application.StartedAtTicks == process.StartedAtTicks)));
+                    }
+                    if (application is not null)
+                        await this.AddProcessesAsync(selection, application, this.shutdown.Token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    this.selectionGate.Release();
+                }
+            }
+            catch (OperationCanceledException) when (this.shutdown.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception) when (IsDiagnosticFailure(exception))
+            {
+                lock (this.stateGate) this.error = "Could not refresh the selected application's processes. Check diagnostic permissions.";
+            }
+        }
+    }
+
+    private async Task StopSelectionAsync(Selection selection)
+    {
+        Attachment[] attachments;
+        lock (this.stateGate)
+        {
+            attachments = selection.Attachments.ToArray();
+            selection.Attachments.Clear();
+        }
+        await Task.WhenAll(attachments.Select(StopAsync)).ConfigureAwait(false);
     }
 
     private SelectionException Fail(string message, Exception? innerException = null)
@@ -355,9 +468,10 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
 
         lock (this.stateGate)
         {
-            if (this.selected == attachment && !this.shutdown.IsCancellationRequested)
+            if (this.selected is Selection selection && selection.Attachments.Contains(attachment) && !this.shutdown.IsCancellationRequested)
             {
-                this.Viewer!.Record(message, severity: severity, category: category);
+                this.Viewer!.Record(selection.IncludeRelated ? $"[PID {attachment.Application.ProcessId}] {message}" : message,
+                    severity: severity, category: category);
             }
         }
     }
@@ -376,7 +490,8 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
             lock (this.stateGate)
             {
                 attachment.Ended = true;
-                if (this.selected == attachment)
+                if (this.selected is Selection selection && selection.Attachments.Remove(attachment) &&
+                    selection.Attachments.Count == 0 && selection.Pending == 0)
                 {
                     this.selected = null;
                     this.error = "The application exited or its diagnostic connection closed. Select an application to continue.";
@@ -436,9 +551,27 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
     {
     }
 
-    private sealed class Attachment(RunningApplication application, EventPipeSession session)
+    private sealed class Selection(RunningApplication application, bool includeRelated)
     {
-        internal RunningApplication Application { get; } = application;
+        internal RunningApplication Application { get; set; } = application;
+        internal bool IncludeRelated { get; } = includeRelated;
+        internal bool Activated { get; set; }
+        internal int Pending { get; set; }
+        internal HashSet<Attachment> Attachments { get; } = [];
+        internal HashSet<string> Attempted { get; } = new(StringComparer.Ordinal);
+        internal string? Error { get; set; }
+        internal RunningApplication Snapshot() => this.Application with
+        {
+            Processes = this.Attachments.Where(attachment => !attachment.Ended).Select(attachment => attachment.Application)
+                .OrderBy(process => process.ProcessId).ToArray()
+        };
+    }
+
+    private sealed record AttachmentResult(Attachment? Attachment, string? Error);
+
+    private sealed class Attachment(RunningApplicationProcess application, EventPipeSession session)
+    {
+        internal RunningApplicationProcess Application { get; } = application;
         internal EventPipeSession Session { get; } = session;
         internal EventPipeEventSource Source { get; } = new(session.EventStream);
         internal Task Processing { get; set; } = Task.CompletedTask;

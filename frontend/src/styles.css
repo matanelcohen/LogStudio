@@ -433,7 +433,12 @@ pre, code, kbd { font-family: Consolas, "Courier New", Courier, monospace; }
 .query-region > .notice { margin-top: 12px; }
 .application-picker { margin-bottom: 16px; font-size: var(--ui-font-size, 14px); }
 .application-picker-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
-.application-picker-controls select { max-width: min(440px, 100%); }
+.application-picker-controls input { width: 220px; max-width: 100%; }
+.application-picker-controls select { flex: 1; min-width: 180px; max-width: 100%; text-overflow: ellipsis; }
+.application-processes { margin: 8px 0; overflow-wrap: anywhere; }
+.application-processes summary { cursor: pointer; color: var(--cp-secondary-text); }
+.application-processes ul { display: grid; gap: 6px; padding: 8px 0 8px 20px; }
+.application-processes li span { display: block; color: var(--cp-secondary-text); }
 .application-picker .notice { margin-top: 8px; }
 .workspace-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
 .workspace-kicker { color: var(--cp-native-accent); font-size: var(--ui-font-size, 14px); font-weight: 650; letter-spacing: 1.2px; }

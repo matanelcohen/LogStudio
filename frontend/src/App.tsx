@@ -16,7 +16,7 @@ import { Inspector } from "./Inspector";
 import { LogTable } from "./LogTable";
 import {
   defaultQuery, errorMessage, NumberFormatter, readChoice, TimeFormatter, validateConditions,
-  type LogCondition, type LogEntry, type Notice, type PageCursor, type QueryState, type RunningApplicationsState, type SessionInfo, type ViewerStatus
+  type LogCondition, type LogEntry, type Notice, type PageCursor, type QueryState, type RunningApplication, type RunningApplicationsState, type SessionInfo, type ViewerStatus
 } from "./model";
 import { QueryBar } from "./QueryBar";
 import { Hint } from "./ui";
@@ -314,6 +314,7 @@ function RunningApplicationPicker({ onAttached, onListening }: { onAttached(): v
   const [error, setError] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
+  const [search, setSearch] = useState("");
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -340,17 +341,20 @@ function RunningApplicationPicker({ onAttached, onListening }: { onAttached(): v
     return () => { active = false; controller.abort(); if (timer !== null) clearTimeout(timer); };
   }, [busy, retry, onListening]);
 
-  const identity = (app: { processId: number; startedAtTicks: string }) => `${app.processId}:${app.startedAtTicks}`;
+  const identity = (app: RunningApplication) => app.groupId ?? `${app.processId}:${app.startedAtTicks}`;
+  const processes = (app: RunningApplication) => app.processes ?? [app];
   async function choose(value: string) {
-    const application = state?.applications.find(app => identity(app) === value);
+    const application = state?.applications.find(app => identity(app) === value) ??
+      (state?.selected && identity(state.selected) === value ? state.selected : null);
     if (!application || busy) return;
     setBusy(true); setSelectionError(null);
     try {
       const next = await selectApplication(application);
       if (!mounted.current) return;
       setState(next); onListening(next.selected !== null);
-      if (next.error) setSelectionError(next.error);
-      else if (next.selected && identity(next.selected) === identity(application)) onAttached();
+      const attached = next.selected && identity(next.selected) === identity(application);
+      if (next.error && !attached) setSelectionError(next.error);
+      if (attached && (!state?.selected || identity(state.selected) !== identity(application))) onAttached();
     } catch (error) {
       if (mounted.current) setSelectionError(errorMessage(error));
     } finally {
@@ -361,18 +365,43 @@ function RunningApplicationPicker({ onAttached, onListening }: { onAttached(): v
   const applications = state?.applications ?? [];
   const selected = state?.selected;
   const choices = selected && !applications.some(app => identity(app) === identity(selected)) ? [selected, ...applications] : applications;
+  const term = search.trim().toLocaleLowerCase();
+  const filtered = choices.filter(app => identity(app) === (selected && identity(selected)) ||
+    [app.name, app.path, ...processes(app).flatMap(process => [process.name, process.path, String(process.processId)])]
+      .some(value => value?.toLocaleLowerCase().includes(term)));
+  function label(app: RunningApplication) {
+    if (!app.groupId) return `${app.name} (PID ${app.processId})`;
+    const members = processes(app);
+    return `${app.name} (${members.length} ${members.length === 1 ? "process" : "processes"}; PIDs ${members.map(process => process.processId).join(", ")}) — ${app.path ?? "Path unavailable"}`;
+  }
   return <section className="application-picker" aria-label="Live application capture">
     <div className="application-picker-controls">
+      <input type="search" aria-label="Find running app" placeholder="Find app, path, or PID…" value={search}
+        onChange={event => setSearch(event.target.value)} />
       <label htmlFor="runningApplication">Running app</label>
       <select id="runningApplication" value={selected ? identity(selected) : ""} disabled={busy || !state}
         aria-describedby="applicationCaptureHelp" onChange={event => void choose(event.target.value)}>
         <option value="" disabled>{state && applications.length === 0 ? "No running .NET apps found" : "Choose a running app"}</option>
-        {choices.map(app => <option key={identity(app)} value={identity(app)}>{app.name} (PID {app.processId})</option>)}
+        {filtered.filter(app => !app.isTool).map(app => <option key={identity(app)} value={identity(app)}>{label(app)}</option>)}
+        {filtered.some(app => app.isTool) && <optgroup label=".NET tooling">
+          {filtered.filter(app => app.isTool).map(app => <option key={identity(app)} value={identity(app)}>{label(app)}</option>)}
+        </optgroup>}
+        {applications.length > 0 && filtered.length === 0 && <option disabled>No apps match your search</option>}
       </select>
       <button className="ghost-button" disabled={busy} onClick={() => { setSelectionError(null); setRetry(value => value + 1); }}>Refresh apps</button>
-      <span role="status">{busy ? "Connecting to application…" : selected ? `Listening to ${selected.name}` : "Waiting for you to choose an app."}</span>
+      {selected && (selectionError || state?.error) && <button disabled={busy} onClick={() => void choose(identity(selected))}>Retry app</button>}
+      <span role="status">{busy ? "Connecting to application…" : selected?.groupId && processes(selected).length === 0 ?
+        `Connecting to ${selected.name}…` : selected ?
+        `Listening to ${selected.name}${selected.groupId ? ` · ${processes(selected).length} ${processes(selected).length === 1 ? "process" : "processes"}` : ""}` :
+        "Waiting for you to choose an app."}</span>
     </div>
-    <p id="applicationCaptureHelp" className="muted">Captures new .NET ILogger events only, not existing console output. Switching apps replaces the current capture history.</p>
+    {selected?.groupId && <details className="application-processes">
+      <summary>Captured processes · {selected.path ?? "Path unavailable"}</summary>
+      <ul>{processes(selected).map(process => <li key={`${process.processId}:${process.startedAtTicks}`}>
+        <strong>PID {process.processId}</strong> · {process.name}<span>{process.path ?? "Path unavailable"}</span>
+      </li>)}</ul>
+    </details>}
+    <p id="applicationCaptureHelp" className="muted">Apps are grouped by launch or entrypoint path. Selecting an app captures its processes together and follows new members while the group is running. Merged logs include the PID. Captures new .NET ILogger events only, not existing console output. Switching apps replaces the current capture history.</p>
     {(selectionError || error || state?.error) && <p className="notice danger" role="alert">{selectionError ?? error ?? state?.error}</p>}
   </section>;
 }

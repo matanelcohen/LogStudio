@@ -29,13 +29,15 @@ public sealed class RunningApplicationsTests
         Assert.Equal(0, applications.SelectionCount);
     }
 
-    [Fact]
-    public async Task SelectionRequiresAnExplicitActionAndExactProcessIdentity()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SelectionRequiresAnExplicitActionAndExactProcessIdentity(bool includeRelated)
     {
         FakeApplications applications = new();
         await using ConsoleLogViewer viewer = Start(applications);
         using HttpClient client = new();
-        Uri url = new(viewer.Url, "api/applications?processId=42&startedAtTicks=639112345678901234");
+        Uri url = new(viewer.Url, "api/applications?processId=42&startedAtTicks=639112345678901234" + (includeRelated ? "&scope=application" : ""));
         using HttpResponseMessage missingHeader = await client.PostAsync(url, null);
         Assert.Equal(HttpStatusCode.Forbidden, missingHeader.StatusCode);
         Assert.Equal(0, applications.SelectionCount);
@@ -47,6 +49,7 @@ public sealed class RunningApplicationsTests
         Assert.Equal(1, applications.SelectionCount);
         Assert.Equal(42, applications.ProcessId);
         Assert.Equal(639112345678901234L, applications.StartedAtTicks);
+        Assert.Equal(includeRelated, applications.IncludeRelated);
     }
 
     [Theory]
@@ -56,6 +59,7 @@ public sealed class RunningApplicationsTests
     [InlineData("processId=42&startedAtTicks=invalid")]
     [InlineData("processId=42")]
     [InlineData("processId=42&startedAtTicks=639112345678901234&sessionId=saved")]
+    [InlineData("processId=42&startedAtTicks=639112345678901234&scope=all")]
     public async Task InvalidSelectionsDoNotReachTheCollector(string query)
     {
         FakeApplications applications = new();
@@ -119,14 +123,16 @@ public sealed class RunningApplicationsTests
         public int SelectionCount { get; private set; }
         public int ProcessId { get; private set; }
         public long StartedAtTicks { get; private set; }
+        public bool IncludeRelated { get; private set; }
         public bool FailSelection { get; init; }
         public RunningApplicationsState GetState() => new([new(42, "Example.Api", 639112345678901234L)], null, null);
-        public Task<RunningApplicationsState> SelectAsync(int processId, long startedAtTicks, CancellationToken cancellationToken)
+        public Task<RunningApplicationsState> SelectAsync(int processId, long startedAtTicks, CancellationToken cancellationToken, bool includeRelated = false)
         {
             if (this.FailSelection) throw new InvalidOperationException("Application exited.");
             this.SelectionCount++;
             this.ProcessId = processId;
             this.StartedAtTicks = startedAtTicks;
+            this.IncludeRelated = includeRelated;
             return Task.FromResult(this.GetState() with { Selected = new(processId, "Example.Api", startedAtTicks) });
         }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;

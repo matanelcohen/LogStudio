@@ -76,8 +76,26 @@ printed URL if you omit `--open`, then choose **Running app** from the dropdown.
 Discovery refreshes automatically, and **Refresh apps** updates it immediately.
 Even if only one app is running, no app is attached until you select it.
 
-The list contains accessible .NET processes advertising runtime diagnostics, with
-their process IDs to distinguish instances. This requires compatible .NET
+Use **Find running app** to search app names, entrypoint paths, or any member's PID.
+The picker groups a `dotnet run` / `dotnet watch` launcher and its .NET descendants
+under the actual app's name and path, instead of making you guess which `dotnet`
+PID to select. Separate launches remain separate choices. Standalone processes
+with the same full managed entrypoint path are grouped together; unrelated apps
+are never grouped just because they use the same `dotnet` host or have the same name.
+Standalone SDK/build processes are listed under **.NET tooling**. Unavailable
+paths are labeled **Path unavailable**; processes without a known entrypoint path
+or launch relationship remain separate rather than being grouped by guesswork.
+
+Selecting a group captures its accessible processes together. Expand **Captured
+processes** to see the connected PIDs and paths. New members of the selected group
+are discovered automatically while it is running, including replacement children
+of a live `dotnet watch` launcher, without clearing earlier logs. Each captured
+message is prefixed with `[PID 1234]` so you can identify and search its source.
+If a member cannot be attached, an error identifies its PID while successfully
+connected members continue; **Retry app** retries the missing connections.
+
+The list contains accessible .NET processes advertising runtime diagnostics.
+This requires compatible .NET
 EventPipe diagnostics and permission to access the target (normally the same OS
 user). Applications with diagnostics disabled will not appear.
 Capture uses the `Microsoft-Extensions-Logging` EventSource provider:
@@ -88,8 +106,9 @@ Only new `ILogger` events after selection are captured; earlier events, arbitrar
 Use the normal command wrapper when you need console output.
 
 Switching apps stops the previous listener and replaces the current capture
-history, so export any history you want to keep first. Exiting apps are not
-replaced automatically; select another app yourself. Ctrl+C disconnects the viewer
+history, so export any history you want to keep first. Once all captured processes
+in a group exit, capture stops; a later independent run is not attached automatically.
+Select the app again to start a new capture. Ctrl+C disconnects the viewer
 without stopping the external application. `--listen-all` cannot be combined with
 a child command or `--no-wait`; the existing wrapper mode is unchanged.
 
@@ -113,7 +132,7 @@ PATH, use the command printed by the installer. No sudo or shell-profile edits a
 ```bash
 # Pin a release or choose user-writable directories:
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.sh \
-  | bash -s -- --version 1.6.3 --install-dir "$HOME/.local/share/logstudio" --bin-dir "$HOME/.local/bin"
+  | bash -s -- --version 1.6.4 --install-dir "$HOME/.local/share/logstudio" --bin-dir "$HOME/.local/bin"
 logstudio --open -- dotnet run --project ./path/to/App.csproj
 ```
 
@@ -126,7 +145,7 @@ Invoke-WebRequest -UseBasicParsing https://github.com/matanelcohen/LogStudio/rel
 logstudio --open -- dotnet run --project .\path\to\App.csproj
 ```
 
-Use `& $installer -Version 1.6.3 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
+Use `& $installer -Version 1.6.4 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
 version or choose a directory. If execution policy blocks the script, use the process-only
 override described below; when launching a separate PowerShell process, add the printed
 `bin` directory to PATH in your current terminal yourself. The installer otherwise updates
@@ -234,7 +253,7 @@ does not verify Windows-specific execution.
 ### Publishing compiled releases
 
 Set and commit the package version in `Directory.Build.props`, then push a matching tag
-on that commit, such as `1.6.3` (or `1.6.3-rc.1` for a prerelease). Versions and tags
+on that commit, such as `1.6.4` (or `1.6.4-rc.1` for a prerelease). Versions and tags
 must not have a `v` prefix. The
 [compiled-release workflow](../.github/workflows/release.yml) validates the tag, restores,
 builds, tests the frontend/backend and installer contracts, and verifies a source install.

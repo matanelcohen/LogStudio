@@ -89,6 +89,11 @@ describe("log-first workspace", () => {
 
   describe("listen-all application selection", () => {
     const application = { processId: 42, name: "Example.Api", startedAtTicks: "639112345678901234" };
+    const worker = { processId: 43, name: "Example.Worker", startedAtTicks: "639112345678901235", path: "/repo/Example.Worker.dll" };
+    const group = {
+      ...application, groupId: "launch:42:639112345678901234", path: "/repo/Example.Api.dll",
+      processes: [{ ...application, path: "/repo/Example.Api.dll" }, worker]
+    };
     const waiting: RunningApplicationsState = { applications: [application], selected: null, error: null };
     beforeEach(() => {
       vi.mocked(useLiveStatus).mockReturnValue({
@@ -114,6 +119,107 @@ describe("log-first workspace", () => {
       await waitFor(() => expect(api.fetchApplications).toHaveBeenCalledTimes(2));
       expect(dropdown.value).toBe("");
       expect(select).not.toHaveBeenCalled();
+    });
+
+    it("shows one app choice with its path and PIDs and searches app names, paths, and member PIDs", async () => {
+      const other = { ...group, processId: 50, groupId: "other", path: "/another/Example.Api.dll", processes: [{ ...application, processId: 50 }] };
+      const tooling = { ...application, processId: 60, name: "MSBuild", isTool: true };
+      vi.mocked(api.fetchApplications).mockResolvedValue({ ...waiting, applications: [group, other, tooling] });
+      const select = vi.spyOn(api, "selectApplication");
+      render(<App />);
+      await screen.findByRole("option", { name: /2 processes; PIDs 42, 43.*\/repo\/Example.Api.dll/ });
+      expect(screen.getByRole("group", { name: ".NET tooling" }).textContent).toContain("MSBuild");
+      for (const term of ["EXAMPLE.WORKER", "/REPO/", "43"]) {
+        fireEvent.change(screen.getByRole("searchbox", { name: "Find running app" }), { target: { value: term } });
+        expect(screen.getAllByRole("option")).toHaveLength(2);
+        expect(screen.getByRole("option", { name: /PIDs 42, 43/ })).toBeDefined();
+      }
+      fireEvent.change(screen.getByRole("searchbox", { name: "Find running app" }), { target: { value: "not-a-running-app" } });
+      expect(screen.getByRole("option", { name: "No apps match your search" })).toBeDefined();
+      expect(select).not.toHaveBeenCalled();
+    });
+
+    it("selects the entire app and exposes the captured process paths", async () => {
+      const grouped = { ...waiting, applications: [group] };
+      vi.mocked(api.fetchApplications).mockResolvedValueOnce(grouped).mockResolvedValue({ ...grouped, selected: group });
+      vi.spyOn(api, "selectApplication").mockResolvedValue({ ...grouped, selected: group });
+      render(<App />);
+      await screen.findByRole("option", { name: /PIDs 42, 43/ });
+      fireEvent.change(screen.getByRole("combobox", { name: "Running app" }), { target: { value: group.groupId } });
+      await screen.findByText("Listening to Example.Api · 2 processes");
+      expect(api.selectApplication).toHaveBeenCalledExactlyOnceWith(group);
+      expect(screen.getByText("PID 43")).toBeDefined();
+      expect(screen.getByText("/repo/Example.Worker.dll")).toBeDefined();
+    });
+
+    it("keeps the selected group and a paused investigation when the lead PID changes", async () => {
+      const updated = { ...group, processId: worker.processId, startedAtTicks: worker.startedAtTicks, processes: [worker] };
+      vi.mocked(api.fetchApplications).mockResolvedValueOnce({ ...waiting, applications: [group], selected: group })
+        .mockResolvedValue({ ...waiting, applications: [updated], selected: updated });
+      const select = vi.spyOn(api, "selectApplication");
+      render(<App />);
+      await screen.findByText("Listening to Example.Api · 2 processes");
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      fireEvent.change(screen.getByRole("searchbox", { name: "Find running app" }), { target: { value: "unrelated search" } });
+      fireEvent.click(screen.getByRole("button", { name: "Refresh apps" }));
+      await screen.findByText("Listening to Example.Api · 1 process");
+      expect((screen.getByRole("combobox", { name: "Running app" }) as HTMLSelectElement).value).toBe(group.groupId);
+      expect(screen.getByRole("button", { name: "Resume" })).toBeDefined();
+      expect(select).not.toHaveBeenCalled();
+      expect(screen.queryByText("PID 42")).toBeNull();
+    });
+
+    it("makes partial capture explicit while opening the successfully attached group", async () => {
+      const partial = { ...waiting, applications: [group], selected: { ...group, processes: [worker] }, error: "Could not attach to PID 42." };
+      vi.mocked(api.fetchApplications).mockResolvedValueOnce({ ...waiting, applications: [group] }).mockResolvedValue(partial);
+      vi.spyOn(api, "selectApplication").mockResolvedValue(partial);
+      render(<App />);
+      await screen.findByRole("option", { name: /PIDs 42, 43/ });
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      fireEvent.change(screen.getByRole("combobox", { name: "Running app" }), { target: { value: group.groupId } });
+      await screen.findByText("Listening to Example.Api · 1 process");
+      expect(screen.getByRole("alert").textContent).toContain("Could not attach to PID 42.");
+      expect(screen.getByRole("button", { name: "Pause" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Retry app" })).toBeDefined();
+    });
+
+    it("clears a partial attachment warning when the missing process connects", async () => {
+      const partial = { ...waiting, applications: [group], selected: { ...group, processes: [worker] }, error: "Could not attach to PID 42." };
+      vi.mocked(api.fetchApplications).mockResolvedValueOnce({ ...waiting, applications: [group] }).mockResolvedValue(partial);
+      vi.spyOn(api, "selectApplication").mockResolvedValue(partial);
+      render(<App />);
+      await screen.findByRole("option", { name: /PIDs 42, 43/ });
+      fireEvent.change(screen.getByRole("combobox", { name: "Running app" }), { target: { value: group.groupId } });
+      await screen.findByRole("button", { name: "Retry app" });
+      vi.mocked(api.fetchApplications).mockResolvedValue({ ...waiting, applications: [group], selected: group });
+      fireEvent.click(screen.getByRole("button", { name: "Refresh apps" }));
+      await screen.findByText("Listening to Example.Api · 2 processes");
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Retry app" })).toBeNull();
+    });
+
+    it("retries missing processes without resetting a paused investigation", async () => {
+      const partial = { ...waiting, applications: [group], selected: { ...group, processes: [worker] }, error: "Could not attach to PID 42." };
+      const connected = { ...waiting, applications: [group], selected: group };
+      vi.mocked(api.fetchApplications).mockResolvedValueOnce(partial).mockResolvedValue(connected);
+      vi.spyOn(api, "selectApplication").mockResolvedValue(connected);
+      render(<App />);
+      await screen.findByRole("button", { name: "Retry app" });
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "Keep my query" } });
+      fireEvent.click(screen.getByRole("button", { name: "Retry app" }));
+      await screen.findByText("Listening to Example.Api · 2 processes");
+      expect(screen.getByRole("button", { name: "Resume" })).toBeDefined();
+      expect((screen.getByLabelText("Search logs") as HTMLInputElement).value).toBe("Keep my query");
+      expect(api.selectApplication).toHaveBeenCalledExactlyOnceWith(group);
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+
+    it("shows connecting rather than listening while a replacement process attaches", async () => {
+      vi.mocked(api.fetchApplications).mockResolvedValue({ ...waiting, applications: [group], selected: { ...group, processes: [] } });
+      render(<App />);
+      await screen.findByText("Connecting to Example.Api…");
+      expect(screen.queryByText("Listening to Example.Api · 0 processes")).toBeNull();
     });
 
     it("attaches only the chosen process and resumes the live view", async () => {

@@ -40,6 +40,7 @@ internal static class Program
             {
                 logging.ClearProviders();
                 logging.SetMinimumLevel(LogLevel.Trace);
+                logging.AddEventSourceLogger();
                 logging.AddSimpleConsole(console =>
                 {
                     console.TimestampFormat = DemoOptions.TimestampFormat;

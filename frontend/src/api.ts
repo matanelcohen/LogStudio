@@ -1,6 +1,6 @@
 import {
   ApiRoutes, ClearActionHeader, ClearActionValue, ConditionFields, ConditionModes, ConditionOperators, CopilotChatActionValue, CopilotClearHistoryActionValue, CopilotConnectActionValue, DeleteSessionActionValue, ImportActionValue, importFormat, IncludeModes, MaximumCategorySuggestions, MaximumChatAnswerLength, MaximumChatRequestBytes, MaximumHighlights, MaximumPageSize, PageSize, QueryKeys, readChoice, RenameActionValue, SaveFiltersActionValue, Severities, Streams, UploadContentType, validateConditions, validateImportFile,
-  InputActionValue, MaximumInputLength, SelectApplicationActionValue, type RunningApplication, type RunningApplicationsState,
+  InputActionValue, MaximumInputLength, SelectApplicationActionValue, type RunningApplication, type RunningApplicationProcess, type RunningApplicationsState,
   type ChatMessage, type ChatOptions, type ChatResponse, type CopilotConnection, type ClearResult, type LogEntry, type LogPage, type SessionFilters, type SessionInfo, type ViewerStatus
 } from "./model";
 
@@ -77,13 +77,28 @@ export function readStatus(value: unknown): ViewerStatus {
   };
 }
 
-function readApplication(value: unknown): RunningApplication {
+function readApplicationProcess(value: unknown): RunningApplicationProcess {
   const data = object(value);
   const processId = count(data.processId, "process ID");
   const startedAtTicks = text(data.startedAtTicks, "process start identity");
   if (processId === 0 || !/^[1-9]\d{0,18}$/.test(startedAtTicks))
     throw new Error("The server returned an invalid process identity.");
-  return { processId, name: text(data.name, "application name"), startedAtTicks };
+  return {
+    processId, name: text(data.name, "application name"), startedAtTicks,
+    ...(data.path === undefined ? {} : { path: nullableText(data.path, "application path") })
+  };
+}
+
+function readApplication(value: unknown): RunningApplication {
+  const data = object(value);
+  if (data.processes !== undefined && data.processes !== null && !Array.isArray(data.processes))
+    throw new Error("The server returned an invalid application process list.");
+  return {
+    ...readApplicationProcess(data),
+    ...(data.groupId === undefined ? {} : { groupId: nullableText(data.groupId, "application group") }),
+    ...(data.processes === undefined || data.processes === null ? {} : { processes: data.processes.map(readApplicationProcess) }),
+    ...(data.isTool === undefined ? {} : { isTool: boolean(data.isTool, "application tooling flag") })
+  };
 }
 
 function readApplications(value: unknown): RunningApplicationsState {
@@ -105,6 +120,7 @@ export async function fetchApplications(signal: AbortSignal): Promise<RunningApp
 
 export async function selectApplication(application: RunningApplication): Promise<RunningApplicationsState> {
   const parameters = new URLSearchParams({ processId: String(application.processId), startedAtTicks: application.startedAtTicks });
+  if (application.groupId) parameters.set("scope", "application");
   const response = await fetch(`${ApiRoutes.Applications}?${parameters}`, {
     method: "POST", headers: { [ClearActionHeader]: SelectApplicationActionValue }
   });

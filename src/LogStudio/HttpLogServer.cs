@@ -641,9 +641,12 @@ internal sealed class HttpLogServer : IAsyncDisposable
             if (!int.TryParse(request.QueryString["processId"], NumberStyles.None, CultureInfo.InvariantCulture, out int processId) || processId <= 0 ||
                 !long.TryParse(request.QueryString["startedAtTicks"], NumberStyles.None, CultureInfo.InvariantCulture, out long startedAtTicks) || startedAtTicks <= 0)
                 throw new ArgumentException("Choose a running application with a valid process identity.");
+            string? scope = request.QueryString["scope"];
+            if (scope is not (null or "process" or "application"))
+                throw new ArgumentException("Choose either application or process capture scope.");
             try
             {
-                state = await this.runningApplications.SelectAsync(processId, startedAtTicks, cancellationToken).ConfigureAwait(false);
+                state = await this.runningApplications.SelectAsync(processId, startedAtTicks, cancellationToken, scope == "application").ConfigureAwait(false);
             }
             catch (InvalidOperationException exception)
             {

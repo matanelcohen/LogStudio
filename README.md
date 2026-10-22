@@ -57,6 +57,8 @@ logstudio --listen-all --open
 ```
 
 Choose an app from **Running app** in the viewer. Nothing is attached automatically.
+Search by name, path, or PID. Related `dotnet run` / `dotnet watch` processes appear
+as one app, with their paths and PIDs; selecting it captures the group together.
 This mode captures new `ILogger` events from apps with the .NET logging EventSource
 provider enabled; it cannot recover existing stdout/stderr. See the
 [running-app guide](docs/guide.md#choose-a-running-net-app).

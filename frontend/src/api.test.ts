@@ -64,6 +64,31 @@ describe("typed server payloads", () => {
     await expect(selectApplication({ processId: 42, name: "App", startedAtTicks: "639112345678901234" })).rejects.toThrow("Application exited.");
   });
 
+  it("reads grouped app paths and member identities and explicitly requests application capture", async () => {
+    const process = { processId: 42, name: "Api", startedAtTicks: "639112345678901234", path: "/apps/Api.dll" };
+    const application = { ...process, groupId: "path:/apps/Api.dll", processes: [process, { ...process, processId: 43 }], isTool: false };
+    const state = { applications: [application], selected: application, error: null };
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(state)));
+    vi.stubGlobal("fetch", fetch);
+    expect((await selectApplication(application)).selected).toEqual(application);
+    expect(fetch).toHaveBeenCalledExactlyOnceWith("api/applications?processId=42&startedAtTicks=639112345678901234&scope=application", {
+      method: "POST", headers: { "X-Log-Studio-Action": "select-application" }
+    });
+  });
+
+  it.each([
+    [{ path: 123 }, "application path"],
+    [{ groupId: false }, "application group"],
+    [{ processes: {} }, "application process list"],
+    [{ processes: [{ processId: 43, name: "Worker", startedAtTicks: 639112345678901235 }] }, "process start identity"],
+    [{ isTool: "false" }, "application tooling flag"]
+  ])("rejects malformed group metadata: %j", async (metadata, message) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      applications: [{ processId: 42, name: "Api", startedAtTicks: "639112345678901234", ...metadata }], selected: null, error: null
+    }))));
+    await expect(fetchApplications(new AbortController().signal)).rejects.toThrow(message);
+  });
+
   it("accepts a bounded page without loading full history", () => {
     const page = readPage(fixturePage());
     expect(page.entries).toEqual([Entry]);

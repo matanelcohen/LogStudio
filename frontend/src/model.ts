@@ -81,10 +81,17 @@ export interface ViewerStatus {
   clearedThroughId: number;
 }
 
-export interface RunningApplication {
+export interface RunningApplicationProcess {
   processId: number;
   name: string;
   startedAtTicks: string;
+  path?: string | null;
+}
+
+export interface RunningApplication extends RunningApplicationProcess {
+  groupId?: string | null;
+  processes?: RunningApplicationProcess[];
+  isTool?: boolean;
 }
 
 export interface RunningApplicationsState {

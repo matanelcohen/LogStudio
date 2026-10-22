@@ -526,7 +526,7 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
                 JsonElement[] applications = state.RootElement.GetProperty("applications").EnumerateArray().ToArray();
                 self = Assert.Single(applications, application => application.GetProperty("processId").GetInt32() == Environment.ProcessId).Clone();
                 other = Assert.Single(applications, application => application.GetProperty("processId").GetInt32() == target.Id).Clone();
-                if (OperatingSystem.IsLinux()) Assert.Equal("LogStudio.Demo", other.GetProperty("name").GetString());
+                Assert.Equal("LogStudio.Demo", other.GetProperty("name").GetString());
             }
 
             using (JsonDocument selected = await SelectApplicationAsync(client, ApplicationSelection(url, self), timeout.Token))
@@ -582,6 +582,176 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
             await targetOutput;
             if (error is not null) await error;
             if (targetError is not null) await targetError;
+        }
+    }
+
+    [Fact]
+    public async Task ListenAllGroupsMatchingPathsAndFollowsMembersWithoutReconnectingAfterTheGroupExits()
+    {
+        using Process first = StartProcess(new[] { DemoPath, "--showcase" });
+        using Process listener = StartProcess(WrapperArguments("--listen-all"));
+        List<Process> targets = [first];
+        List<Task<string>> output = [first.StandardOutput.ReadToEndAsync(), listener.StandardOutput.ReadToEndAsync()];
+        try
+        {
+            await ReadUrlAsync(first);
+            output.Add(first.StandardError.ReadToEndAsync());
+            Uri url = await ReadUrlAsync(listener);
+            output.Add(listener.StandardError.ReadToEndAsync());
+            using HttpClient client = new();
+            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(40));
+            JsonElement state = await WaitForApplicationsAsync(client, url,
+                state => state.GetProperty("applications").EnumerateArray().Any(app => IncludesProcess(app, first.Id)), timeout.Token);
+            JsonElement application = Assert.Single(state.GetProperty("applications").EnumerateArray(), app => IncludesProcess(app, first.Id));
+            Assert.Equal("LogStudio.Demo", application.GetProperty("name").GetString());
+            Assert.Equal(DemoPath, application.GetProperty("path").GetString());
+            string groupId = application.GetProperty("groupId").GetString()!;
+            using (JsonDocument selected = await SelectApplicationAsync(client, ApplicationSelection(url, application, includeRelated: true), timeout.Token))
+            {
+                Assert.True(IncludesProcess(selected.RootElement.GetProperty("selected"), first.Id));
+            }
+            JsonElement originalEntry = await CaptureDemoMessageAsync(client, url, first, first.Id, timeout.Token);
+
+            Process second = StartProcess(new[] { DemoPath, "--showcase" });
+            targets.Add(second);
+            output.Add(second.StandardOutput.ReadToEndAsync());
+            await ReadUrlAsync(second);
+            output.Add(second.StandardError.ReadToEndAsync());
+            state = await WaitForApplicationsAsync(client, url,
+                state => IncludesProcess(state.GetProperty("selected"), first.Id) && IncludesProcess(state.GetProperty("selected"), second.Id), timeout.Token);
+            Assert.Equal(groupId, state.GetProperty("selected").GetProperty("groupId").GetString());
+            JsonElement grouped = Assert.Single(state.GetProperty("applications").EnumerateArray(), app => IncludesProcess(app, first.Id));
+            Assert.True(IncludesProcess(grouped, second.Id));
+            Assert.Equal(2, grouped.GetProperty("processes").GetArrayLength());
+            await CaptureDemoMessageAsync(client, url, second, second.Id, timeout.Token);
+            using (JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token))
+            {
+                Assert.Contains(snapshot.RootElement.GetProperty("entries").EnumerateArray(),
+                    entry => entry.GetProperty("id").GetInt64() == originalEntry.GetProperty("id").GetInt64() &&
+                        entry.GetProperty("message").GetString() == originalEntry.GetProperty("message").GetString());
+            }
+
+            await first.StandardInput.WriteLineAsync("quit");
+            first.StandardInput.Close();
+            await first.WaitForExitAsync().WaitAsync(ProcessTimeout);
+            state = await WaitForApplicationsAsync(client, url, state =>
+                IncludesProcess(state.GetProperty("selected"), second.Id) && !IncludesProcess(state.GetProperty("selected"), first.Id), timeout.Token);
+            Assert.Equal(groupId, state.GetProperty("selected").GetProperty("groupId").GetString());
+            await CaptureDemoMessageAsync(client, url, second, second.Id, timeout.Token);
+            await second.StandardInput.WriteLineAsync("quit");
+            second.StandardInput.Close();
+            await second.WaitForExitAsync().WaitAsync(ProcessTimeout);
+            await WaitForApplicationsAsync(client, url, state => state.GetProperty("selected").ValueKind == JsonValueKind.Null, timeout.Token);
+
+            Process later = StartProcess(new[] { DemoPath, "--showcase" });
+            targets.Add(later);
+            output.Add(later.StandardOutput.ReadToEndAsync());
+            await ReadUrlAsync(later);
+            output.Add(later.StandardError.ReadToEndAsync());
+            await WaitForApplicationsAsync(client, url,
+                state => state.GetProperty("applications").EnumerateArray().Any(app => IncludesProcess(app, later.Id)), timeout.Token);
+            await Task.Delay(TimeSpan.FromSeconds(3), timeout.Token);
+            using (JsonDocument afterExit = JsonDocument.Parse(await client.GetStringAsync(new Uri(url, "api/applications"), timeout.Token)))
+            {
+                Assert.Equal(JsonValueKind.Null, afterExit.RootElement.GetProperty("selected").ValueKind);
+            }
+        }
+        finally
+        {
+            await KillAsync(listener);
+            foreach (Process target in targets)
+            {
+                await KillAsync(target);
+                target.Dispose();
+            }
+            await Task.WhenAll(output);
+        }
+    }
+
+    [Fact]
+    public async Task ListenAllGroupsDotnetRunWithItsActualAppAndKeepsSeparateLaunchesSeparate()
+    {
+        string project = Path.GetFullPath("../../../LogStudio.Demo.csproj", Path.GetDirectoryName(DemoPath)!);
+        string configuration = new DirectoryInfo(Path.GetDirectoryName(DemoPath)!).Parent!.Name;
+        string[] arguments = ["run", "--no-build", "--no-launch-profile", "--project", project, "--configuration", configuration, "--", "--showcase"];
+        using Process first = StartProcess(arguments);
+        using Process second = StartProcess(arguments);
+        using Process listener = StartProcess(WrapperArguments("--listen-all"));
+        List<Task<string>> output = [first.StandardOutput.ReadToEndAsync(), second.StandardOutput.ReadToEndAsync(), listener.StandardOutput.ReadToEndAsync()];
+        try
+        {
+            await ReadUrlAsync(first);
+            output.Add(first.StandardError.ReadToEndAsync());
+            await ReadUrlAsync(second);
+            output.Add(second.StandardError.ReadToEndAsync());
+            Uri url = await ReadUrlAsync(listener);
+            output.Add(listener.StandardError.ReadToEndAsync());
+            using HttpClient client = new();
+            using CancellationTokenSource timeout = new(ProcessTimeout);
+            JsonElement state = await WaitForApplicationsAsync(client, url, state =>
+                state.GetProperty("applications").EnumerateArray().Any(app => app.GetProperty("processId").GetInt32() == first.Id && app.GetProperty("processes").GetArrayLength() >= 2) &&
+                state.GetProperty("applications").EnumerateArray().Any(app => app.GetProperty("processId").GetInt32() == second.Id && app.GetProperty("processes").GetArrayLength() >= 2), timeout.Token);
+            JsonElement firstApp = Assert.Single(state.GetProperty("applications").EnumerateArray(), app => app.GetProperty("processId").GetInt32() == first.Id);
+            JsonElement secondApp = Assert.Single(state.GetProperty("applications").EnumerateArray(), app => app.GetProperty("processId").GetInt32() == second.Id);
+            Assert.NotEqual(firstApp.GetProperty("groupId").GetString(), secondApp.GetProperty("groupId").GetString());
+            Assert.Equal("LogStudio.Demo", firstApp.GetProperty("name").GetString());
+            Assert.Equal(DemoPath, firstApp.GetProperty("path").GetString());
+            Assert.Equal(DemoPath, secondApp.GetProperty("path").GetString());
+            int childId = Assert.Single(firstApp.GetProperty("processes").EnumerateArray(), process => process.GetProperty("name").GetString() == "LogStudio.Demo")
+                .GetProperty("processId").GetInt32();
+            using (JsonDocument selected = await SelectApplicationAsync(client, ApplicationSelection(url, firstApp, includeRelated: true), timeout.Token))
+            {
+                Assert.Equal(JsonValueKind.Null, selected.RootElement.GetProperty("error").ValueKind);
+                Assert.True(IncludesProcess(selected.RootElement.GetProperty("selected"), first.Id));
+                Assert.True(IncludesProcess(selected.RootElement.GetProperty("selected"), childId));
+            }
+            await second.StandardInput.WriteLineAsync("success");
+            await CaptureDemoMessageAsync(client, url, first, childId, timeout.Token);
+            using (JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token))
+            {
+                foreach (JsonElement process in secondApp.GetProperty("processes").EnumerateArray())
+                    Assert.DoesNotContain(snapshot.RootElement.GetProperty("entries").EnumerateArray(),
+                        entry => entry.GetProperty("message").GetString()!.StartsWith($"[PID {process.GetProperty("processId").GetInt32()}]", StringComparison.Ordinal));
+            }
+
+            using (JsonDocument selected = await SelectApplicationAsync(client, ApplicationSelection(url, secondApp, includeRelated: true), timeout.Token))
+            {
+                Assert.Equal(secondApp.GetProperty("groupId").GetString(), selected.RootElement.GetProperty("selected").GetProperty("groupId").GetString());
+                Assert.Equal(JsonValueKind.Null, selected.RootElement.GetProperty("error").ValueKind);
+            }
+            int secondChildId = Assert.Single(secondApp.GetProperty("processes").EnumerateArray(), process => process.GetProperty("name").GetString() == "LogStudio.Demo")
+                .GetProperty("processId").GetInt32();
+            await first.StandardInput.WriteLineAsync("success");
+            await CaptureDemoMessageAsync(client, url, second, secondChildId, timeout.Token);
+            using (JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token))
+            {
+                foreach (JsonElement process in firstApp.GetProperty("processes").EnumerateArray())
+                    Assert.DoesNotContain(snapshot.RootElement.GetProperty("entries").EnumerateArray(),
+                        entry => entry.GetProperty("message").GetString()!.StartsWith($"[PID {process.GetProperty("processId").GetInt32()}]", StringComparison.Ordinal));
+            }
+
+            if (!OperatingSystem.IsWindows())
+            {
+                await InterruptAsync(listener);
+                await listener.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                Assert.Equal(130, listener.ExitCode);
+                Assert.False(first.HasExited);
+                Assert.False(second.HasExited);
+            }
+            await first.StandardInput.WriteLineAsync("quit");
+            await second.StandardInput.WriteLineAsync("quit");
+            first.StandardInput.Close();
+            second.StandardInput.Close();
+            await Task.WhenAll(first.WaitForExitAsync(), second.WaitForExitAsync()).WaitAsync(ProcessTimeout);
+            Assert.Equal(0, first.ExitCode);
+            Assert.Equal(0, second.ExitCode);
+        }
+        finally
+        {
+            await KillAsync(listener);
+            await KillAsync(first);
+            await KillAsync(second);
+            await Task.WhenAll(output);
         }
     }
 
@@ -652,7 +822,6 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
     [Fact]
     public async Task ListenAllUsesSafeManagedEntrypointNamesAndCapsSessionNamesBeforeSelection()
     {
-        if (!OperatingSystem.IsLinux()) return;
         string directory = Directory.CreateTempSubdirectory("logstudio-listen-target-").FullName;
         try
         {
@@ -697,9 +866,12 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
                     Assert.Equal(longName[..128], snapshot.RootElement.GetProperty("status").GetProperty("applicationName").GetString());
                 }
 
-                await InterruptAsync(listener);
-                await listener.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
-                Assert.Equal(130, listener.ExitCode);
+                if (!OperatingSystem.IsWindows())
+                {
+                    await InterruptAsync(listener);
+                    await listener.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                    Assert.Equal(130, listener.ExitCode);
+                }
                 Assert.False(target.HasExited);
                 await target.StandardInput.WriteLineAsync("quit");
                 target.StandardInput.Close();
@@ -950,8 +1122,41 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
 
     private static string[] WrapperArguments(params string[] arguments) => new[] { ToolPath }.Concat(arguments).ToArray();
 
-    private static Uri ApplicationSelection(Uri url, JsonElement application) => new(url,
-        $"api/applications?processId={application.GetProperty("processId").GetInt32()}&startedAtTicks={application.GetProperty("startedAtTicks").GetString()}");
+    private static Uri ApplicationSelection(Uri url, JsonElement application, bool includeRelated = false) => new(url,
+        $"api/applications?processId={application.GetProperty("processId").GetInt32()}&startedAtTicks={application.GetProperty("startedAtTicks").GetString()}" +
+        (includeRelated ? "&scope=application" : ""));
+
+    private static bool IncludesProcess(JsonElement application, int processId) =>
+        application.ValueKind == JsonValueKind.Object && application.GetProperty("processes").EnumerateArray()
+            .Any(process => process.GetProperty("processId").GetInt32() == processId);
+
+    private static async Task<JsonElement> WaitForApplicationsAsync(HttpClient client, Uri url,
+        Func<JsonElement, bool> predicate, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            using JsonDocument state = JsonDocument.Parse(await client.GetStringAsync(new Uri(url, "api/applications"), cancellationToken));
+            if (predicate(state.RootElement)) return state.RootElement.Clone();
+            await Task.Delay(100, cancellationToken);
+        }
+    }
+
+    private static async Task<JsonElement> CaptureDemoMessageAsync(HttpClient client, Uri url, Process input,
+        int processId, CancellationToken cancellationToken)
+    {
+        using JsonDocument before = await GetSnapshotAsync(client, url, cancellationToken);
+        long lastId = before.RootElement.GetProperty("status").GetProperty("lastId").GetInt64();
+        while (true)
+        {
+            await input.StandardInput.WriteLineAsync("success");
+            using JsonDocument snapshot = await GetSnapshotAsync(client, url, cancellationToken);
+            JsonElement match = snapshot.RootElement.GetProperty("entries").EnumerateArray().FirstOrDefault(entry =>
+                entry.GetProperty("id").GetInt64() > lastId &&
+                entry.GetProperty("message").GetString()!.StartsWith($"[PID {processId}] Checkout ", StringComparison.Ordinal));
+            if (match.ValueKind != JsonValueKind.Undefined) return match.Clone();
+            await Task.Delay(250, cancellationToken);
+        }
+    }
 
     private static async Task<JsonDocument> SelectApplicationAsync(HttpClient client, Uri route, CancellationToken cancellationToken)
     {
