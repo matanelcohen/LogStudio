@@ -142,6 +142,7 @@ internal static class Program
 
     private static async Task<int> RunAsync(ToolOptions options, CancellationToken cancellationToken)
     {
+        using ProcessInput processInput = new();
         await using ConsoleLogViewer viewer = ConsoleLogViewer.Start(new ConsoleLogViewerOptions
         {
             CaptureConsole = false,
@@ -155,6 +156,7 @@ internal static class Program
             RunCommand = options.Command,
             RunArguments = options.Arguments,
             RunWorkingDirectory = Environment.CurrentDirectory,
+            Input = processInput,
         });
         using TextWriter stdout = viewer.CreateCaptureWriter(Console.Out, LogStream.Stdout);
         using TextWriter stderr = viewer.CreateCaptureWriter(Console.Error, LogStream.Stderr);
@@ -176,10 +178,13 @@ internal static class Program
         {
             throw new InvalidOperationException($"The process '{options.Command}' did not start.");
         }
+        processInput.Attach(child.StandardInput.BaseStream, () => !child.HasExited);
+        child.Exited += (_, _) => processInput.Close();
+        child.EnableRaisingEvents = true;
 
         using CancellationTokenSource outputStop = new();
         using CancellationTokenSource inputStop = new();
-        Task input = PumpInputAsync(Console.OpenStandardInput(), child.StandardInput.BaseStream, inputStop.Token);
+        Task input = PumpInputAsync(Console.OpenStandardInput(), processInput, inputStop.Token);
         Task output = PumpAsync(child.StandardOutput, stdout, child, outputStop.Token);
         Task error = PumpAsync(child.StandardError, stderr, child, outputStop.Token);
         Task waitForExit = child.WaitForExitAsync(cancellationToken);
@@ -199,7 +204,7 @@ internal static class Program
                     throw;
                 }
 
-                CloseChildInput(child);
+                processInput.Close();
             }
 
             await waitForExit.ConfigureAwait(false);
@@ -212,10 +217,7 @@ internal static class Program
         }
 
         inputStop.Cancel();
-        if (!input.IsCompleted)
-        {
-            CloseChildInput(child);
-        }
+        processInput.Close();
 
         if (input.IsCompleted)
         {
@@ -270,30 +272,24 @@ internal static class Program
         return exitCode;
     }
 
-    private static void CloseChildInput(Process child)
+    private static async Task PumpInputAsync(Stream source, ProcessInput destination, CancellationToken cancellationToken)
     {
         try
         {
-            child.StandardInput.Close();
+            byte[] buffer = new byte[PumpBufferSize];
+            int count;
+            while ((count = await source.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false)) > 0)
+            {
+                await destination.WriteAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
+            }
         }
-        catch (IOException)
+        catch (Exception exception) when (!destination.CanWrite && exception is IOException or ObjectDisposedException or OperationCanceledException)
         {
         }
-        catch (ObjectDisposedException)
+        finally
         {
+            destination.Close();
         }
-    }
-
-    private static async Task PumpInputAsync(Stream source, Stream destination, CancellationToken cancellationToken)
-    {
-        byte[] buffer = new byte[PumpBufferSize];
-        int count;
-        while ((count = await source.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false)) > 0)
-        {
-            await destination.WriteAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
-        }
-
-        await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task PumpAsync(StreamReader source, TextWriter destination, Process child, CancellationToken cancellationToken)

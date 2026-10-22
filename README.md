@@ -46,6 +46,10 @@ Keep using your existing command after `--`. The wrapped command still needs its
 dependencies; for example, `dotnet run` requires your application's .NET SDK.
 The viewer opens locally in your browser. Without `--open`, open the URL printed in the terminal.
 
+When the wrapped program asks for input, use **Terminal input** below the logs and press
+Enter or **Send input**. Each submission sends one line to the program, just like typing
+in the original terminal. See [interactive input](docs/guide.md#interactive-input) for limitations.
+
 To choose an already-running .NET app instead of wrapping a command:
 
 ```bash

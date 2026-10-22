@@ -194,6 +194,7 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
     /// <param name="exitCode">The child process exit code, if known.</param>
     public void Complete(int? exitCode = null)
     {
+        this.settings.Input?.Close();
         try
         {
             lock (this.lifecycleGate)
@@ -263,6 +264,7 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
 
     private async Task DisposeCoreAsync()
     {
+        this.settings.Input?.Close();
         this.telemetry.Dispose();
         lock (ConsoleCaptureGate)
         {

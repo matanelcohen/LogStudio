@@ -37,10 +37,10 @@ export function useLiveStatus(paused: boolean) {
         const cleared = next.clearedThroughId > (latest.current?.clearedThroughId ?? 0);
         if (paused && !cleared) {
           if (latest.current) {
-            latest.current = { ...latest.current, applicationName: next.applicationName, revision: next.revision };
+            latest.current = { ...latest.current, applicationName: next.applicationName, canWriteInput: next.canWriteInput, revision: next.revision };
           }
-          setStatus(status => status === null ? next : status.applicationName === next.applicationName ? status :
-            { ...status, applicationName: next.applicationName, revision: next.revision });
+          setStatus(status => status === null ? next : status.applicationName === next.applicationName && status.canWriteInput === next.canWriteInput ? status :
+            { ...status, applicationName: next.applicationName, canWriteInput: next.canWriteInput, revision: next.revision });
           return;
         }
         if (!cleared && resumeThrough.current !== null && next.firstId > resumeThrough.current + 1)

@@ -1,8 +1,40 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchApplications, readPage, readStatus, selectApplication } from "./api";
+import { fetchApplications, readPage, readStatus, selectApplication, sendInput } from "./api";
 import { Entry, fixturePage, Status } from "./test-fixtures";
 
 describe("typed server payloads", () => {
+  it("reads input availability while remaining compatible with saved statuses", () => {
+    expect(readStatus(Status).canWriteInput).toBe(false);
+    expect(readStatus({ ...Status, canWriteInput: true }).canWriteInput).toBe(true);
+    expect(() => readStatus({ ...Status, canWriteInput: "true" })).toThrow("terminal input availability");
+  });
+
+  it.each(["  hello 世界 👋  ", "", "\t", "x".repeat(4096)])("sends protected terminal input unchanged: %j", async input => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ sent: true })));
+    vi.stubGlobal("fetch", fetch);
+    await sendInput(input);
+    expect(fetch).toHaveBeenCalledExactlyOnceWith("api/input", {
+      method: "POST", headers: { "X-Log-Studio-Action": "input", "Content-Type": "application/json" },
+      body: JSON.stringify({ text: input })
+    });
+  });
+
+  it.each(["x".repeat(4097), "first\nsecond", "\r", "\0", "\x1b", "\x7f", "\x85"])("rejects oversized or control input before sending", async input => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    await expect(sendInput(input)).rejects.toThrow("single line");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("surfaces input failures and requires an explicit success acknowledgement", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ error: "Input closed." }), { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ sent: false })));
+    vi.stubGlobal("fetch", fetch);
+    await expect(sendInput("answer")).rejects.toThrow("Input closed.");
+    await expect(sendInput("answer")).rejects.toThrow("did not confirm");
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("reads selection mode while remaining compatible with saved statuses", () => {
     expect(readStatus(Status).listenAll).toBe(false);
     expect(readStatus({ ...Status, listenAll: true }).listenAll).toBe(true);

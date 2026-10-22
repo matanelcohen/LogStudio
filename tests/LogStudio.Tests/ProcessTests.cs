@@ -8,6 +8,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -47,6 +48,133 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Input> ", result.Output, StringComparison.Ordinal);
         Assert.Contains($"Received: {Payload}", result.Output, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" \t ")]
+    [InlineData("日本語 café 🙂")]
+    public async Task BrowserInputReachesTheWaitingChildAndIsUnavailableAfterExit(string text)
+    {
+        using Process process = StartProcess(WrapperArguments("--", DotnetCommand, DemoPath, "--count", "0", "--interactive"));
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string>? error = null;
+        using HttpClient client = new();
+        using CancellationTokenSource timeout = new(ProcessTimeout);
+        try
+        {
+            Uri url = await ReadUrlAsync(process);
+            error = process.StandardError.ReadToEndAsync();
+            while (true)
+            {
+                using JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token);
+                if (snapshot.RootElement.GetProperty("status").GetProperty("canWriteInput").GetBoolean()) break;
+                await Task.Delay(20, timeout.Token);
+            }
+            using HttpRequestMessage request = new(HttpMethod.Post, new Uri(url, "api/input"));
+            request.Headers.Add(ViewerConstants.ClearRequestHeader, "input");
+            request.Content = new StringContent(JsonSerializer.Serialize(new { text }), Encoding.UTF8, "application/json");
+            using HttpResponseMessage response = await client.SendAsync(request, timeout.Token);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            while (true)
+            {
+                using JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token);
+                if (snapshot.RootElement.GetProperty("status").GetProperty("isCompleted").GetBoolean())
+                {
+                    Assert.False(snapshot.RootElement.GetProperty("status").GetProperty("canWriteInput").GetBoolean());
+                    Assert.Contains(snapshot.RootElement.GetProperty("entries").EnumerateArray(), entry =>
+                        entry.GetProperty("message").GetString()?.Contains("Received: " + text, StringComparison.Ordinal) == true);
+                    break;
+                }
+                await Task.Delay(20, timeout.Token);
+            }
+            using HttpRequestMessage afterExit = new(HttpMethod.Post, new Uri(url, "api/input"));
+            afterExit.Headers.Add(ViewerConstants.ClearRequestHeader, "input");
+            afterExit.Content = new StringContent("{\"text\":\"do not send\"}", Encoding.UTF8, "application/json");
+            using HttpResponseMessage rejected = await client.SendAsync(afterExit, timeout.Token);
+            Assert.Equal(HttpStatusCode.Conflict, rejected.StatusCode);
+        }
+        finally
+        {
+            await KillAsync(process);
+            await output;
+            if (error is not null) await error;
+        }
+    }
+
+    [Fact]
+    public async Task TerminalEofClosesChildInputAndBrowserCapability()
+    {
+        using Process process = StartProcess(WrapperArguments("--", DotnetCommand, DemoPath, "--count", "0", "--interactive"));
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string>? error = null;
+        try
+        {
+            Uri url = await ReadUrlAsync(process);
+            error = process.StandardError.ReadToEndAsync();
+            process.StandardInput.Close();
+            using HttpClient client = new();
+            using CancellationTokenSource timeout = new(ProcessTimeout);
+            while (true)
+            {
+                using JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token);
+                if (snapshot.RootElement.GetProperty("status").GetProperty("isCompleted").GetBoolean())
+                {
+                    Assert.False(snapshot.RootElement.GetProperty("status").GetProperty("canWriteInput").GetBoolean());
+                    break;
+                }
+                await Task.Delay(20, timeout.Token);
+            }
+            using HttpRequestMessage request = new(HttpMethod.Post, new Uri(url, "api/input"));
+            request.Headers.Add(ViewerConstants.ClearRequestHeader, "input");
+            request.Content = new StringContent("{\"text\":\"do not send\"}", Encoding.UTF8, "application/json");
+            using HttpResponseMessage response = await client.SendAsync(request, timeout.Token);
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        }
+        finally
+        {
+            await KillAsync(process);
+            Assert.DoesNotContain("do not send", await output, StringComparison.Ordinal);
+            if (error is not null) await error;
+        }
+    }
+
+    [Fact]
+    public async Task BrowserAndTerminalCanSendSuccessiveLinesToTheSameChild()
+    {
+        using Process process = StartProcess(WrapperArguments("--no-wait", "--", DotnetCommand, DemoPath, "--showcase"));
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string>? error = null;
+        try
+        {
+            Uri url = await ReadUrlAsync(process);
+            error = process.StandardError.ReadToEndAsync();
+            using HttpClient client = new();
+            using CancellationTokenSource timeout = new(ProcessTimeout);
+            while (true)
+            {
+                using JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token);
+                if (snapshot.RootElement.GetProperty("status").GetProperty("canWriteInput").GetBoolean()) break;
+                await Task.Delay(20, timeout.Token);
+            }
+            foreach (string text in new[] { "", "success" })
+            {
+                using HttpRequestMessage request = new(HttpMethod.Post, new Uri(url, "api/input"));
+                request.Headers.Add(ViewerConstants.ClearRequestHeader, "input");
+                request.Content = new StringContent(JsonSerializer.Serialize(new { text }), Encoding.UTF8, "application/json");
+                using HttpResponseMessage response = await client.SendAsync(request, timeout.Token);
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            }
+            await process.StandardInput.WriteLineAsync("quit");
+            await process.WaitForExitAsync().WaitAsync(ProcessTimeout);
+            Assert.Equal(0, process.ExitCode);
+            Assert.Contains("Checkout 4 completed", await output, StringComparison.Ordinal);
+            await error;
+        }
+        finally
+        {
+            await KillAsync(process);
+        }
     }
 
     [Fact]
