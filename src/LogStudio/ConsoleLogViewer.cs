@@ -57,7 +57,7 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
         }
     }
 
-    /// <summary>Gets the session-specific localhost URL. Treat it as a local access credential.</summary>
+    /// <summary>Gets the localhost viewer URL.</summary>
     public Uri Url => this.server.Url;
 
     /// <summary>Gets the private temporary history directory. It is deleted when the viewer is disposed.</summary>

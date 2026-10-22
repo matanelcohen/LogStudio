@@ -340,9 +340,10 @@ public sealed class TelemetrySuggestionTests
             using HttpRequestMessage mixedCase = route.EndsWith("suggest", StringComparison.Ordinal) ? Post(server.Url, "{}", route: route + "?SESSIONID=saved") : new(HttpMethod.Get, new Uri(server.Url, route + "?SESSIONID="));
             using HttpResponseMessage mixedCaseResponse = await client.SendAsync(mixedCase);
             Assert.Equal(HttpStatusCode.BadRequest, mixedCaseResponse.StatusCode);
-            using HttpRequestMessage missing = route.EndsWith("suggest", StringComparison.Ordinal) ? Post(new Uri(server.Url.GetLeftPart(UriPartial.Authority)), "{}", route: route) : new(HttpMethod.Get, new Uri(server.Url.GetLeftPart(UriPartial.Authority) + "/" + route));
-            using HttpResponseMessage notFound = await client.SendAsync(missing);
-            Assert.Equal(HttpStatusCode.NotFound, notFound.StatusCode);
+            using HttpRequestMessage crossSite = route.EndsWith("suggest", StringComparison.Ordinal) ? Post(server.Url, "{}", route: route) : new(HttpMethod.Get, new Uri(server.Url, route));
+            crossSite.Headers.Add(ViewerConstants.FetchSiteHeader, "cross-site");
+            using HttpResponseMessage crossSiteResponse = await client.SendAsync(crossSite);
+            Assert.Equal(HttpStatusCode.Forbidden, crossSiteResponse.StatusCode);
         }
         using HttpRequestMessage noAction = Post(server.Url, "{}", null);
         using HttpResponseMessage noActionResponse = await client.SendAsync(noAction);

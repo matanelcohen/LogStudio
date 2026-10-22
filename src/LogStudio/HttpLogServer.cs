@@ -44,7 +44,6 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private readonly TelemetrySettings initialTelemetrySettings;
     private readonly IRunningApplications? runningApplications;
     private readonly ProcessInput? input;
-    private readonly string pathPrefix;
     private readonly string authority;
     private readonly string contentSecurityPolicy;
     private readonly Dictionary<string, Asset> assets;
@@ -71,13 +70,12 @@ internal sealed class HttpLogServer : IAsyncDisposable
         this.initialTelemetrySettings = new(settings.MeterSources, settings.ActivitySources, false);
         this.copilot = copilot ?? new CopilotCliClient();
         this.copilotTimeout = copilotTimeout ?? TimeSpan.FromMinutes(2);
-        this.pathPrefix = $"/{Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant()}/";
         string nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(24));
         this.contentSecurityPolicy = string.Format(CultureInfo.InvariantCulture, ContentSecurityPolicy, nonce);
         this.assets = LoadAssets(nonce);
         (this.listener, int port) = Bind(settings.Port);
         this.authority = $"http://{ViewerConstants.LoopbackHost}:{port}";
-        this.Url = new Uri(this.authority + this.pathPrefix);
+        this.Url = new Uri(this.authority + "/");
         this.acceptTask = this.AcceptAsync();
     }
 
@@ -207,21 +205,22 @@ internal sealed class HttpLogServer : IAsyncDisposable
         try
         {
             if (request.RemoteEndPoint is null || !IPAddress.IsLoopback(request.RemoteEndPoint.Address) ||
-                request.Url is null || request.Url.Host != ViewerConstants.LoopbackHost ||
-                !request.Url.AbsolutePath.StartsWith(this.pathPrefix, StringComparison.Ordinal))
+                request.Url is null || request.Url.Host != ViewerConstants.LoopbackHost)
             {
                 await WriteErrorAsync(response, HttpStatusCode.NotFound, NotFoundMessage, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
             string? origin = request.Headers[ViewerConstants.OriginHeader];
-            if (origin is not null && !string.Equals(origin, this.authority, StringComparison.OrdinalIgnoreCase))
+            string? fetchSite = request.Headers[ViewerConstants.FetchSiteHeader];
+            if ((origin is not null && !string.Equals(origin, this.authority, StringComparison.OrdinalIgnoreCase)) ||
+                fetchSite is not (null or "same-origin" or "none"))
             {
                 await WriteErrorAsync(response, HttpStatusCode.Forbidden, "Only same-origin browser requests are allowed.", cancellationToken).ConfigureAwait(false);
                 return;
             }
 
-            string route = request.Url.AbsolutePath[this.pathPrefix.Length..];
+            string route = request.Url.AbsolutePath[1..];
             if (route == "api/input")
             {
                 await this.InputAsync(context, cancellationToken).ConfigureAwait(false);
