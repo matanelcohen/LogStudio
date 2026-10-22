@@ -89,6 +89,38 @@ describe("full-session log chat panel", () => {
     expect(focus).toHaveBeenCalledOnce();
   });
 
+  it("anchors the visible message across reflow without enabling auto-follow from restoration scroll events", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
+    vi.mocked(api.fetchCopilotHistory).mockResolvedValue([
+      { role: "user", content: "First question" }, { role: "assistant", content: "First answer" },
+      { role: "user", content: "Second question" }, { role: "assistant", content: "Second answer" }
+    ]);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (!this.classList.contains("copilot-message")) return new DOMRect();
+      const log = this.parentElement!;
+      const heights = this.closest('[role="dialog"]') ? [40, 100, 40, 100] : [80, 400, 80, 400];
+      const index = Array.from(log.children).indexOf(this);
+      const top = heights.slice(0, index).reduce((total, height) => total + height, 0) - log.scrollTop;
+      return new DOMRect(0, top, 300, heights[index]);
+    });
+    render(<CopilotChatPanel status={Status} sessionId="saved" onClose={vi.fn()} returnFocus={vi.fn()} />);
+    await connectCli();
+    await screen.findByText("Second answer");
+    const log = screen.getByRole("log");
+    Object.defineProperties(log, { scrollHeight: { value: 960 }, clientHeight: { value: 200 } });
+    log.scrollTop = 180;
+    fireEvent.scroll(log);
+    fireEvent.click(screen.getByRole("button", { name: "Expand Copilot chat" }));
+    const expandedLog = screen.getByRole("log");
+    expect(expandedLog.scrollTop).toBe(65);
+    Object.defineProperties(expandedLog, { scrollHeight: { value: 280 }, clientHeight: { value: 200 } });
+    fireEvent.scroll(expandedLog);
+    expect(screen.getByRole("button", { name: "Latest message" })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Restore Copilot chat" }));
+    expect(screen.getByRole("log").scrollTop).toBe(180);
+    expect(screen.getByRole("button", { name: "Latest message" })).toBeDefined();
+  });
+
   it("keeps streaming through layout changes and allows restoration while closing chat is disabled", async () => {
     vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
     let finish!: (value: ChatResponse) => void;

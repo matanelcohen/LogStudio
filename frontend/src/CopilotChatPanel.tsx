@@ -44,10 +44,24 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
   const conversation = useRef<HTMLDivElement>(null);
   const followMessages = useRef(true);
   const scrollPosition = useRef(0);
+  const readingAnchor = useRef<{ index: number; fraction: number } | null>(null);
+  const restoredScroll = useRef<{ log: HTMLDivElement; top: number } | null>(null);
+  const restoreConversation = useCallback((log: HTMLDivElement, reflow = false) => {
+    let top = followMessages.current ? log.scrollHeight : scrollPosition.current;
+    const anchor = readingAnchor.current;
+    const message = anchor && log.children.item(anchor.index);
+    if (!followMessages.current && reflow && message) {
+      const bounds = message.getBoundingClientRect();
+      top = log.scrollTop + bounds.top - log.getBoundingClientRect().top + bounds.height * anchor.fraction;
+    }
+    log.scrollTop = top;
+    scrollPosition.current = log.scrollTop;
+    restoredScroll.current = { log, top: log.scrollTop };
+  }, []);
   const attachConversation = useCallback((log: HTMLDivElement | null) => {
     conversation.current = log;
-    if (log) log.scrollTop = followMessages.current ? log.scrollHeight : scrollPosition.current;
-  }, []);
+    if (log) restoreConversation(log, true);
+  }, [restoreConversation]);
   const resizeQuestion = useCallback((input: HTMLTextAreaElement | null) => {
     questionInput.current = input;
     if (!input) return;
@@ -88,8 +102,8 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
 
   useEffect(() => {
     const log = conversation.current;
-    if (!hidden && log) log.scrollTop = followMessages.current ? log.scrollHeight : scrollPosition.current;
-  }, [messages, streamedAnswer, busy, hidden, expanded]);
+    if (!hidden && log) restoreConversation(log);
+  }, [messages, streamedAnswer, busy, hidden, restoreConversation]);
 
   useEffect(() => {
     resizeQuestion(questionInput.current);
@@ -185,9 +199,14 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
         aria-busy={busy}
         onScroll={event => {
           const log = event.currentTarget;
+          if (restoredScroll.current?.log === log && restoredScroll.current.top === log.scrollTop) return;
           scrollPosition.current = log.scrollTop;
           followMessages.current = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
           setFollowing(followMessages.current);
+          const top = log.getBoundingClientRect().top;
+          const index = Array.from(log.children).findIndex(message => message.getBoundingClientRect().bottom > top);
+          const bounds = log.children.item(index)?.getBoundingClientRect();
+          readingAnchor.current = bounds && bounds.height > 0 ? { index, fraction: Math.max(0, (top - bounds.top) / bounds.height) } : null;
         }}>
         {messages.map((message, index) => <div className={`copilot-message ${message.role}`} key={index}>
           <span className="copilot-message-author">{message.role === "user" ? "You" : "Copilot"}</span>
