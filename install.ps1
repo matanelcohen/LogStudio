@@ -93,7 +93,12 @@ try {
     }
     if (-not $FrontendRestored) {
         Invoke-Checked $Npm @("ci", "--prefer-online")
-        Invoke-Checked $Npm @("audit", "--audit-level=high")
+        & $Npm audit --audit-level=high
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "npm audit failed; retrying once in 5 seconds."
+            Start-Sleep -Seconds 5
+            Invoke-Checked $Npm @("audit", "--audit-level=high")
+        }
     }
     Write-Host "`nBuilding and testing React frontend..."
     Invoke-Checked $Npm @("run", "build")

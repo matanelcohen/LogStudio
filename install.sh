@@ -95,7 +95,11 @@ if [[ "$RestoreMode" != "online" ]]; then
 fi
 if [[ "$FrontendRestored" != true ]]; then
   npm ci --prefer-online
-  npm audit --audit-level=high
+  if ! npm audit --audit-level=high; then
+    printf 'npm audit failed; retrying once in 5 seconds.\n'
+    sleep 5
+    npm audit --audit-level=high
+  fi
 fi
 printf '\nBuilding and testing React frontend...\n'
 npm run build
