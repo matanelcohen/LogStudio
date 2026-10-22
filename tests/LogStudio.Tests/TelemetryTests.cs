@@ -444,8 +444,10 @@ public sealed class TelemetryTests
         sameOrigin.Headers.Add("Origin", viewer.Url.GetLeftPart(UriPartial.Authority));
         using HttpResponseMessage allowed = await client.SendAsync(sameOrigin);
         Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
-        using HttpResponseMessage missing = await client.GetAsync(viewer.Url.GetLeftPart(UriPartial.Authority) + "/api/telemetry");
-        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+        using HttpRequestMessage crossSite = new(HttpMethod.Get, endpoint);
+        crossSite.Headers.Add(ViewerConstants.FetchSiteHeader, "cross-site");
+        using HttpResponseMessage crossSiteResponse = await client.SendAsync(crossSite);
+        Assert.Equal(HttpStatusCode.Forbidden, crossSiteResponse.StatusCode);
         using HttpResponseMessage post = await client.PostAsync(endpoint, null);
         Assert.Equal(HttpStatusCode.MethodNotAllowed, post.StatusCode);
         using HttpResponseMessage saved = await client.GetAsync(new Uri(viewer.Url, "api/telemetry?sessionId=saved"));
