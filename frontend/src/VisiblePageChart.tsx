@@ -7,8 +7,12 @@ export function VisiblePageChart({ entries }: { entries: LogEntry[] }) {
   const data = useMemo(() => {
     if (!entries.length) return null;
     const times = entries.map(entry => Date.parse(entry.timestamp));
-    const first = Math.min(...times);
-    const last = Math.max(...times);
+    let first = Infinity;
+    let last = -Infinity;
+    for (const time of times) {
+      first = Math.min(first, time);
+      last = Math.max(last, time);
+    }
     const span = Math.max(1, last - first);
     const buckets = Array.from({ length: BucketCount }, () => 0);
     for (const time of times) {
