@@ -23,9 +23,9 @@ internal sealed class LogBuffer : IDisposable
     private readonly HashSet<string?> categories = new(StringComparer.Ordinal);
     private readonly LogParser[] parsers = { new(), new(), new() };
     private readonly ViewerSettings settings;
+    private readonly LogChangeSignal changes;
     private string applicationName;
     private readonly DateTimeOffset startedAt = DateTimeOffset.UtcNow;
-    private TaskCompletionSource changed = NewSignal();
     private long lastId;
     private long clearedThroughId;
     private long generation;
@@ -39,9 +39,10 @@ internal sealed class LogBuffer : IDisposable
     private DateTimeOffset? completedAt;
     private int? exitCode;
 
-    internal LogBuffer(ViewerSettings settings)
+    internal LogBuffer(ViewerSettings settings, LogChangeSignal? changes = null)
     {
         this.settings = settings;
+        this.changes = changes ?? new LogChangeSignal();
         this.applicationName = settings.ApplicationName;
         this.StorageDirectory = Directory.CreateTempSubdirectory(TemporaryDirectoryPrefix).FullName;
         FileStream? journal = null;
@@ -217,7 +218,7 @@ internal sealed class LogBuffer : IDisposable
         lock (this.gate)
         {
             this.EnsureAvailable();
-            return new LogUpdate(this.Status(), this.changed.Task);
+            return new LogUpdate(this.Status(), this.changes.Changed);
         }
     }
 
@@ -236,7 +237,7 @@ internal sealed class LogBuffer : IDisposable
         lock (this.gate)
         {
             history = this.OpenHistoryCore();
-            changed = this.changed.Task;
+            changed = this.changes.Changed;
         }
 
         using (history)
@@ -257,7 +258,7 @@ internal sealed class LogBuffer : IDisposable
             if (this.disposed) return;
             this.disposed = true;
             if (this.settings.Input is not null) this.settings.Input.Changed -= this.InputChanged;
-            this.changed.TrySetResult();
+            this.changes.Pulse();
             try
             {
                 this.journal.Dispose();
@@ -275,8 +276,6 @@ internal sealed class LogBuffer : IDisposable
             }
         }
     }
-
-    private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private static FileStream CreateWriter(string path)
     {
@@ -364,11 +363,14 @@ internal sealed class LogBuffer : IDisposable
         }
     }
 
-    private void Pulse()
+    internal void NotifyChanged()
     {
-        this.revision++;
-        TaskCompletionSource previous = this.changed;
-        this.changed = NewSignal();
-        previous.TrySetResult();
+        lock (this.gate)
+        {
+            this.EnsureAvailable();
+            this.Pulse();
+        }
     }
+
+    private void Pulse() => this.revision = this.changes.Pulse();
 }

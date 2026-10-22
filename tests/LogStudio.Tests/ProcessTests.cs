@@ -28,7 +28,8 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
     private const string Payload = "argument with spaces = quoted value";
     private const int LongRunStepCount = 10_001;
     private static readonly TimeSpan ProcessTimeout = TimeSpan.FromSeconds(20);
-    private static readonly ConcurrentDictionary<int, string> HistoryDirectories = new();
+    private static readonly ConcurrentDictionary<int, ConcurrentDictionary<string, byte>> HistoryDirectories = new();
+    private static readonly ConcurrentDictionary<Uri, int> ViewerProcesses = new();
     private static readonly string[] HistoryFileNames = { "entries.jsonl", "entries.idx" };
 
     [Fact]
@@ -536,7 +537,7 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
     }
 
     [Fact]
-    public async Task ListenAllClearsHistoryOnExplicitSwitchAndDoesNotReconnectAfterTargetExit()
+    public async Task ListenAllRestoresSeparateHistoriesOnExplicitSwitchAndDoesNotReconnectAfterTargetExit()
     {
         using Process target = StartProcess(new[] { DemoPath, "--showcase" });
         using Process listener = StartProcess(WrapperArguments("--listen-all"));
@@ -547,6 +548,8 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
         using ILoggerFactory loggerFactory = LoggerFactory.Create(builder => builder.AddEventSourceLogger());
         ILogger logger = loggerFactory.CreateLogger("ListenAll.SwitchTests");
         string marker = $"history-before-switch-{Guid.NewGuid():N}";
+        string resumed = $"history-after-switch-{Guid.NewGuid():N}";
+        List<string> histories = [];
         try
         {
             await ReadUrlAsync(target);
@@ -554,7 +557,7 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
             Uri url = await ReadUrlAsync(listener);
             error = listener.StandardError.ReadToEndAsync();
             using HttpClient client = new();
-            using CancellationTokenSource timeout = new(ProcessTimeout);
+            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(40));
             JsonElement self;
             JsonElement other;
             using (JsonDocument state = JsonDocument.Parse(await client.GetStringAsync(new Uri(url, "api/applications"), timeout.Token)))
@@ -570,11 +573,21 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
                 Assert.Equal(Environment.ProcessId, selected.RootElement.GetProperty("selected").GetProperty("processId").GetInt32());
             }
 
+            JsonElement original;
+            long firstRevision;
             while (true)
             {
-                logger.LogInformation("{Message}", marker);
+                logger.LogWarning("{Message}", marker);
                 using JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token);
-                if (snapshot.RootElement.GetProperty("entries").EnumerateArray().Any(entry => entry.GetProperty("message").GetString() == marker)) break;
+                JsonElement match = snapshot.RootElement.GetProperty("entries").EnumerateArray()
+                    .FirstOrDefault(entry => entry.GetProperty("message").GetString() == marker);
+                if (match.ValueKind != JsonValueKind.Undefined)
+                {
+                    original = match.Clone();
+                    histories.Add(snapshot.RootElement.GetProperty("status").GetProperty("historyDirectory").GetString()!);
+                    firstRevision = snapshot.RootElement.GetProperty("status").GetProperty("revision").GetInt64();
+                    break;
+                }
                 await Task.Delay(100, timeout.Token);
             }
 
@@ -587,7 +600,44 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
             using (JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token))
             {
                 Assert.Empty(snapshot.RootElement.GetProperty("entries").EnumerateArray());
+                histories.Add(snapshot.RootElement.GetProperty("status").GetProperty("historyDirectory").GetString()!);
+                Assert.NotEqual(histories[0], histories[1]);
+                Assert.True(snapshot.RootElement.GetProperty("status").GetProperty("revision").GetInt64() > firstRevision);
             }
+            JsonElement otherEntry = await CaptureDemoMessageAsync(client, url, target, target.Id, timeout.Token, includeRelated: false);
+            using (JsonDocument selected = await SelectApplicationAsync(client, ApplicationSelection(url, self), timeout.Token))
+            {
+                Assert.Equal(Environment.ProcessId, selected.RootElement.GetProperty("selected").GetProperty("processId").GetInt32());
+            }
+            using (JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token))
+            {
+                Assert.Equal(histories[0], snapshot.RootElement.GetProperty("status").GetProperty("historyDirectory").GetString());
+                JsonElement restored = Assert.Single(snapshot.RootElement.GetProperty("entries").EnumerateArray(),
+                    entry => entry.GetProperty("id").GetInt64() == original.GetProperty("id").GetInt64());
+                Assert.Equal(original.GetRawText(), restored.GetRawText());
+                Assert.DoesNotContain(snapshot.RootElement.GetProperty("entries").EnumerateArray(),
+                    entry => entry.GetProperty("message").GetString() == otherEntry.GetProperty("message").GetString());
+            }
+            while (true)
+            {
+                logger.LogError("{Message}", resumed);
+                using JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token);
+                if (snapshot.RootElement.GetProperty("entries").EnumerateArray().Any(entry => entry.GetProperty("message").GetString() == resumed)) break;
+                await Task.Delay(100, timeout.Token);
+            }
+            using (JsonDocument selected = await SelectApplicationAsync(client, ApplicationSelection(url, other), timeout.Token))
+            {
+                Assert.Equal(target.Id, selected.RootElement.GetProperty("selected").GetProperty("processId").GetInt32());
+            }
+            using (JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token))
+            {
+                Assert.Equal(histories[1], snapshot.RootElement.GetProperty("status").GetProperty("historyDirectory").GetString());
+                Assert.Contains(snapshot.RootElement.GetProperty("entries").EnumerateArray(),
+                    entry => entry.GetRawText() == otherEntry.GetRawText());
+                Assert.DoesNotContain(snapshot.RootElement.GetProperty("entries").EnumerateArray(),
+                    entry => entry.GetProperty("category").GetString() == "ListenAll.SwitchTests");
+            }
+            await CaptureDemoMessageAsync(client, url, target, target.Id, timeout.Token, includeRelated: false);
 
             await target.StandardInput.WriteLineAsync("quit");
             target.StandardInput.Close();
@@ -673,6 +723,27 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
             state = await WaitForApplicationsAsync(client, url, state =>
                 IncludesProcess(state.GetProperty("selected"), second.Id) && !IncludesProcess(state.GetProperty("selected"), first.Id), timeout.Token);
             Assert.Equal(groupId, state.GetProperty("selected").GetProperty("groupId").GetString());
+            await CaptureDemoMessageAsync(client, url, second, second.Id, timeout.Token);
+            JsonElement remaining = Assert.Single(state.GetProperty("selected").GetProperty("processes").EnumerateArray(),
+                process => process.GetProperty("processId").GetInt32() == second.Id);
+            using (JsonDocument selected = await SelectApplicationAsync(client, ApplicationSelection(url, remaining), timeout.Token))
+            {
+                Assert.Equal(second.Id, selected.RootElement.GetProperty("selected").GetProperty("processId").GetInt32());
+            }
+            using (JsonDocument processHistory = await GetSnapshotAsync(client, url, timeout.Token))
+                Assert.Empty(processHistory.RootElement.GetProperty("entries").EnumerateArray());
+            await CaptureDemoMessageAsync(client, url, second, second.Id, timeout.Token, includeRelated: false);
+            using (JsonDocument selected = await SelectApplicationAsync(client, ApplicationSelection(url, remaining, includeRelated: true), timeout.Token))
+            {
+                Assert.Equal(groupId, selected.RootElement.GetProperty("selected").GetProperty("groupId").GetString());
+            }
+            using (JsonDocument groupedHistory = await GetSnapshotAsync(client, url, timeout.Token))
+            {
+                Assert.Contains(groupedHistory.RootElement.GetProperty("entries").EnumerateArray(),
+                    entry => entry.GetRawText() == originalEntry.GetRawText());
+                Assert.All(groupedHistory.RootElement.GetProperty("entries").EnumerateArray(),
+                    entry => Assert.StartsWith("[PID ", entry.GetProperty("message").GetString(), StringComparison.Ordinal));
+            }
             await CaptureDemoMessageAsync(client, url, second, second.Id, timeout.Token);
             await second.StandardInput.WriteLineAsync("quit");
             second.StandardInput.Close();
@@ -1180,7 +1251,7 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
     }
 
     private static async Task<JsonElement> CaptureDemoMessageAsync(HttpClient client, Uri url, Process input,
-        int processId, CancellationToken cancellationToken)
+        int processId, CancellationToken cancellationToken, bool includeRelated = true)
     {
         using JsonDocument before = await GetSnapshotAsync(client, url, cancellationToken);
         long lastId = before.RootElement.GetProperty("status").GetProperty("lastId").GetInt64();
@@ -1190,7 +1261,7 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
             using JsonDocument snapshot = await GetSnapshotAsync(client, url, cancellationToken);
             JsonElement match = snapshot.RootElement.GetProperty("entries").EnumerateArray().FirstOrDefault(entry =>
                 entry.GetProperty("id").GetInt64() > lastId &&
-                entry.GetProperty("message").GetString()!.StartsWith($"[PID {processId}] Checkout ", StringComparison.Ordinal));
+                entry.GetProperty("message").GetString()!.StartsWith(includeRelated ? $"[PID {processId}] Checkout " : "Checkout ", StringComparison.Ordinal));
             if (match.ValueKind != JsonValueKind.Undefined) return match.Clone();
             await Task.Delay(250, cancellationToken);
         }
@@ -1205,8 +1276,13 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
         return JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
     }
 
-    private static async Task<JsonDocument> GetSnapshotAsync(HttpClient client, Uri url, CancellationToken cancellationToken) =>
-        JsonDocument.Parse(await client.GetStringAsync(new Uri(url, ViewerConstants.SnapshotRoute), cancellationToken));
+    private static async Task<JsonDocument> GetSnapshotAsync(HttpClient client, Uri url, CancellationToken cancellationToken)
+    {
+        JsonDocument snapshot = JsonDocument.Parse(await client.GetStringAsync(new Uri(url, ViewerConstants.SnapshotRoute), cancellationToken));
+        if (ViewerProcesses.TryGetValue(url, out int processId))
+            HistoryDirectories.GetOrAdd(processId, _ => new())[snapshot.RootElement.GetProperty("status").GetProperty("historyDirectory").GetString()!] = 0;
+        return snapshot;
+    }
 
     private static Task InterruptAsync(Process process) => SignalAsync(process, "INT");
 
@@ -1281,8 +1357,10 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
                 Uri url = new(line[UrlPrefix.Length..]);
                 using HttpClient client = new();
                 using JsonDocument page = JsonDocument.Parse(await client.GetStringAsync(new Uri(url, ViewerConstants.SearchRoute), timeout.Token));
-                HistoryDirectories[process.Id] = page.RootElement.GetProperty("status").GetProperty("historyDirectory").GetString() ??
+                string directory = page.RootElement.GetProperty("status").GetProperty("historyDirectory").GetString() ??
                     throw new InvalidOperationException("The viewer did not return its temporary history directory.");
+                HistoryDirectories.GetOrAdd(process.Id, _ => new())[directory] = 0;
+                ViewerProcesses[url] = process.Id;
                 return url;
             }
         }
@@ -1302,10 +1380,15 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
         }
 
         await process.WaitForExitAsync().WaitAsync(ProcessTimeout);
-        if (HistoryDirectories.TryRemove(process.Id, out string? directory) && Directory.Exists(directory))
+        foreach (Uri url in ViewerProcesses.Where(pair => pair.Value == process.Id).Select(pair => pair.Key))
+            ViewerProcesses.TryRemove(url, out _);
+        if (HistoryDirectories.TryRemove(process.Id, out ConcurrentDictionary<string, byte>? directories))
         {
-            foreach (string file in HistoryFileNames) File.Delete(Path.Combine(directory, file));
-            Directory.Delete(directory);
+            foreach (string directory in directories.Keys.Where(Directory.Exists))
+            {
+                foreach (string file in HistoryFileNames) File.Delete(Path.Combine(directory, file));
+                Directory.Delete(directory);
+            }
         }
     }
 

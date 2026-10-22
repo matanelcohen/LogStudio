@@ -98,6 +98,20 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
             }
 
             candidate = new Selection(application, includeRelated);
+            lock (this.stateGate)
+            {
+                if (this.selected is Selection active)
+                {
+                    // Reuse shared connections when changing scope instead of overlapping logging sessions.
+                    foreach (Attachment attachment in active.Attachments.Where(attachment => !attachment.Ended &&
+                        application.Processes!.Any(process => process.ProcessId == attachment.Application.ProcessId &&
+                            process.StartedAtTicks == attachment.Application.StartedAtTicks)))
+                    {
+                        candidate.Attachments.Add(attachment);
+                        candidate.Attempted.Add(RunningApplicationGroups.Identity(attachment.Application));
+                    }
+                }
+            }
             await this.AddProcessesAsync(candidate, application, cancellation.Token).ConfigureAwait(false);
             cancellation.Token.ThrowIfCancellationRequested();
             Selection? previous;
@@ -106,6 +120,7 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
                 if (candidate.Attachments.Count == 0)
                     throw this.Fail(candidate.Error ?? "The application's diagnostic connection closed. Select an application to try again.");
                 previous = this.selected;
+                previous?.Attachments.ExceptWith(candidate.Attachments);
                 this.selected = null;
             }
 
@@ -123,9 +138,10 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
                 }
                 else
                 {
-                    // Old callbacks cannot append after this clear, even if their IPC drain timed out.
-                    viewer.ClearLogs();
-                    viewer.RenameSession(application.Name);
+                    // Old callbacks are fenced out even if their IPC drain timed out.
+                    string identity = includeRelated ? "group:" + application.GroupId :
+                        $"process:{application.ProcessId}:{application.StartedAtTicks}";
+                    viewer.SelectApplicationHistory(identity, application.Name);
                     candidate.Attachments.RemoveWhere(attachment => attachment.Ended);
                     candidate.Activated = true;
                     this.selected = candidate;
@@ -284,7 +300,8 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
                 }
                 foreach (RunningApplicationProcess process in application.Processes!)
                     if (selection.Attempted.Contains(RunningApplicationGroups.Identity(process)) &&
-                        !selection.Attachments.Any(attachment => attachment.Application == process))
+                        !selection.Attachments.Any(attachment => attachment.Application.ProcessId == process.ProcessId &&
+                            attachment.Application.StartedAtTicks == process.StartedAtTicks))
                         failures.Add($"PID {process.ProcessId}'s diagnostic connection closed. Retry the app to reconnect.");
                 selection.Error = failures.Count == 0 ? null : string.Join(" ", failures);
             }
@@ -421,6 +438,9 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
         Attachment[] attachments;
         lock (this.stateGate)
         {
+            // A failed scope change may still borrow connections owned by the active selection.
+            if (this.selected is Selection active && active != selection)
+                selection.Attachments.ExceptWith(active.Attachments);
             attachments = selection.Attachments.ToArray();
             selection.Attachments.Clear();
         }

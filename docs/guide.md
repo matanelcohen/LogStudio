@@ -108,8 +108,11 @@ Only new `ILogger` events after selection are captured; earlier events, arbitrar
 `Console.WriteLine` output, and other processes' stdout/stderr are not available.
 Use the normal command wrapper when you need console output.
 
-Switching apps stops the previous listener and replaces the current capture
-history, so export any history you want to keep first. Once all captured processes
+Switching apps stops the previous listener without deleting its logs. Each app
+keeps its own capture history; selecting it again restores its earlier logs and
+continues capturing new events. Only the selected app is captured, so events
+emitted while another app is selected are not collected. Clearing session logs
+affects only the selected app's history. Once all captured processes
 in a group exit, capture stops; a later independent run is not attached automatically.
 Select the app again to start a new capture. Ctrl+C disconnects the viewer
 without stopping the external application. `--listen-all` cannot be combined with
@@ -1071,6 +1074,10 @@ startup-hook viewer ends with its host process; inspect telemetry while that pro
   `status.capacity` is `0` for unlimited history or the configured positive retention limit.
   GET `<session-url>api/events?after=<id>` streams status, entry batches, and replay-gap notices
   using server-sent events, honoring `Last-Event-ID` on reconnect.
+  In `--listen-all` mode, event IDs include the application session identity.
+  Pass the complete event ID in `after` or `Last-Event-ID` to resume the same app.
+  IDs from another app, or legacy numeric-only cursors, replay the selected app's
+  retained history from the beginning rather than skipping unrelated entries.
 - GET `<session-url>api/updates` sends metadata-only SSE updates for the browser.
 - GET `<session-url>api/sessions` lists the current run and saved named/date-stamped runs with
   redacted command details. `sessionId=<id>` selects saved history for search/export/clear;

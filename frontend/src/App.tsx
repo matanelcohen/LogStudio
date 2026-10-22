@@ -59,13 +59,15 @@ export default function App() {
   const chatOpener = useRef<HTMLButtonElement>(null);
   const settingsOpener = useRef<HTMLButtonElement>(null);
   const seenClear = useRef(0);
+  const seenHistory = useRef<string | null>(null);
   const appearance = useAppearance();
   const typography = useTypography();
   const live = useLiveStatus(pause !== null);
   const archived = !!query.sessionId;
+  const historyDirectory = live.status?.listenAll ? live.status.historyDirectory : "";
   const clearedThroughId = archived ? 0 : live.status?.clearedThroughId ?? 0;
-  const history = useLogPage(query, cursor, archived ? null : pause?.maximumId ?? null, archived ? 0 : live.status?.revision ?? 0, archived || pause !== null, clearedThroughId);
-  const status = archived ? history.page?.status ?? null : pause?.status && pause.status.clearedThroughId >= clearedThroughId ?
+  const history = useLogPage(query, cursor, archived ? null : pause?.maximumId ?? null, archived ? 0 : live.status?.revision ?? 0, archived || pause !== null, clearedThroughId, archived ? "" : historyDirectory);
+  const status = archived ? history.page?.status ?? null : pause?.status && pause.status.clearedThroughId >= clearedThroughId && (!historyDirectory || pause.status.historyDirectory === historyDirectory) ?
     { ...pause.status, applicationName: live.status?.applicationName ?? pause.status.applicationName } :
     live.status ?? history.page?.status ?? null;
   const visibleSelection = selected && selected.id > (status?.clearedThroughId ?? 0) ? selected : null;
@@ -78,6 +80,15 @@ export default function App() {
   useEffect(() => {
     if (live.gap) setNotice({ tone: "warning", message: live.gap });
   }, [live.gap]);
+  useEffect(() => {
+    const previous = seenHistory.current;
+    seenHistory.current = historyDirectory || null;
+    if (!previous || previous === historyDirectory || archived) return;
+    seenClear.current = clearedThroughId;
+    setQuery(query => ({ ...defaultQuery(), pageSize: query.pageSize }));
+    setCursor({ before: null, after: null }); setSelected(null); setPause(null); setFollow(true);
+    setChatOpen(false); setClearOpen(false); setNotice(null);
+  }, [historyDirectory, archived]);
   useEffect(() => {
     if (clearedThroughId <= seenClear.current) return;
     seenClear.current = clearedThroughId;
@@ -140,6 +151,7 @@ export default function App() {
     setClearError(null);
     try {
       const result = await clearSessionLogs(query.sessionId);
+      if (!archived && historyDirectory && seenHistory.current !== historyDirectory) return;
       if (!archived) live.applyStatus(result.status);
       setSelected(null);
       setPause(null);
@@ -402,7 +414,7 @@ function RunningApplicationPicker({ onAttached, onListening }: { onAttached(): v
         <strong>PID {process.processId}</strong> · {process.name}<span>{process.path ?? "Path unavailable"}</span>
       </li>)}</ul>
     </details>}
-    <p id="applicationCaptureHelp" className="muted">Apps are grouped by launch or entrypoint path. Selecting an app captures its processes together and follows new members while the group is running. Merged logs include the PID. Captures new .NET ILogger events only, not existing console output. Switching apps replaces the current capture history.</p>
+    <p id="applicationCaptureHelp" className="muted">Apps are grouped by launch or entrypoint path. Selecting an app captures its processes together and follows new members while the group is running. Merged logs include the PID. Captures new .NET ILogger events only, not existing console output. Each app keeps its own history; switching back restores its captured logs. Only the selected app is captured.</p>
     {(selectionError || error || state?.error) && <p className="notice danger" role="alert">{selectionError ?? error ?? state?.error}</p>}
   </section>;
 }

@@ -37,11 +37,8 @@ internal sealed class HttpLogServer : IAsyncDisposable
         "img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; style-src-attr 'unsafe-inline'";
 
     private readonly HttpListener listener;
-    private readonly LogBuffer logs;
+    private readonly Func<ViewerSession> currentSession;
     private readonly TextWriter diagnostics;
-    private readonly Func<LogClearResult> clearLogs;
-    private readonly Func<string, SessionInfo> renameSession;
-    private readonly SessionCatalog sessions;
     private readonly TelemetryRecorder? telemetry;
     private readonly TelemetrySettings initialTelemetrySettings;
     private readonly IRunningApplications? runningApplications;
@@ -60,12 +57,14 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private readonly Task acceptTask;
 
     internal HttpLogServer(ViewerSettings settings, LogBuffer logs, TextWriter diagnostics, Func<LogClearResult> clearLogs, SessionCatalog sessions, Func<string, SessionInfo> renameSession, CopilotCliClient? copilot = null, TelemetryRecorder? telemetry = null, TimeSpan? copilotTimeout = null)
+        : this(settings, () => new ViewerSession(logs, sessions, clearLogs, renameSession), diagnostics, copilot, telemetry, copilotTimeout)
     {
-        this.logs = logs;
+    }
+
+    internal HttpLogServer(ViewerSettings settings, Func<ViewerSession> currentSession, TextWriter diagnostics, CopilotCliClient? copilot = null, TelemetryRecorder? telemetry = null, TimeSpan? copilotTimeout = null)
+    {
+        this.currentSession = currentSession;
         this.diagnostics = diagnostics;
-        this.clearLogs = clearLogs;
-        this.renameSession = renameSession;
-        this.sessions = sessions;
         this.telemetry = telemetry;
         this.runningApplications = settings.RunningApplications;
         this.input = settings.Input;
@@ -204,6 +203,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
 
     private async Task HandleAsync(HttpListenerContext context, CancellationToken cancellationToken)
     {
+        ViewerSession session = this.currentSession();
         HttpListenerRequest request = context.Request;
         HttpListenerResponse response = context.Response;
         this.SetHeaders(response);
@@ -228,7 +228,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
             string route = request.Url.AbsolutePath[1..];
             if (route == "api/input")
             {
-                await this.InputAsync(context, cancellationToken).ConfigureAwait(false);
+                await this.InputAsync(context, session, cancellationToken).ConfigureAwait(false);
                 return;
             }
             if (route == "api/applications")
@@ -248,7 +248,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
             }
             if (route == ViewerConstants.CopilotHistoryRoute)
             {
-                await this.ChatHistoryAsync(context, cancellationToken).ConfigureAwait(false);
+                await this.ChatHistoryAsync(context, session, cancellationToken).ConfigureAwait(false);
                 return;
             }
             if (route is ViewerConstants.CopilotConnectRoute or ViewerConstants.CopilotChatRoute)
@@ -256,7 +256,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
                 if (request.HttpMethod != ViewerConstants.PostMethod)
                     await WriteErrorAsync(response, HttpStatusCode.MethodNotAllowed, "Copilot requires an explicit POST action.", cancellationToken).ConfigureAwait(false);
                 else
-                    await this.ChatAsync(context, route == ViewerConstants.CopilotConnectRoute, cancellationToken).ConfigureAwait(false);
+                    await this.ChatAsync(context, session, route == ViewerConstants.CopilotConnectRoute, cancellationToken).ConfigureAwait(false);
                 return;
             }
             if (route == ViewerConstants.ImportRoute && request.HttpMethod == ViewerConstants.PostMethod)
@@ -280,7 +280,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
                 {
                     SessionInfo result = await SessionTransfer.ImportAsync(request.InputStream,
                         request.QueryString[ViewerConstants.ImportFormatQuery] ?? string.Empty,
-                        request.QueryString[ViewerConstants.ImportNameQuery], this.sessions, cancellationToken).ConfigureAwait(false);
+                        request.QueryString[ViewerConstants.ImportNameQuery], session.Catalog, cancellationToken).ConfigureAwait(false);
                     await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(result, ViewerConstants.JsonOptions),
                         ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
                 }
@@ -313,7 +313,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
                 {
                     if (action == ViewerConstants.DeleteSessionAction)
                     {
-                        this.sessions.Delete(id);
+                        session.Catalog.Delete(id);
                         await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(new { deleted = true }, ViewerConstants.JsonOptions),
                             ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
                     }
@@ -341,7 +341,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
                         {
                             throw new ArgumentException("Session filters must contain all required fields with valid types.", exception);
                         }
-                        SessionInfo updated = this.sessions.SaveFilters(id, filters, this.logs.GetStatus());
+                        SessionInfo updated = session.Catalog.SaveFilters(id, filters, session.Logs.GetStatus());
                         await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(updated, ViewerConstants.JsonOptions),
                             ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
                     }
@@ -364,7 +364,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
                                 !body.RootElement.TryGetProperty(ViewerConstants.SessionNameProperty, out JsonElement name) || name.ValueKind != JsonValueKind.String)
                                 throw new ArgumentException("A session name is required.");
                             string value = name.GetString() ?? string.Empty;
-                            SessionInfo renamed = id == this.sessions.Id ? this.renameSession(value) : this.sessions.Rename(id, value);
+                            SessionInfo renamed = id == session.Catalog.Id ? session.Rename(value) : session.Catalog.Rename(id, value);
                             await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(renamed, ViewerConstants.JsonOptions),
                                 ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
                         }
@@ -389,7 +389,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
                 try
                 {
                     string? selected = request.QueryString[ViewerConstants.SessionIdQuery];
-                    LogClearResult result = string.IsNullOrEmpty(selected) || selected == this.sessions.Id ? this.clearLogs() : this.sessions.Clear(selected);
+                    LogClearResult result = string.IsNullOrEmpty(selected) || selected == session.Catalog.Id ? session.Clear() : session.Catalog.Clear(selected);
                     byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(result, ViewerConstants.JsonOptions);
                     await WriteBytesAsync(response, bytes, ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
                 }
@@ -437,16 +437,16 @@ internal sealed class HttpLogServer : IAsyncDisposable
             }
             else if (route == ViewerConstants.SessionsRoute)
             {
-                byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(this.sessions.List(this.logs.GetStatus()), ViewerConstants.JsonOptions);
+                byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(session.Catalog.List(session.Logs.GetStatus()), ViewerConstants.JsonOptions);
                 await WriteBytesAsync(response, bytes, ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
             }
             else if (route == ViewerConstants.SnapshotRoute)
             {
-                await this.ReadHistoryAsync(context, route, cancellationToken).ConfigureAwait(false);
+                await this.ReadHistoryAsync(context, session, route, cancellationToken).ConfigureAwait(false);
             }
             else if (route == ViewerConstants.SearchRoute || route == ViewerConstants.ExportRoute || route == ViewerConstants.BundleExportRoute)
             {
-                await this.ReadHistoryAsync(context, route, cancellationToken).ConfigureAwait(false);
+                await this.ReadHistoryAsync(context, session, route, cancellationToken).ConfigureAwait(false);
             }
             else if (this.assets.TryGetValue(route == RootRoute ? ViewerConstants.IndexFile : route, out Asset? asset))
             {
@@ -496,7 +496,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
         }
     }
 
-    private async Task InputAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    private async Task InputAsync(HttpListenerContext context, ViewerSession session, CancellationToken cancellationToken)
     {
         HttpListenerRequest request = context.Request;
         HttpListenerResponse response = context.Response;
@@ -519,7 +519,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
             await WriteErrorAsync(response, HttpStatusCode.UnsupportedMediaType, "Input requires application/json encoded as UTF-8.", cancellationToken).ConfigureAwait(false);
             return;
         }
-        if (this.input?.CanWrite != true || this.logs.GetStatus().IsCompleted)
+        if (this.input?.CanWrite != true || session.Logs.GetStatus().IsCompleted)
         {
             await WriteErrorAsync(response, HttpStatusCode.Conflict, "Standard input is unavailable or the wrapped process has finished.", cancellationToken).ConfigureAwait(false);
             return;
@@ -849,7 +849,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
         finally { this.copilotSlot.Release(); }
     }
 
-    private async Task ChatHistoryAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    private async Task ChatHistoryAsync(HttpListenerContext context, ViewerSession session, CancellationToken cancellationToken)
     {
         HttpListenerRequest request = context.Request;
         HttpListenerResponse response = context.Response;
@@ -872,8 +872,8 @@ internal sealed class HttpLogServer : IAsyncDisposable
         try
         {
             string? selected = request.QueryString[ViewerConstants.SessionIdQuery];
-            if (clear) this.sessions.ClearChatHistory(selected);
-            await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(this.sessions.ReadChatHistory(selected), ViewerConstants.JsonOptions),
+            if (clear) session.Catalog.ClearChatHistory(selected);
+            await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(session.Catalog.ReadChatHistory(selected), ViewerConstants.JsonOptions),
                 ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is UnauthorizedAccessException ||
@@ -888,7 +888,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
         }
     }
 
-    private async Task ChatAsync(HttpListenerContext context, bool connect, CancellationToken cancellationToken)
+    private async Task ChatAsync(HttpListenerContext context, ViewerSession session, bool connect, CancellationToken cancellationToken)
     {
         HttpListenerRequest request = context.Request;
         HttpListenerResponse response = context.Response;
@@ -931,7 +931,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
             this.copilot.ValidateOptions(chat);
             ChatContext snapshot;
             string? selected = request.QueryString[ViewerConstants.SessionIdQuery];
-            using (LogHistoryReader history = string.IsNullOrEmpty(selected) || selected == this.sessions.Id ? this.logs.OpenHistory() : this.sessions.Open(selected))
+            using (LogHistoryReader history = string.IsNullOrEmpty(selected) || selected == session.Catalog.Id ? session.Logs.OpenHistory() : session.Catalog.Open(selected))
                 snapshot = CopilotChat.BuildContext(chat, history, cancellationToken);
             ChatResponse result;
             using (snapshot)
@@ -949,7 +949,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
                         {
                             result = await this.copilot.AskAsync(snapshot, streamDeadline.Token, chat,
                                 content => WriteChatEventAsync(response, new { content }, streamDeadline.Token)).ConfigureAwait(false);
-                            this.sessions.AppendChat(selected, chat.Question, result.Answer);
+                            session.Catalog.AppendChat(selected, chat.Question, result.Answer);
                             await WriteChatEventAsync(response, result, streamDeadline.Token).ConfigureAwait(false);
                         }
                         catch (CopilotException exception)
@@ -969,7 +969,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
                     return;
                 }
                 result = await this.copilot.AskAsync(snapshot, cancellationToken, chat).ConfigureAwait(false);
-                this.sessions.AppendChat(selected, chat.Question, result.Answer);
+                session.Catalog.AppendChat(selected, chat.Question, result.Answer);
             }
             await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(result, ViewerConstants.JsonOptions),
                 ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
@@ -1004,7 +1004,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
         await response.OutputStream.FlushAsync(cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task ReadHistoryAsync(HttpListenerContext context, string route, CancellationToken cancellationToken)
+    private async Task ReadHistoryAsync(HttpListenerContext context, ViewerSession session, string route, CancellationToken cancellationToken)
     {
         LogQuery query;
         try
@@ -1027,7 +1027,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
         try
         {
             string? selected = context.Request.QueryString[ViewerConstants.SessionIdQuery];
-            using LogHistoryReader history = string.IsNullOrEmpty(selected) || selected == this.sessions.Id ? this.logs.OpenHistory() : this.sessions.Open(selected);
+            using LogHistoryReader history = string.IsNullOrEmpty(selected) || selected == session.Catalog.Id ? session.Logs.OpenHistory() : session.Catalog.Open(selected);
             HttpListenerResponse response = context.Response;
             if (route == ViewerConstants.SearchRoute)
             {
@@ -1044,7 +1044,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
             {
                 response.ContentType = ViewerConstants.ZipContentType;
                 response.Headers[ViewerConstants.ContentDispositionHeader] = $"attachment; filename=\"log-studio-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.logstudio.zip\"";
-                SessionInfo information = this.sessions.Information(selected, history.Status) with { EntryCount = history.Status.RetainedCount };
+                SessionInfo information = session.Catalog.Information(selected, history.Status) with { EntryCount = history.Status.RetainedCount };
                 await SessionTransfer.ExportAsync(response.OutputStream, history, information, cancellationToken).ConfigureAwait(false);
             }
             else if (route == ViewerConstants.ExportRoute)
@@ -1121,20 +1121,27 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private async Task StreamAsync(HttpListenerContext context, CancellationToken cancellationToken, bool updatesOnly)
     {
         HttpListenerResponse response = context.Response;
+        ViewerSession initial = this.currentSession();
+        ViewerStatus initialStatus = initial.Logs.GetStatus();
+        string? catalogId = initialStatus.ListenAll ? initial.Catalog.Id : null;
         string? afterValue = context.Request.QueryString[ViewerConstants.AfterQuery];
         string? lastEventId = context.Request.Headers[ViewerConstants.LastEventIdHeader];
-        if (!TryReadCursor(afterValue, out long after) || !TryReadCursor(lastEventId, out long lastId))
+        if (!TryReadCursor(afterValue, catalogId, out long after) || !TryReadCursor(lastEventId, catalogId, out long lastId))
         {
-            await WriteErrorAsync(response, HttpStatusCode.BadRequest, "after and Last-Event-ID must be non-negative integers.", cancellationToken).ConfigureAwait(false);
+            string message = initialStatus.ListenAll
+                ? "after and Last-Event-ID must be session replay tokens (<session GUID>:<non-negative entry ID>) or non-negative integers."
+                : "after and Last-Event-ID must be non-negative integers.";
+            await WriteErrorAsync(response, HttpStatusCode.BadRequest, message, cancellationToken).ConfigureAwait(false);
             return;
         }
 
         long cursor = Math.Max(after, lastId);
-        if (cursor > this.logs.GetStatus().LastId)
+        if (cursor > initialStatus.LastId && !initialStatus.ListenAll)
         {
             await WriteErrorAsync(response, HttpStatusCode.BadRequest, "The replay cursor is ahead of this session.", cancellationToken).ConfigureAwait(false);
             return;
         }
+        if (cursor > initialStatus.LastId) cursor = 0;
 
         if (!this.streamSlots.Wait(0))
         {
@@ -1151,10 +1158,19 @@ internal sealed class HttpLogServer : IAsyncDisposable
             using StreamWriter writer = new(response.OutputStream, new UTF8Encoding(false), leaveOpen: true);
             writer.NewLine = LineEnding;
             long revision = -1;
+            string historyDirectory = initialStatus.HistoryDirectory;
             while (!cancellationToken.IsCancellationRequested)
             {
-                LogUpdate update = this.logs.GetUpdate();
-                LogBatch? batch = updatesOnly ? null : this.logs.ReadAfter(cursor);
+                ViewerSession session = this.currentSession();
+                if (session.Logs.StorageDirectory != historyDirectory)
+                {
+                    historyDirectory = session.Logs.StorageDirectory;
+                    cursor = 0;
+                    revision = -1;
+                }
+                LogUpdate update = session.Logs.GetUpdate();
+                LogBatch? batch = updatesOnly ? null : session.Logs.ReadAfter(cursor);
+                if (session.Logs != this.currentSession().Logs) continue;
                 ViewerStatus status = batch?.Status ?? update.Status;
                 if (cursor > 0 && batch?.MissedCount > 0)
                 {
@@ -1175,7 +1191,9 @@ internal sealed class HttpLogServer : IAsyncDisposable
                 if (batch?.Entries.Length > 0)
                 {
                     cursor = batch.Entries[^1].Id;
-                    await SendEventAsync(writer, ViewerConstants.BatchEvent, batch.Entries, cursor, cancellationToken).ConfigureAwait(false);
+                    string eventId = cursor.ToString(CultureInfo.InvariantCulture);
+                    if (status.ListenAll) eventId = $"{session.Catalog.Id}:{eventId}";
+                    await SendEventAsync(writer, ViewerConstants.BatchEvent, batch.Entries, eventId, cancellationToken).ConfigureAwait(false);
                 }
 
                 await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -1201,17 +1219,29 @@ internal sealed class HttpLogServer : IAsyncDisposable
         }
     }
 
-    private static bool TryReadCursor(string? value, out long cursor)
+    private static bool TryReadCursor(string? value, string? catalogId, out long cursor)
     {
         cursor = 0;
-        return value is null || long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out cursor);
+        if (catalogId is null)
+            return value is null || long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out cursor);
+        if (value is null) return true;
+
+        int separator = value.IndexOf(':');
+        // Numeric listen-all cursors cannot identify the application history they came from.
+        if (separator < 0) return long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out _);
+        if (separator != 32 || !Guid.TryParseExact(value.AsSpan(0, separator), "N", out _) ||
+            !long.TryParse(value.AsSpan(separator + 1), NumberStyles.None, CultureInfo.InvariantCulture, out long entryId))
+            return false;
+
+        if (value.AsSpan(0, separator).Equals(catalogId.AsSpan(), StringComparison.OrdinalIgnoreCase)) cursor = entryId;
+        return true;
     }
 
-    private static async Task SendEventAsync<T>(StreamWriter writer, string eventName, T value, long? id, CancellationToken cancellationToken)
+    private static async Task SendEventAsync<T>(StreamWriter writer, string eventName, T value, string? id, CancellationToken cancellationToken)
     {
-        if (id.HasValue)
+        if (id is not null)
         {
-            await writer.WriteAsync($"{IdPrefix}{id.Value.ToString(CultureInfo.InvariantCulture)}{LineEnding}".AsMemory(), cancellationToken).ConfigureAwait(false);
+            await writer.WriteAsync($"{IdPrefix}{id}{LineEnding}".AsMemory(), cancellationToken).ConfigureAwait(false);
         }
 
         string data = JsonSerializer.Serialize(value, ViewerConstants.JsonOptions);
