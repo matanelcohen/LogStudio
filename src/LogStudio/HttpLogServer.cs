@@ -1117,17 +1117,21 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private async Task StreamAsync(HttpListenerContext context, CancellationToken cancellationToken, bool updatesOnly)
     {
         HttpListenerResponse response = context.Response;
+        ViewerSession initial = this.currentSession();
+        ViewerStatus initialStatus = initial.Logs.GetStatus();
+        string? catalogId = initialStatus.ListenAll ? initial.Catalog.Id : null;
         string? afterValue = context.Request.QueryString[ViewerConstants.AfterQuery];
         string? lastEventId = context.Request.Headers[ViewerConstants.LastEventIdHeader];
-        if (!TryReadCursor(afterValue, out long after) || !TryReadCursor(lastEventId, out long lastId))
+        if (!TryReadCursor(afterValue, catalogId, out long after) || !TryReadCursor(lastEventId, catalogId, out long lastId))
         {
-            await WriteErrorAsync(response, HttpStatusCode.BadRequest, "after and Last-Event-ID must be non-negative integers.", cancellationToken).ConfigureAwait(false);
+            string message = initialStatus.ListenAll
+                ? "after and Last-Event-ID must be session replay tokens (<session GUID>:<non-negative entry ID>) or non-negative integers."
+                : "after and Last-Event-ID must be non-negative integers.";
+            await WriteErrorAsync(response, HttpStatusCode.BadRequest, message, cancellationToken).ConfigureAwait(false);
             return;
         }
 
         long cursor = Math.Max(after, lastId);
-        ViewerSession initial = this.currentSession();
-        ViewerStatus initialStatus = initial.Logs.GetStatus();
         if (cursor > initialStatus.LastId && !initialStatus.ListenAll)
         {
             await WriteErrorAsync(response, HttpStatusCode.BadRequest, "The replay cursor is ahead of this session.", cancellationToken).ConfigureAwait(false);
@@ -1183,7 +1187,9 @@ internal sealed class HttpLogServer : IAsyncDisposable
                 if (batch?.Entries.Length > 0)
                 {
                     cursor = batch.Entries[^1].Id;
-                    await SendEventAsync(writer, ViewerConstants.BatchEvent, batch.Entries, cursor, cancellationToken).ConfigureAwait(false);
+                    string eventId = cursor.ToString(CultureInfo.InvariantCulture);
+                    if (status.ListenAll) eventId = $"{session.Catalog.Id}:{eventId}";
+                    await SendEventAsync(writer, ViewerConstants.BatchEvent, batch.Entries, eventId, cancellationToken).ConfigureAwait(false);
                 }
 
                 await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -1209,17 +1215,29 @@ internal sealed class HttpLogServer : IAsyncDisposable
         }
     }
 
-    private static bool TryReadCursor(string? value, out long cursor)
+    private static bool TryReadCursor(string? value, string? catalogId, out long cursor)
     {
         cursor = 0;
-        return value is null || long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out cursor);
+        if (catalogId is null)
+            return value is null || long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out cursor);
+        if (value is null) return true;
+
+        int separator = value.IndexOf(':');
+        // Numeric listen-all cursors cannot identify the application history they came from.
+        if (separator < 0) return long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out _);
+        if (separator != 32 || !Guid.TryParseExact(value.AsSpan(0, separator), "N", out _) ||
+            !long.TryParse(value.AsSpan(separator + 1), NumberStyles.None, CultureInfo.InvariantCulture, out long entryId))
+            return false;
+
+        if (value.AsSpan(0, separator).Equals(catalogId.AsSpan(), StringComparison.OrdinalIgnoreCase)) cursor = entryId;
+        return true;
     }
 
-    private static async Task SendEventAsync<T>(StreamWriter writer, string eventName, T value, long? id, CancellationToken cancellationToken)
+    private static async Task SendEventAsync<T>(StreamWriter writer, string eventName, T value, string? id, CancellationToken cancellationToken)
     {
-        if (id.HasValue)
+        if (id is not null)
         {
-            await writer.WriteAsync($"{IdPrefix}{id.Value.ToString(CultureInfo.InvariantCulture)}{LineEnding}".AsMemory(), cancellationToken).ConfigureAwait(false);
+            await writer.WriteAsync($"{IdPrefix}{id}{LineEnding}".AsMemory(), cancellationToken).ConfigureAwait(false);
         }
 
         string data = JsonSerializer.Serialize(value, ViewerConstants.JsonOptions);

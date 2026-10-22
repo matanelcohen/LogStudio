@@ -207,6 +207,104 @@ public sealed class ApplicationHistoryTests
         Assert.Equal("B first", Assert.Single(batch.EnumerateArray()).GetProperty("message").GetString());
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ListenAllReconnectReplaysAnotherApplicationEvenWhenItsLastIdIsHigher(bool header, bool legacy)
+    {
+        using ConsoleLogViewer viewer = StartViewer();
+        viewer.SelectApplicationHistory("process:1:10", "App A");
+        for (int index = 1; index <= 50; index++) viewer.Record($"A {index}");
+        using HttpClient client = new() { Timeout = Timeout.InfiniteTimeSpan };
+        SessionInfo firstSession = await CurrentSessionAsync(client, viewer);
+        string cursor;
+        using (HttpResponseMessage initial = await client.GetAsync(new Uri(viewer.Url, ViewerConstants.EventsRoute), HttpCompletionOption.ResponseHeadersRead))
+        using (StreamReader reader = new(await initial.Content.ReadAsStreamAsync()))
+        {
+            (string? id, JsonElement batch) = await ReadEventWithIdAsync(reader, ViewerConstants.BatchEvent);
+            Assert.Equal(50, batch.GetArrayLength());
+            Assert.Equal($"{firstSession.Id}:50", id);
+            cursor = legacy ? "50" : id!;
+        }
+
+        viewer.SelectApplicationHistory("process:2:20", "App B");
+        for (int index = 1; index <= 100; index++) viewer.Record($"B {index}");
+        SessionInfo secondSession = await CurrentSessionAsync(client, viewer);
+        using HttpRequestMessage request = new(HttpMethod.Get, new Uri(viewer.Url,
+            ViewerConstants.EventsRoute + (header ? "" : "?after=" + Uri.EscapeDataString(cursor))));
+        if (header) request.Headers.Add(ViewerConstants.LastEventIdHeader, cursor);
+        using HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using StreamReader resumed = new(await response.Content.ReadAsStreamAsync());
+        (string? eventId, JsonElement replay) = await ReadEventWithIdAsync(resumed, ViewerConstants.BatchEvent);
+        Assert.Equal(Enumerable.Range(1, 100).Select(index => $"B {index}"),
+            replay.EnumerateArray().Select(entry => entry.GetProperty("message").GetString()));
+        Assert.Equal($"{secondSession.Id}:100", eventId);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ListenAllReconnectResumesTheSameApplicationWithoutDuplicates(bool header)
+    {
+        using ConsoleLogViewer viewer = StartViewer();
+        viewer.SelectApplicationHistory("process:1:10", "App A");
+        viewer.Record("A first");
+        viewer.Record("A second");
+        using HttpClient client = new() { Timeout = Timeout.InfiniteTimeSpan };
+        SessionInfo session = await CurrentSessionAsync(client, viewer);
+        string cursor;
+        using (HttpResponseMessage initial = await client.GetAsync(new Uri(viewer.Url, ViewerConstants.EventsRoute), HttpCompletionOption.ResponseHeadersRead))
+        using (StreamReader reader = new(await initial.Content.ReadAsStreamAsync()))
+        {
+            (string? id, JsonElement batch) = await ReadEventWithIdAsync(reader, ViewerConstants.BatchEvent);
+            Assert.Equal(2, batch.GetArrayLength());
+            Assert.Equal($"{session.Id}:2", id);
+            cursor = id!;
+        }
+
+        viewer.SelectApplicationHistory("process:2:20", "App B");
+        viewer.Record("B first");
+        viewer.SelectApplicationHistory("process:1:10", "App A");
+        viewer.Record("A resumed");
+        using HttpRequestMessage request = new(HttpMethod.Get, new Uri(viewer.Url,
+            ViewerConstants.EventsRoute + (header ? "" : "?after=" + Uri.EscapeDataString(cursor))));
+        if (header) request.Headers.Add(ViewerConstants.LastEventIdHeader, cursor);
+        using HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using StreamReader resumed = new(await response.Content.ReadAsStreamAsync());
+        (string? eventId, JsonElement replay) = await ReadEventWithIdAsync(resumed, ViewerConstants.BatchEvent);
+        Assert.Equal("A resumed", Assert.Single(replay.EnumerateArray()).GetProperty("message").GetString());
+        Assert.Equal($"{session.Id}:3", eventId);
+    }
+
+    [Theory]
+    [InlineData("-1")]
+    [InlineData("hello")]
+    [InlineData("9223372036854775808")]
+    [InlineData("invalid:1")]
+    [InlineData("00000000000000000000000000000000:-1")]
+    [InlineData("00000000000000000000000000000000:")]
+    [InlineData("00000000000000000000000000000000:9223372036854775808")]
+    [InlineData("00000000000000000000000000000000:1:2")]
+    public async Task ListenAllReconnectRejectsInvalidCursorsInHeadersAndQueries(string cursor)
+    {
+        using ConsoleLogViewer viewer = StartViewer();
+        using HttpClient client = new();
+        foreach (bool header in new[] { false, true })
+        {
+            using HttpRequestMessage request = new(HttpMethod.Get, new Uri(viewer.Url,
+                ViewerConstants.EventsRoute + (header ? "" : "?after=" + Uri.EscapeDataString(cursor))));
+            if (header) request.Headers.Add(ViewerConstants.LastEventIdHeader, cursor);
+            using HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            using JsonDocument error = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Contains("session replay tokens", error.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public async Task BundleExportsCaptureOneApplicationContextForMetadataAndLogs()
     {
@@ -249,26 +347,32 @@ public sealed class ApplicationHistoryTests
     private static async Task<LogSearchResult> SearchAsync(HttpClient client, ConsoleLogViewer viewer, string query = "") =>
         JsonSerializer.Deserialize<LogSearchResult>(await client.GetStringAsync(new Uri(viewer.Url, ViewerConstants.SearchRoute + query)), ViewerConstants.JsonOptions)!;
 
-    private static async Task<JsonElement> ReadEventAsync(StreamReader reader, string expected)
+    private static async Task<JsonElement> ReadEventAsync(StreamReader reader, string expected) =>
+        (await ReadEventWithIdAsync(reader, expected)).Data;
+
+    private static async Task<(string? Id, JsonElement Data)> ReadEventWithIdAsync(StreamReader reader, string expected)
     {
         using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
         string? type = null;
         string? data = null;
+        string? id = null;
         while (true)
         {
             string? line = await reader.ReadLineAsync(timeout.Token);
             Assert.NotNull(line);
             if (line.StartsWith("event: ", StringComparison.Ordinal)) type = line[7..];
             else if (line.StartsWith("data: ", StringComparison.Ordinal)) data = line[6..];
+            else if (line.StartsWith("id: ", StringComparison.Ordinal)) id = line[4..];
             else if (line.Length == 0)
             {
                 if (type == expected && data is not null)
                 {
                     using JsonDocument document = JsonDocument.Parse(data);
-                    return document.RootElement.Clone();
+                    return (id, document.RootElement.Clone());
                 }
                 type = null;
                 data = null;
+                id = null;
             }
         }
     }

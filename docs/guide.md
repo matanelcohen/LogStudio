@@ -1058,6 +1058,10 @@ startup-hook viewer ends with its host process; inspect telemetry while that pro
   `status.capacity` is `0` for unlimited history or the configured positive retention limit.
   GET `<session-url>api/events?after=<id>` streams status, entry batches, and replay-gap notices
   using server-sent events, honoring `Last-Event-ID` on reconnect.
+  In `--listen-all` mode, event IDs include the application session identity.
+  Pass the complete event ID in `after` or `Last-Event-ID` to resume the same app.
+  IDs from another app, or legacy numeric-only cursors, replay the selected app's
+  retained history from the beginning rather than skipping unrelated entries.
 - GET `<session-url>api/updates` sends metadata-only SSE updates for the browser.
 - GET `<session-url>api/sessions` lists the current run and saved named/date-stamped runs with
   redacted command details. `sessionId=<id>` selects saved history for search/export/clear;
