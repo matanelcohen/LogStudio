@@ -18,7 +18,7 @@ public sealed class ProcessInputTests
     {
         using MemoryStream pipe = new();
         using ProcessInput input = new();
-        input.Attach(pipe, () => true);
+        input.Attach(pipe);
         await using ConsoleLogViewer viewer = StartViewer(input);
         using HttpClient client = new();
         string[] lines = { "", " \t ", "日本語 café 🙂", new('x', ProcessInput.MaximumTextLength) };
@@ -33,6 +33,55 @@ public sealed class ProcessInputTests
         Assert.Equal(Encoding.UTF8.GetBytes(string.Join(Environment.NewLine, lines) + Environment.NewLine), pipe.ToArray());
         Assert.Empty(viewer.GetLogs());
         Assert.Empty(File.ReadAllText(Path.Combine(viewer.HistoryDirectory, "entries.jsonl")));
+    }
+
+    [Theory]
+    [InlineData(28591, "café £")]
+    [InlineData(20127, "ASCII \t input")]
+    [InlineData(65001, "日本語 café 🙂")]
+    [InlineData(1200, "日本語 café 🙂")]
+    public async Task BrowserLinesUseTheAttachedEncodingWithoutBomOrChangingRawTerminalBytes(int codePage, string text)
+    {
+        using MemoryStream pipe = new();
+        using ProcessInput input = new();
+        Encoding encoding = Encoding.GetEncoding(codePage);
+        input.Attach(pipe, encoding);
+        byte[] raw = { 0xff, 0, 0x80, 13, 10 };
+        await input.WriteAsync(raw, CancellationToken.None);
+        await using ConsoleLogViewer viewer = StartViewer(input);
+        using HttpClient client = new();
+        using HttpRequestMessage request = InputRequest(viewer.Url, JsonSerializer.Serialize(new { text }));
+        using HttpResponseMessage response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using MemoryStream expected = new();
+        expected.Write(raw);
+        expected.Write(encoding.GetBytes(text + Environment.NewLine));
+        Assert.Equal(expected.ToArray(), pipe.ToArray());
+    }
+
+    [Theory]
+    [InlineData(28591, "private-input日本語🙂")]
+    [InlineData(20127, "private-inputcafé")]
+    public async Task UnrepresentableInputIsRejectedBeforeWritingWithoutEchoOrClosingStdin(int codePage, string text)
+    {
+        using MemoryStream pipe = new();
+        using ProcessInput input = new();
+        Encoding encoding = (Encoding)Encoding.GetEncoding(codePage).Clone();
+        input.Attach(pipe, encoding);
+        encoding.EncoderFallback = new EncoderReplacementFallback("replacement");
+        await using ConsoleLogViewer viewer = StartViewer(input);
+        using HttpClient client = new();
+        using HttpRequestMessage request = InputRequest(viewer.Url, JsonSerializer.Serialize(new { text }));
+        using HttpResponseMessage response = await client.SendAsync(request);
+        await AssertErrorAsync(response, HttpStatusCode.BadRequest);
+        string error = await response.Content.ReadAsStringAsync();
+        Assert.Contains("standard input encoding", error, StringComparison.Ordinal);
+        Assert.Empty(pipe.ToArray());
+        Assert.True(input.CanWrite);
+        using HttpRequestMessage retry = InputRequest(viewer.Url, "{\"text\":\"safe\"}");
+        using HttpResponseMessage accepted = await client.SendAsync(retry);
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        Assert.Equal(Encoding.ASCII.GetBytes("safe" + Environment.NewLine), pipe.ToArray());
     }
 
     [Theory]
@@ -56,7 +105,7 @@ public sealed class ProcessInputTests
     {
         using MemoryStream pipe = new();
         using ProcessInput input = new();
-        input.Attach(pipe, () => true);
+        input.Attach(pipe);
         await using ConsoleLogViewer viewer = StartViewer(input);
         using HttpClient client = new();
         using HttpRequestMessage request = InputRequest(viewer.Url, json);
@@ -71,7 +120,7 @@ public sealed class ProcessInputTests
     {
         using MemoryStream pipe = new();
         using ProcessInput input = new();
-        input.Attach(pipe, () => true);
+        input.Attach(pipe);
         await using ConsoleLogViewer viewer = StartViewer(input);
         using HttpClient client = new();
         foreach ((string route, string? action, string? origin, HttpMethod method, string contentType, HttpStatusCode expected) in new[]
@@ -105,7 +154,7 @@ public sealed class ProcessInputTests
     {
         using MemoryStream pipe = new();
         using ProcessInput input = new();
-        input.Attach(pipe, () => true);
+        input.Attach(pipe);
         await using ConsoleLogViewer viewer = StartViewer(input);
         using HttpClient client = new();
         using (HttpRequestMessage request = InputRequest(viewer.Url, JsonSerializer.Serialize(new { text = new string('x', 4097) })))
@@ -128,7 +177,7 @@ public sealed class ProcessInputTests
     }
 
     [Fact]
-    public async Task ClosedExitedCompletedAndUnsupportedInputRemainUnavailable()
+    public async Task ClosedCompletedUnsupportedAndFailedPipeInputRemainUnavailable()
     {
         using HttpClient client = new();
         await using (ConsoleLogViewer unsupported = StartViewer())
@@ -138,22 +187,21 @@ public sealed class ProcessInputTests
             using HttpResponseMessage response = await client.SendAsync(request);
             await AssertErrorAsync(response, HttpStatusCode.Conflict);
         }
-        foreach (string state in new[] { "closed", "exited", "completed", "disposed-stream" })
+        foreach (string state in new[] { "closed", "completed", "disposed-stream" })
         {
             using MemoryStream pipe = new();
             using ProcessInput input = new();
-            bool running = true;
-            input.Attach(pipe, () => running);
+            input.Attach(pipe);
             await using ConsoleLogViewer viewer = StartViewer(input);
             Assert.True(await CanWriteAsync(client, viewer.Url));
             if (state == "closed") input.Close();
-            if (state == "exited") running = false;
             if (state == "completed") viewer.Complete();
             if (state == "disposed-stream") pipe.Dispose();
-            Assert.False(await CanWriteAsync(client, viewer.Url));
+            if (state != "disposed-stream") Assert.False(await CanWriteAsync(client, viewer.Url));
             using HttpRequestMessage request = InputRequest(viewer.Url);
             using HttpResponseMessage response = await client.SendAsync(request);
             await AssertErrorAsync(response, HttpStatusCode.Conflict);
+            Assert.False(await CanWriteAsync(client, viewer.Url));
             Assert.Empty(pipe.ToArray());
         }
     }
@@ -169,7 +217,7 @@ public sealed class ProcessInputTests
         using StreamReader reader = new(await response.Content.ReadAsStreamAsync());
         JsonElement initial = await ReadStatusAsync(reader);
         Assert.False(initial.GetProperty("canWriteInput").GetBoolean());
-        input.Attach(pipe, () => true);
+        input.Attach(pipe);
         JsonElement attached = await ReadStatusAsync(reader);
         Assert.True(attached.GetProperty("canWriteInput").GetBoolean());
         Assert.True(attached.GetProperty("revision").GetInt64() > initial.GetProperty("revision").GetInt64());
@@ -178,11 +226,38 @@ public sealed class ProcessInputTests
     }
 
     [Fact]
+    public async Task StatusDoesNotProbeExitCallbacksAndConcurrentExitNotificationsDoNotDeadlock()
+    {
+        using ExitNotifyingStream pipe = new();
+        using ProcessInput input = new();
+        input.Attach(pipe);
+        ViewerSettings settings = new ConsoleLogViewerOptions { CaptureConsole = false, Input = input }.Validate();
+        using LogBuffer logs = new(settings);
+        input.Changed += () =>
+        {
+            ViewerStatus status = Task.Run(logs.GetStatus).WaitAsync(TimeSpan.FromSeconds(3)).GetAwaiter().GetResult();
+            Assert.False(status.CanWriteInput);
+        };
+        pipe.AvailabilityRead = input.Close;
+        await input.WriteAsync(new byte[] { 1 }, CancellationToken.None);
+        Assert.True(logs.GetStatus().CanWriteInput);
+        Assert.Equal(0, pipe.AvailabilityReads);
+        Task statusReads = Task.Run(() =>
+        {
+            for (int index = 0; index < 10000; index++) logs.GetStatus();
+        });
+        Task exitNotification = Task.Run(input.Close);
+        await Task.WhenAll(statusReads, exitNotification).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(logs.GetStatus().CanWriteInput);
+        Assert.Equal(0, pipe.AvailabilityReads);
+    }
+
+    [Fact]
     public async Task BlockedInputTimesOutAndRejectsConcurrentHttpRequestsWithoutHangingShutdown()
     {
         using BlockingStream pipe = new();
         using ProcessInput input = new(TimeSpan.FromMilliseconds(300));
-        input.Attach(pipe, () => true);
+        input.Attach(pipe);
         await using ConsoleLogViewer viewer = StartViewer(input);
         using HttpClient client = new();
         using HttpRequestMessage first = InputRequest(viewer.Url);
@@ -202,7 +277,7 @@ public sealed class ProcessInputTests
     {
         using SlowStream pipe = new();
         using ProcessInput input = new();
-        input.Attach(pipe, () => true);
+        input.Attach(pipe);
         byte[] raw = { 0, 255, 13, 10, 1, 2, 3 };
         Task terminal = input.WriteAsync(raw, CancellationToken.None);
         Task browser = input.SendLineAsync("🙂", CancellationToken.None);
@@ -220,7 +295,7 @@ public sealed class ProcessInputTests
         using AnonymousPipeServerStream pipe = new(PipeDirection.Out);
         using AnonymousPipeClientStream reader = new(PipeDirection.In, pipe.GetClientHandleAsString());
         using ProcessInput input = new(TimeSpan.FromMilliseconds(150));
-        input.Attach(pipe, () => true);
+        input.Attach(pipe);
         Task fill = Task.Run(async () =>
         {
             while (true) await input.SendLineAsync(new string('x', 4096), CancellationToken.None);
@@ -234,7 +309,7 @@ public sealed class ProcessInputTests
     {
         using BlockingStream pipe = new();
         using ProcessInput input = new();
-        input.Attach(pipe, () => true);
+        input.Attach(pipe);
         ConsoleLogViewer viewer = StartViewer(input);
         using HttpClient client = new();
         using HttpRequestMessage request = InputRequest(viewer.Url);
@@ -251,7 +326,7 @@ public sealed class ProcessInputTests
         string directory = Path.Combine(Environment.CurrentDirectory, ".input-sessions-" + Guid.NewGuid().ToString("N"));
         using MemoryStream pipe = new();
         using ProcessInput input = new();
-        input.Attach(pipe, () => true);
+        input.Attach(pipe);
         ViewerSettings settings = new ConsoleLogViewerOptions
         {
             CaptureConsole = false, SaveSession = true, SessionsDirectory = directory, Input = input,
@@ -332,6 +407,25 @@ public sealed class ProcessInputTests
             this.released.TrySetResult();
             base.Dispose(disposing);
         }
+    }
+
+    private sealed class ExitNotifyingStream : MemoryStream
+    {
+        internal Action? AvailabilityRead { get; set; }
+        internal int AvailabilityReads { get; private set; }
+
+        public override bool CanWrite
+        {
+            get
+            {
+                this.AvailabilityReads++;
+                this.AvailabilityRead?.Invoke();
+                return base.CanWrite;
+            }
+        }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
+            ValueTask.CompletedTask;
     }
 
     private sealed class SlowStream : MemoryStream

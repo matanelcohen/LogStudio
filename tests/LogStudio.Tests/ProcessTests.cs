@@ -75,6 +75,17 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
             request.Headers.Add(ViewerConstants.ClearRequestHeader, "input");
             request.Content = new StringContent(JsonSerializer.Serialize(new { text }), Encoding.UTF8, "application/json");
             using HttpResponseMessage response = await client.SendAsync(request, timeout.Token);
+            Encoding inputEncoding = (Encoding)process.StandardInput.Encoding.Clone();
+            inputEncoding.EncoderFallback = EncoderFallback.ExceptionFallback;
+            try
+            {
+                inputEncoding.GetByteCount(text);
+            }
+            catch (EncoderFallbackException)
+            {
+                Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+                return;
+            }
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             while (true)
             {

@@ -668,9 +668,11 @@ $viewer = "C:\dev\LogStudio"
 While a wrapped command is running, **Terminal input** below the logs lets you answer
 prompts without switching back to the original terminal. Type a response and press
 Enter or **Send input**. A submission sends the text plus one newline; an empty
-submission sends a blank line. Leading/trailing spaces and Unicode are preserved.
-Each line is limited to 4,096 characters; tabs are allowed but other control characters
-and embedded newlines are not.
+submission sends a blank line. Leading/trailing spaces are preserved.
+Browser text uses the console's input encoding; configure the console and child to use
+UTF-8 for full Unicode support. Characters the encoding cannot represent are rejected
+rather than silently replaced. Each line is limited to 4,096 characters; tabs are allowed
+but other control characters and embedded newlines are not.
 
 You can still type or pipe input through the original terminal. Browser input is
 available only while the wrapped child's stdin is open, even if log updates are paused.

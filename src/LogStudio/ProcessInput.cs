@@ -9,13 +9,12 @@ namespace LogStudio;
 internal sealed class ProcessInput : IDisposable
 {
     internal const int MaximumTextLength = 4096;
-    private static readonly Encoding InputEncoding = new UTF8Encoding(false, true);
     private readonly object gate = new();
     private readonly SemaphoreSlim writer = new(1);
     private readonly CancellationTokenSource closed = new();
     private readonly TimeSpan writeTimeout;
     private Stream? destination;
-    private Func<bool>? isRunning;
+    private Encoding encoding = new UTF8Encoding(false, true);
     private bool stopped;
 
     internal ProcessInput(TimeSpan? writeTimeout = null)
@@ -29,19 +28,23 @@ internal sealed class ProcessInput : IDisposable
     {
         get
         {
+            // Liveness probes can synchronously raise exit notifications; only inspect cached state here.
             lock (this.gate)
-                return !this.stopped && this.destination?.CanWrite == true && this.isRunning!();
+                return !this.stopped && this.destination is not null;
         }
     }
 
-    internal void Attach(Stream destination, Func<bool> isRunning)
+    internal void Attach(Stream destination, Encoding? encoding = null)
     {
+        ArgumentNullException.ThrowIfNull(destination);
+        Encoding strictEncoding = (Encoding)(encoding ?? this.encoding).Clone();
+        strictEncoding.EncoderFallback = EncoderFallback.ExceptionFallback;
         lock (this.gate)
         {
             if (this.stopped) throw new InvalidOperationException("Standard input has already closed.");
             if (this.destination is not null) throw new InvalidOperationException("Standard input is already attached.");
             this.destination = destination;
-            this.isRunning = isRunning;
+            this.encoding = strictEncoding;
         }
         this.Changed?.Invoke();
     }
@@ -69,7 +72,17 @@ internal sealed class ProcessInput : IDisposable
         ValidateText(text);
         using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(this.writeTimeout);
-        byte[] bytes = InputEncoding.GetBytes(text + Environment.NewLine);
+        Encoding inputEncoding;
+        lock (this.gate) inputEncoding = this.encoding;
+        byte[] bytes;
+        try
+        {
+            bytes = inputEncoding.GetBytes(text + Environment.NewLine);
+        }
+        catch (EncoderFallbackException)
+        {
+            throw new ArgumentException("Input contains characters unavailable in the wrapped program's standard input encoding.");
+        }
         try
         {
             await this.WriteAsync(bytes, timeout.Token).ConfigureAwait(false);
@@ -96,8 +109,8 @@ internal sealed class ProcessInput : IDisposable
             Stream target;
             lock (this.gate)
             {
-                if (!this.CanWrite) throw new IOException("Standard input is unavailable.");
-                target = this.destination!;
+                if (this.stopped || this.destination is null) throw new IOException("Standard input is unavailable.");
+                target = this.destination;
             }
 
             // Both raw terminal chunks and complete browser lines use this same write gate.

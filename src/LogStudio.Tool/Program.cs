@@ -178,7 +178,7 @@ internal static class Program
         {
             throw new InvalidOperationException($"The process '{options.Command}' did not start.");
         }
-        processInput.Attach(child.StandardInput.BaseStream, () => !child.HasExited);
+        processInput.Attach(child.StandardInput.BaseStream, child.StandardInput.Encoding);
         child.Exited += (_, _) => processInput.Close();
         child.EnableRaisingEvents = true;
 
