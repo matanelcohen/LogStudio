@@ -267,6 +267,13 @@ Use **Expand chat** in the panel header for a full-screen overlay above the work
 **Restore chat**, Escape, or clicking the backdrop returns to the docked panel without losing
 your conversation, draft, model selection, or reading position. Expansion and restoration remain
 available while an answer streams. **Close chat** closes the panel; it is disabled while a question runs.
+
+Screenshots: [docked](../appscreenshot/copilot-chat-docked.png),
+[expanded light](../appscreenshot/copilot-chat-fullscreen-light.png),
+[expanded dark](../appscreenshot/copilot-chat-fullscreen-dark.png),
+[expanded mobile](../appscreenshot/copilot-chat-fullscreen-mobile.png), and
+[closed](../appscreenshot/copilot-chat-closed.png). These use synthetic local demo logs and a
+mocked Copilot conversation; no logs were sent to Copilot to capture them.
 The panel includes starter prompts, streamed Markdown replies, locally highlighted fenced code,
 tables, and a copy-answer action. The expanding composer stays at the bottom. Press **Enter** to send,
 or **Shift+Enter** for a new line.
