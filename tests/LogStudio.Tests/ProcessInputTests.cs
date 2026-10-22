@@ -32,7 +32,9 @@ public sealed class ProcessInputTests
         }
         Assert.Equal(Encoding.UTF8.GetBytes(string.Join(Environment.NewLine, lines) + Environment.NewLine), pipe.ToArray());
         Assert.Empty(viewer.GetLogs());
-        Assert.Empty(File.ReadAllText(Path.Combine(viewer.HistoryDirectory, "entries.jsonl")));
+        using FileStream history = new(Path.Combine(viewer.HistoryDirectory, "entries.jsonl"), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using StreamReader reader = new(history);
+        Assert.Empty(reader.ReadToEnd());
     }
 
     [Theory]

@@ -87,6 +87,9 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
                 return;
             }
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            // Windows console output can use a different code page from standard input.
+            Encoding outputEncoding = process.StandardOutput.CurrentEncoding;
+            string expectedEcho = "Received: " + outputEncoding.GetString(outputEncoding.GetBytes(text));
             while (true)
             {
                 using JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token);
@@ -94,7 +97,7 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
                 {
                     Assert.False(snapshot.RootElement.GetProperty("status").GetProperty("canWriteInput").GetBoolean());
                     Assert.Contains(snapshot.RootElement.GetProperty("entries").EnumerateArray(), entry =>
-                        entry.GetProperty("message").GetString()?.Contains("Received: " + text, StringComparison.Ordinal) == true);
+                        entry.GetProperty("message").GetString()?.Contains(expectedEcho, StringComparison.Ordinal) == true);
                     break;
                 }
                 await Task.Delay(20, timeout.Token);
