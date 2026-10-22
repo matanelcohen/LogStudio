@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -29,6 +30,41 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
     private static readonly TimeSpan ProcessTimeout = TimeSpan.FromSeconds(20);
     private static readonly ConcurrentDictionary<int, string> HistoryDirectories = new();
     private static readonly string[] HistoryFileNames = { "entries.jsonl", "entries.idx" };
+
+    [Fact]
+    public async Task SequentialWrapperRunsUseTheSameDefaultPort()
+    {
+        for (int run = 0; run < 2; run++)
+        {
+            ProcessResult result = await RunProcessAsync(new[]
+            {
+                ToolPath, "--no-wait", "--", DotnetCommand, DemoPath, "--count", "0", "--delay", "0",
+            });
+            Assert.Equal(0, result.ExitCode);
+            Assert.Contains("Log Studio: http://127.0.0.1:5177/", result.Error, StringComparison.Ordinal);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OccupiedPortsWithRedirectedInputFailWithoutStartingAnything(bool listenAll)
+    {
+        using TcpListener occupied = new(IPAddress.Loopback, 0);
+        occupied.Start();
+        string port = ((IPEndPoint)occupied.LocalEndpoint).Port.ToString(CultureInfo.InvariantCulture);
+        string[] arguments = listenAll
+            ? new[] { "--port", port, "--listen-all" }
+            : new[] { "--port", port, "--no-wait", "--", DotnetCommand, DemoPath, "--count", "0", "--interactive" };
+        ProcessResult result = await RunProcessAsync(WrapperArguments(arguments), input: Payload);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains($"Port {port} is already in use", result.Error, StringComparison.Ordinal);
+        Assert.Contains("Log Studio may already be running", result.Error, StringComparison.Ordinal);
+        Assert.Contains("--port 0", result.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain("[A]", result.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain(UrlPrefix, result.Error, StringComparison.Ordinal);
+        Assert.Empty(result.Output);
+    }
 
     [Fact]
     public async Task WrapperMirrorsStdoutStderrAndPreservesNonzeroExitCode()
@@ -1031,6 +1067,8 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
         Assert.Contains("0 keeps all entries (default)", result.Output, StringComparison.Ordinal);
         Assert.Contains("stored in private temporary files", result.Output, StringComparison.Ordinal);
         Assert.Contains("--version", result.Output, StringComparison.Ordinal);
+        Assert.Contains("default: 5177", result.Output, StringComparison.Ordinal);
+        Assert.Contains("Redirected input never prompts", result.Output, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -1120,7 +1158,7 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
     private static string FixturePath(string key) => typeof(ProcessTests).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
         .Single(attribute => attribute.Key == key).Value ?? throw new InvalidOperationException($"Missing fixture metadata: {key}.");
 
-    private static string[] WrapperArguments(params string[] arguments) => new[] { ToolPath }.Concat(arguments).ToArray();
+    private static string[] WrapperArguments(params string[] arguments) => new[] { ToolPath, "--port", "0" }.Concat(arguments).ToArray();
 
     private static Uri ApplicationSelection(Uri url, JsonElement application, bool includeRelated = false) => new(url,
         $"api/applications?processId={application.GetProperty("processId").GetInt32()}&startedAtTicks={application.GetProperty("startedAtTicks").GetString()}" +
