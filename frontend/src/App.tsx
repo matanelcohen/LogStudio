@@ -166,10 +166,11 @@ export default function App() {
       <div className="discover-shell">
         <a className="skip-link" href="#workspace">Skip to log results</a>
         <nav className="discover-rail" aria-label="Workspace applications">
-          <span className="rail-brand" aria-hidden="true"><Logs size={23} /></span>
-          <span className="rail-label" aria-hidden="true">WORKSPACE</span>
+          <div className="rail-brand" aria-hidden="true"><span className="rail-brand-icon"><Logs size={21} /></span><span className="rail-wordmark">Log Studio</span></div>
+          <span className="rail-label" aria-hidden="true">Workspace</span>
           <button className="rail-item active" aria-label="Discover logs" aria-current="page" title="Discover logs" onClick={() => searchRef.current?.focus()}><Compass size={20} /><span>Discover</span></button>
           <button className="rail-item" aria-label="Browse sessions" title="Sessions" onClick={() => setSessionsOpen(true)}><History size={20} /><span>Sessions</span></button>
+          <div className="rail-footer"><Monitor size={17} aria-hidden="true" /><div><strong>On this device</strong><span>Local workspace</span></div></div>
         </nav>
       <div className="app">
         <header className="app-header">

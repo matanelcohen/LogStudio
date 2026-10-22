@@ -531,6 +531,37 @@ describe("log-first workspace", () => {
     await waitFor(() => expect(api.saveSessionFilters).toHaveBeenLastCalledWith("", { ...current.filters, search: "" }));
   });
 
+  it("keeps glass on chrome and provides opaque accessibility and unsupported-browser fallbacks", () => {
+    const { container } = render(<><style>{styles}</style><App /></>);
+    const rules = Array.from(container.querySelector("style")!.sheet!.cssRules);
+    function declaration(rules: CSSRule[], selector: string, property: string) {
+      return rules.filter((rule): rule is CSSStyleRule => rule.type === CSSRule.STYLE_RULE)
+        .filter(rule => rule.selectorText.split(",").map(value => value.trim()).includes(selector))
+        .map(rule => rule.style.getPropertyValue(property)).filter(Boolean).at(-1);
+    }
+    expect(declaration(rules, ".discover-shell", "background")).toBe("var(--cp-shell-material)");
+    expect(declaration(rules, ".discover-shell", "border-radius")).toBe("20px");
+    expect(declaration(rules, ".query-bar", "background")).toBe("var(--cp-card-material)");
+    expect(declaration(rules, ".logs-scroll", "background")).toBe("var(--cp-content-material)");
+    expect(declaration(rules, "tr[data-log-id]", "background")).toBe("var(--cp-surface)");
+
+    const preferences = rules.find((rule): rule is CSSMediaRule =>
+      rule.type === CSSRule.MEDIA_RULE && rule.cssText.includes("prefers-reduced-transparency"))!;
+    expect(preferences.conditionText).toContain("prefers-contrast: more");
+    const unsupported = rules.find((rule): rule is CSSSupportsRule =>
+      rule.type === CSSRule.SUPPORTS_RULE && rule.cssText.includes("backdrop-filter"))!;
+    for (const fallback of [preferences, unsupported]) {
+      const fallbackRules = Array.from(fallback.cssRules);
+      for (const theme of [":root", 'html[data-theme="dark"]']) {
+        for (const material of ["shell", "chrome", "card", "content", "control"]) {
+          expect(declaration(fallbackRules, theme, `--cp-${material}-material`)).toBe("var(--cp-surface)");
+        }
+        expect(declaration(fallbackRules, theme, "--cp-panel-strong")).toBe("var(--cp-surface)");
+      }
+    }
+    expect(declaration(Array.from(preferences.cssRules), "body", "background-image")).toBe("none");
+  });
+
   it("uses the chosen text sizes for controls, categories, badges, and inspector metadata", () => {
     const { container } = render(<><style>{styles}</style><App /></>);
     const rules = Array.from(container.querySelector("style")!.sheet!.cssRules)
