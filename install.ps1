@@ -93,7 +93,15 @@ try {
     }
     if (-not $FrontendRestored) {
         Invoke-Checked $Npm @("ci", "--prefer-online")
-        Invoke-Checked $Npm @("audit", "--audit-level=high")
+        for ($AuditAttempt = 1; $AuditAttempt -le 3; $AuditAttempt++) {
+            & $Npm audit --audit-level=high
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($AuditAttempt -eq 3) {
+                throw "npm audit failed after 3 attempts; refusing to continue without a successful vulnerability check."
+            }
+            Write-Warning "npm audit failed (attempt $AuditAttempt/3); retrying in 5 seconds..."
+            Start-Sleep -Seconds 5
+        }
     }
     Write-Host "`nBuilding and testing React frontend..."
     Invoke-Checked $Npm @("run", "build")
