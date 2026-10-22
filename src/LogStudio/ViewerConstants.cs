@@ -99,6 +99,7 @@ internal static class ViewerConstants
     internal const string ContentDispositionHeader = "Content-Disposition";
     internal const string LastEventIdHeader = "Last-Event-ID";
     internal const string OriginHeader = "Origin";
+    internal const string FetchSiteHeader = "Sec-Fetch-Site";
     internal const string CacheControlHeader = "Cache-Control";
     internal const string ContentSecurityPolicyHeader = "Content-Security-Policy";
     internal const string ReferrerPolicyHeader = "Referrer-Policy";

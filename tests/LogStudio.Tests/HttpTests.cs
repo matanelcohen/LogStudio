@@ -17,9 +17,13 @@ public sealed class HttpTests
     private const int UnlimitedHistoryEntryCount = 10_005;
 
     [Fact]
-    public async Task AssetsAreEmbeddedAndSessionUrlIsRequired()
+    public async Task AssetsAndApisAreAvailableAtTheRootUrl()
     {
         await using ConsoleLogViewer viewer = CaptureTests.StartServer();
+        Assert.Equal("http", viewer.Url.Scheme);
+        Assert.Equal(ViewerConstants.LoopbackHost, viewer.Url.Host);
+        Assert.Equal("/", viewer.Url.AbsolutePath);
+        Assert.Equal(viewer.Url.GetLeftPart(UriPartial.Authority) + "/", viewer.Url.AbsoluteUri);
         using HttpClient client = new();
         using HttpResponseMessage index = await client.GetAsync(viewer.Url);
         Assert.Equal(HttpStatusCode.OK, index.StatusCode);
@@ -36,9 +40,11 @@ public sealed class HttpTests
         }
 
         using HttpResponseMessage root = await client.GetAsync(new Uri(viewer.Url.GetLeftPart(UriPartial.Authority)));
-        Assert.Equal(HttpStatusCode.NotFound, root.StatusCode);
-        using HttpResponseMessage missingToken = await client.GetAsync(new Uri(viewer.Url.GetLeftPart(UriPartial.Authority) + "/api/logs"));
-        Assert.Equal(HttpStatusCode.NotFound, missingToken.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, root.StatusCode);
+        using HttpResponseMessage snapshot = await client.GetAsync(new Uri(viewer.Url.GetLeftPart(UriPartial.Authority) + "/api/logs"));
+        Assert.Equal(HttpStatusCode.OK, snapshot.StatusCode);
+        using HttpResponseMessage unknown = await client.GetAsync(new Uri(viewer.Url, "unknown/api/logs"));
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
     }
 
     [Fact]
@@ -267,10 +273,50 @@ public sealed class HttpTests
         using HttpClient client = new();
         using HttpRequestMessage crossOrigin = new(HttpMethod.Get, new Uri(viewer.Url, ViewerConstants.SnapshotRoute));
         crossOrigin.Headers.Add(ViewerConstants.OriginHeader, "https://example.invalid");
+        crossOrigin.Headers.Add(ViewerConstants.FetchSiteHeader, "same-origin");
         using HttpResponseMessage denied = await client.SendAsync(crossOrigin);
         Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
         using HttpResponseMessage mutation = await client.PostAsync(new Uri(viewer.Url, ViewerConstants.SnapshotRoute), null);
         Assert.Equal(HttpStatusCode.MethodNotAllowed, mutation.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("cross-site")]
+    [InlineData("same-site")]
+    [InlineData("unexpected")]
+    public async Task ForeignBrowserRequestsWithoutOriginAreRejected(string fetchSite)
+    {
+        await using ConsoleLogViewer viewer = CaptureTests.StartServer();
+        viewer.Record("retained");
+        using HttpClient client = new();
+        foreach (string route in new[] { "", ViewerConstants.ScriptFile, ViewerConstants.SnapshotRoute, ViewerConstants.ClearRoute })
+        {
+            using HttpRequestMessage request = new(
+                route == ViewerConstants.ClearRoute ? HttpMethod.Post : HttpMethod.Get,
+                new Uri(viewer.Url, route));
+            request.Headers.Add(ViewerConstants.FetchSiteHeader, fetchSite);
+            request.Headers.Add(ViewerConstants.ClearRequestHeader, ViewerConstants.ClearRequestAction);
+            using HttpResponseMessage response = await client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        }
+        Assert.Equal("retained", Assert.Single(viewer.GetLogs()).Message);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("none")]
+    [InlineData("same-origin")]
+    public async Task DirectAndSameOriginRequestsAreAllowed(string? fetchSite)
+    {
+        await using ConsoleLogViewer viewer = CaptureTests.StartServer();
+        using HttpClient client = new();
+        foreach (string route in new[] { "", ViewerConstants.ScriptFile, ViewerConstants.SnapshotRoute })
+        {
+            using HttpRequestMessage request = new(HttpMethod.Get, new Uri(viewer.Url, route));
+            if (fetchSite is not null) request.Headers.Add(ViewerConstants.FetchSiteHeader, fetchSite);
+            using HttpResponseMessage response = await client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
     }
 
     [Fact]
@@ -304,7 +350,7 @@ public sealed class HttpTests
         try
         {
             Assert.Equal(viewers.Length, viewers.Select(viewer => viewer.Url.Port).Distinct().Count());
-            Assert.Equal(viewers.Length, viewers.Select(viewer => viewer.Url.AbsolutePath).Distinct().Count());
+            Assert.All(viewers, viewer => Assert.Equal("/", viewer.Url.AbsolutePath));
         }
         finally
         {

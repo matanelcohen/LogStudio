@@ -476,8 +476,8 @@ Downloads use the browser's native download handling rather than constructing a 
 Exported files contain log text and run metadata and are **not encrypted**. Common secret flags
 are redacted again on import, but positional secrets, paths, and log contents are not
 automatically scrubbed. Review exports before sharing them. Importing never executes the
-saved command. The viewer remains loopback-only, protected by its random session URL,
-same-origin checks, and explicit action headers; no OpenSearch cluster or external service
+saved command. The viewer remains loopback-only, protected by same-origin and Fetch Metadata
+checks and explicit action headers; no OpenSearch cluster or external service
 is involved.
 
 For manual build / packaging instead:
@@ -509,9 +509,8 @@ For a quick demonstration:
   dotnet run --project samples/LogStudio.Demo --no-build -c Release
 ```
 
-The terminal prints `Log Studio: http://127.0.0.1:<port>/<session-secret>/`.
-Open that URL if you omit `--open`. The CLI reuses port `5177` by default; each invocation
-still gets a fresh secret session URL. Browser settings persist when the port stays the same.
+The terminal prints `Log Studio: http://127.0.0.1:<port>/`.
+Open that URL if you omit `--open`. By default, each invocation selects an available port.
 
 ### Interactive logs demo (source checkout only)
 
@@ -525,7 +524,7 @@ From the repository root:
 dotnet run --project "$PWD/samples/LogStudio.Demo/LogStudio.Demo.csproj" -c Release -- --showcase
 ```
 
-Open the printed `Log Studio: http://127.0.0.1:<port>/<session-secret>/` URL.
+Open the printed `Log Studio: http://127.0.0.1:<port>/` URL.
 The demo attaches the viewer **inside its own process**, with telemetry enabled;
 do not wrap this command with `logstudio` or set `DOTNET_STARTUP_HOOKS`.
 It automatically seeds one successful, one slow, and one failed synthetic checkout,
@@ -982,7 +981,7 @@ GET `<session-url>api/telemetry/settings` returns
 `{ meterSources, activitySources, canConfigure }`.
 POST to the same route applies `{ meterSources, activitySources }` and returns the
 authoritative settings. It requires `X-Log-Studio-Action: telemetry-configure` and the
-same loopback, secret-URL, and Origin protections as other mutations.
+same loopback, Fetch Metadata, and Origin protections as other mutations.
 
 #### Discover and suggest sources
 
@@ -1042,7 +1041,7 @@ this is a development view, not a lossless telemetry archive. GET `<session-url>
 returns `{ enabled, metrics, spans, droppedMetrics, droppedSpans, omittedMetrics, omittedSpans, suppressedInstruments }`,
 with at most the latest 500 records of each signal in chronological capture order.
 The omitted counts identify retained records outside that response window. It uses the same loopback,
-secret-URL, and Origin protections as the log APIs. Telemetry tags can contain sensitive data
+Fetch Metadata, and Origin protections as the log APIs. Telemetry tags can contain sensitive data
 and are not redacted.
 
 Telemetry is current-run-only: it is not included in saved sessions, log imports/exports,
@@ -1053,8 +1052,10 @@ startup-hook viewer ends with its host process; inspect telemetry while that pro
 ## Local data and limits
 
 - Listens only on IPv4 loopback. No remote binding option is exposed.
-- A random 256-bit path is required for every resource and API request. Treat the full URL as a
-  local access credential. Same-origin checks, CSP, no framing, and no-referrer headers are applied.
+- The viewer is served at `http://127.0.0.1:<port>/`, without a secret path or authentication.
+  Other local programs can access it. Browser requests marked cross-site or same-site by
+  `Sec-Fetch-Site` are rejected, as are requests with a foreign Origin. Direct navigation and
+  same-origin requests are allowed. CSP, no framing, and no-referrer headers are applied.
 - Logs are inserted as text, not HTML. No CDN, cloud calls, analytics, or external fonts.
 - Logs are stored locally in temporary files, not browser storage. On Unix the directory is
   owner-only (`0700`) and files are owner-readable/writable (`0600`). They are not encrypted.
@@ -1082,8 +1083,8 @@ startup-hook viewer ends with its host process; inspect telemetry while that pro
   `minId` / `maxId`, `before` / `after`, `pageSize`, JSON `filters`, and `includeMode=all|any`.
 - GET `<session-url>api/export` streams matching JSONL records using the same filters.
   Download cursors use a snapshot upper ID; records captured later do not change the download.
-- POST `<session-url>api/clear` is the sole mutation route and requires
-  `X-Log-Studio-Action: clear`, the session URL, and the same-origin check. It returns
+- POST `<session-url>api/clear` requires
+  `X-Log-Studio-Action: clear` and the same-origin and Fetch Metadata checks. It returns
   `{ deletedCount, status }`; `status.clearedThroughId` identifies the deletion checkpoint.
   In-flight readers/searches are invalidated (409 if their response has not started; otherwise
   the stream is aborted). A client must retry against current history rather than show stale data.

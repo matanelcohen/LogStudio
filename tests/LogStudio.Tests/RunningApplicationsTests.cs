@@ -73,7 +73,7 @@ public sealed class RunningApplicationsTests
     }
 
     [Fact]
-    public async Task SelectionPreservesOriginTokenAndMethodRestrictions()
+    public async Task SelectionPreservesOriginActionAndMethodRestrictions()
     {
         FakeApplications applications = new();
         await using ConsoleLogViewer viewer = Start(applications);
@@ -83,8 +83,9 @@ public sealed class RunningApplicationsTests
         foreign.Headers.Add("Origin", "https://example.com");
         using HttpResponseMessage forbidden = await client.SendAsync(foreign);
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
-        using HttpResponseMessage missingToken = await client.GetAsync(new Uri(viewer.Url.GetLeftPart(UriPartial.Authority) + "/api/applications"));
-        Assert.Equal(HttpStatusCode.NotFound, missingToken.StatusCode);
+        using HttpRequestMessage missingAction = new(HttpMethod.Post, new Uri(viewer.Url.GetLeftPart(UriPartial.Authority) + "/api/applications?processId=42&startedAtTicks=1"));
+        using HttpResponseMessage missingActionResponse = await client.SendAsync(missingAction);
+        Assert.Equal(HttpStatusCode.Forbidden, missingActionResponse.StatusCode);
         using HttpResponseMessage wrongMethod = await client.PutAsync(new Uri(viewer.Url, "api/applications"), null);
         Assert.Equal(HttpStatusCode.MethodNotAllowed, wrongMethod.StatusCode);
         Assert.Equal(0, applications.SelectionCount);

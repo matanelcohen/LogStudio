@@ -116,7 +116,7 @@ public sealed class ProcessInputTests
     }
 
     [Fact]
-    public async Task InputRequiresTheSecretRouteSameOriginActionMethodAndLiveSession()
+    public async Task InputRequiresTheCorrectRouteSameOriginActionMethodAndLiveSession()
     {
         using MemoryStream pipe = new();
         using ProcessInput input = new();
@@ -132,8 +132,7 @@ public sealed class ProcessInputTests
             ("api/input?sessionId=old", "input", null, HttpMethod.Post, "application/json", HttpStatusCode.BadRequest),
             ("api/input?sessionId=", "input", null, HttpMethod.Post, "application/json", HttpStatusCode.BadRequest),
             ("api/input?SESSIONID=old", "input", null, HttpMethod.Post, "application/json", HttpStatusCode.BadRequest),
-            ("/api/input", "input", null, HttpMethod.Post, "application/json", HttpStatusCode.NotFound),
-            ("/wrong-secret/api/input", "input", null, HttpMethod.Post, "application/json", HttpStatusCode.NotFound),
+            ("/unknown/api/input", "input", null, HttpMethod.Get, "application/json", HttpStatusCode.NotFound),
             ("api/input", "input", null, HttpMethod.Post, "text/plain", HttpStatusCode.UnsupportedMediaType),
         })
         {
