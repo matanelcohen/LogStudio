@@ -682,7 +682,8 @@ This sends input to the existing program, not a new shell command. It does not p
 a pseudo-terminal, `Console.ReadKey`, terminal control keys, or a reliable indication that
 the program is currently waiting for input. Log Studio does not save or echo submissions,
 but the child can still print them into captured output. If sending fails, check the
-program output before retrying: input is never retried automatically.
+program output before retrying: input is never retried automatically. A blocked send
+times out after five seconds and closes stdin rather than hanging the viewer.
 
 ### Wrapper options
 

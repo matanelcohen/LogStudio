@@ -354,7 +354,8 @@ internal static class Program
               logstudio --no-wait -- dotnet path/to/MyApp.dll
               logstudio --listen-all --open
 
-            Standard input is inherited, so interactive console input still works.
+            Standard input is forwarded, so interactive console input still works.
+            Browser Terminal input sends one line while the child's standard input is open.
             By default the viewer stays available after the child finishes.
             History is unlimited by default and stored in private temporary files.
             Reads and completion also flush pending entries. Files are deleted on exit.
