@@ -78,10 +78,12 @@ describe("typed server payloads", () => {
   });
 
   it("accepts user-selected page bounds and rejects mismatched responses", () => {
-    const entries = Array.from({ length: 500 }, (_, index) => ({ ...Entry, id: index + 1 }));
-    expect(readPage({ ...fixturePage(), entries, pageSize: 500 }, 500).entries).toHaveLength(500);
+    const entries = Array.from({ length: 5000 }, (_, index) => ({ ...Entry, id: index + 1 }));
+    expect(readPage({ ...fixturePage(), entries, pageSize: 5000 }, 5000).entries).toHaveLength(5000);
+    expect(readPage({ ...fixturePage(), entries, pageSize: 2147483647 }, 2147483647).entries).toHaveLength(5000);
     expect(() => readPage({ ...fixturePage(), entries, pageSize: 250 }, 250)).toThrow("one page");
-    expect(() => readPage({ ...fixturePage(), pageSize: 1001 }, 1001)).toThrow("page size");
+    expect(readPage({ ...fixturePage(), pageSize: 1001 }, 1001).pageSize).toBe(1001);
+    expect(() => readPage({ ...fixturePage(), pageSize: 2147483648 }, 2147483648)).toThrow("page size");
     expect(() => readPage({ ...fixturePage(), pageSize: 500 }, 250)).toThrow("page size");
   });
   it("rejects unbounded suggestions and invalid status instead of defaulting silently", () => {

@@ -10,7 +10,7 @@ internal static class ViewerConstants
     internal const int DefaultFlushEveryEntries = 1000;
     internal const int DiskBufferBytes = 65_536;
     internal const int PageSize = 250;
-    internal const int MaximumPageSize = 1000;
+    internal const int MaximumPageSize = int.MaxValue;
     internal const int MaximumCategorySuggestions = 1024;
     internal const int MaximumSearchLength = 1024;
     internal const int MaximumSearchTerms = 64;

@@ -718,7 +718,7 @@ Reads flush pending data before opening a stable reader, so recently captured en
 Completion flushes the final partial batch. This is a developer temp journal, not a crash-durable
 database: flushes publish data to the OS, not an fsync guarantee.
 
-The browser requests only **one configured page** (250 rows by default, 1–1000 selectable)
+The browser requests only **one configured page** (250 rows by default, with no 1,000-row ceiling)
 and receives metadata-only live updates.
 Older / Newer pages are loaded on demand. Queries scan disk with bounded buffers; unfiltered
 tail pages use the seek index directly. JSONL downloads stream from the server to the browser's
@@ -758,10 +758,11 @@ remove the reported folder if necessary. Download JSONL before closing if you wa
   Selected levels are OR-ed. All levels removes the level restriction; Deselect all shows
   no entries. Warning/error presets remain shortcuts, and export uses the same selection.
 - Ctrl/Cmd+K or `/` focuses search. Escape clears it.
-- The entire retained history is searched. **Rows/page** accepts any integer from **1 to 1000**
+- The entire retained history is searched. **Rows/page** accepts any positive 32-bit integer
   (default 250). Press Enter or leave the input to apply it; invalid values show an error without
   changing the active size. Older / Newer use the selected size, while exports remain unlimited.
-  Reset filters and Clear logs preserve the chosen page size.
+  Reset filters and Clear logs preserve the chosen page size. Large pages use more server and browser
+  memory and may render more slowly; choose a size appropriate for your machine.
 - **Pause** freezes this tab's history snapshot without pausing capture. Resume catches up
   with the latest page from disk; clear notifications still invalidate a paused snapshot.
   In an explicitly bounded run, a warning appears if entries expired while paused.
@@ -1039,7 +1040,7 @@ startup-hook viewer ends with its host process; inspect telemetry while that pro
 - GET `<session-url>api/sessions` lists the current run and saved named/date-stamped runs with
   redacted command details. `sessionId=<id>` selects saved history for search/export/clear;
   missing or path-like IDs are rejected.
-- GET `<session-url>api/search` returns up to `pageSize` entries (1–1000, default 250),
+- GET `<session-url>api/search` returns up to `pageSize` entries (a positive 32-bit integer, default 250),
   the chosen `pageSize`, whole-history match/severity counts,
   older/newer counts, bounded category suggestions, and literal highlight terms.
   Query parameters include `q`, `matchCase`, legacy `severity`, JSON `levels` (for example
@@ -1090,7 +1091,7 @@ Both NuGets include the component licenses. Dependencies were downloaded through
 public package mirror where the primary npm registry was unavailable; the lockfile retains those
 resolved download URLs and integrity hashes.
 
-The frontend keeps one validated server page (at most the selected size, up to 1000 entries)
+The frontend keeps one validated server page (at most the user-selected size)
 and one selected entry.
 Live notifications are coalesced, and only one search request is in flight for a given query.
 Preference changes abort stale requests; old results cannot overwrite a newer query.

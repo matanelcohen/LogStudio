@@ -209,7 +209,7 @@ internal sealed class LogQuery
             this.MinimumId == 0 && !this.MaximumId.HasValue && history.Status.EvictedCount == 0)
             return this.ReadUnfilteredPage(history, cancellationToken);
 
-        Queue<LogEntry> page = new(this.PageSize);
+        Queue<LogEntry> page = new();
         long matches = 0;
         long errors = 0;
         long warnings = 0;
