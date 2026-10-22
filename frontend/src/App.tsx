@@ -9,6 +9,7 @@ import { SessionsDialog } from "./SessionsDialog";
 import { SessionImportDialog } from "./SessionImportDialog";
 import { CopilotChatPanel } from "./CopilotChatPanel";
 import { SettingsDialog } from "./SettingsDialog";
+import { TerminalInput } from "./TerminalInput";
 import { DiscoverSidebar } from "./DiscoverSidebar";
 import { clearSessionLogs, fetchApplications, selectApplication } from "./api";
 import { Inspector } from "./Inspector";
@@ -265,6 +266,7 @@ export default function App() {
             onCondition={addCondition} onDraft={openEditor} onNotice={setNotice} />}
           </div>
         </main>
+        {!archived && !live.status?.listenAll && live.status?.canWriteInput && !live.status.isCompleted && <TerminalInput />}
         <footer className="app-footer"><span id="capacityNote"><HardDrive size={12} /> On disk · {status?.capacity ? `Limit ${NumberFormatter.format(status.capacity)}` : "Unlimited history"}
           <span id="evictedNote">{status?.evictedCount ? ` · ${NumberFormatter.format(status.evictedCount)} expired` : " · Localhost only"}</span></span>
           <span id="runMeta"><Clock3 size={12} /> {Math.floor(elapsed / 60)}m {elapsed % 60}s{status && ` · ${TimeFormatter.format(new Date(status.startedAt))}`}</span></footer>

@@ -204,7 +204,7 @@ internal sealed class SessionCatalog
             logs.CopyJournal(destination);
             foreach (string file in new[] { JournalFile, IndexFile })
                 if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(Path.Combine(destination, file), FilePermissions);
-            ViewerStatus status = history.Status with { HistoryDirectory = destination };
+            ViewerStatus status = history.Status with { HistoryDirectory = destination, CanWriteInput = false };
             if (closing && !status.IsCompleted) status = status with { IsCompleted = true, CompletedAt = DateTimeOffset.UtcNow };
             ChatMessage[] messages = this.ReadChatHistory(null);
             this.Write(destination, new SavedSession(this.Describe(status, false), status, history.Categories, messages));
@@ -219,7 +219,7 @@ internal sealed class SessionCatalog
             long generation = this.generations.GetValueOrDefault(id);
             string directory = this.DirectoryFor(id);
             return new LogHistoryReader(Path.Combine(directory, JournalFile), Path.Combine(directory, IndexFile),
-                saved.Status, saved.Categories, () => this.Generation(id) == generation);
+                saved.Status with { CanWriteInput = false }, saved.Categories, () => this.Generation(id) == generation);
         }
     }
 

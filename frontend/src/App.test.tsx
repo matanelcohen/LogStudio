@@ -34,6 +34,59 @@ vi.mock("./useLogExplorer", async () => {
 });
 
 describe("log-first workspace", () => {
+  describe("wrapped program input", () => {
+    const running = { ...Status, isCompleted: false, completedAt: null, exitCode: null, canWriteInput: true };
+    function liveStatus(status = running) {
+      vi.mocked(useLiveStatus).mockReturnValue({
+        status, connection: "live", error: null, gap: null, reconnect, applyStatus: vi.fn()
+      });
+    }
+    afterEach(() => {
+      vi.mocked(useLiveStatus).mockReturnValue({
+        status: Status, connection: "live", error: null, gap: null, reconnect, applyStatus: vi.fn()
+      });
+    });
+
+    it("preserves the input draft while searching and pausing, but hides it when live input closes", () => {
+      liveStatus();
+      const { rerender } = render(<App />);
+      const input = screen.getByLabelText("Terminal input") as HTMLInputElement;
+      fireEvent.change(input, { target: { value: "answer draft" } });
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "hello" } });
+      expect(screen.getByLabelText("Terminal input")).toBe(input);
+      expect(input.value).toBe("answer draft");
+      liveStatus({ ...running, canWriteInput: false });
+      rerender(<App />);
+      expect(screen.queryByLabelText("Terminal input")).toBeNull();
+    });
+
+    it("does not expose input for completed runs or listen-all mode", () => {
+      liveStatus({ ...running, isCompleted: true });
+      const { rerender } = render(<App />);
+      expect(screen.queryByLabelText("Terminal input")).toBeNull();
+      vi.mocked(useLiveStatus).mockReturnValue({
+        status: { ...running, listenAll: true }, connection: "live", error: null, gap: null, reconnect, applyStatus: vi.fn()
+      });
+      vi.spyOn(api, "fetchApplications").mockResolvedValue({ applications: [], selected: null, error: null });
+      rerender(<App />);
+      expect(screen.queryByLabelText("Terminal input")).toBeNull();
+    });
+
+    it("never sends input to a live program while browsing a saved session", async () => {
+      liveStatus();
+      vi.mocked(api.fetchSessions).mockResolvedValue([{
+        id: "saved", name: "Saved run", startedAt: Status.startedAt, completedAt: Status.completedAt,
+        exitCode: 0, entryCount: 1, command: "dotnet", arguments: [], workingDirectory: "", isCurrent: false
+      }]);
+      render(<App />);
+      expect(screen.getByLabelText("Terminal input")).toBeDefined();
+      fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+      fireEvent.click(await screen.findByRole("button", { name: "View session" }));
+      expect(screen.queryByLabelText("Terminal input")).toBeNull();
+    });
+  });
+
   describe("listen-all application selection", () => {
     const application = { processId: 42, name: "Example.Api", startedAtTicks: "639112345678901234" };
     const waiting: RunningApplicationsState = { applications: [application], selected: null, error: null };

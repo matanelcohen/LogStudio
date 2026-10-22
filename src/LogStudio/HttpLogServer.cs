@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -21,6 +22,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private const int MacAddressInUse = 48;
     private const int WindowsAlreadyExists = 183;
     private const int MaximumHistoryRequests = 4;
+    private const int MaximumInputBytes = 32768;
     private const string NotFoundMessage = "Not found.";
     private const string Heartbeat = ": heartbeat\n\n";
     private const string EventPrefix = "event: ";
@@ -41,6 +43,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private readonly TelemetryRecorder? telemetry;
     private readonly TelemetrySettings initialTelemetrySettings;
     private readonly IRunningApplications? runningApplications;
+    private readonly ProcessInput? input;
     private readonly string pathPrefix;
     private readonly string authority;
     private readonly string contentSecurityPolicy;
@@ -49,6 +52,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private readonly SemaphoreSlim streamSlots = new(ViewerConstants.MaximumLiveClients);
     private readonly SemaphoreSlim historySlots = new(MaximumHistoryRequests);
     private readonly SemaphoreSlim copilotSlot = new(1);
+    private readonly SemaphoreSlim inputSlot = new(1);
     private readonly CopilotCliClient copilot;
     private readonly TimeSpan copilotTimeout;
     private readonly ConcurrentDictionary<Task, byte> requests = new();
@@ -63,6 +67,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
         this.sessions = sessions;
         this.telemetry = telemetry;
         this.runningApplications = settings.RunningApplications;
+        this.input = settings.Input;
         this.initialTelemetrySettings = new(settings.MeterSources, settings.ActivitySources, false);
         this.copilot = copilot ?? new CopilotCliClient();
         this.copilotTimeout = copilotTimeout ?? TimeSpan.FromMinutes(2);
@@ -87,6 +92,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
         this.streamSlots.Dispose();
         this.historySlots.Dispose();
         this.copilotSlot.Dispose();
+        this.inputSlot.Dispose();
         this.shutdown.Dispose();
     }
 
@@ -216,6 +222,11 @@ internal sealed class HttpLogServer : IAsyncDisposable
             }
 
             string route = request.Url.AbsolutePath[this.pathPrefix.Length..];
+            if (route == "api/input")
+            {
+                await this.InputAsync(context, cancellationToken).ConfigureAwait(false);
+                return;
+            }
             if (route == "api/applications")
             {
                 await this.RunningApplicationsAsync(context, cancellationToken).ConfigureAwait(false);
@@ -478,6 +489,105 @@ internal sealed class HttpLogServer : IAsyncDisposable
         finally
         {
             response.Close();
+        }
+    }
+
+    private async Task InputAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        HttpListenerRequest request = context.Request;
+        HttpListenerResponse response = context.Response;
+        if (request.HttpMethod != ViewerConstants.PostMethod)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.MethodNotAllowed, "Input requires an explicit POST action.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (request.Headers[ViewerConstants.ClearRequestHeader] != "input")
+        {
+            await WriteErrorAsync(response, HttpStatusCode.Forbidden, "An explicit input action header is required.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (Array.Exists(request.QueryString.AllKeys, key => string.Equals(key, ViewerConstants.SessionIdQuery, StringComparison.OrdinalIgnoreCase)))
+            throw new ArgumentException("Input is available only for the current wrapped process; omit sessionId.");
+        if (!MediaTypeHeaderValue.TryParse(request.ContentType, out MediaTypeHeaderValue? contentType) ||
+            !string.Equals(contentType.MediaType, "application/json", StringComparison.OrdinalIgnoreCase) ||
+            (contentType.CharSet is not null && !string.Equals(contentType.CharSet.Trim('"'), "utf-8", StringComparison.OrdinalIgnoreCase)))
+        {
+            await WriteErrorAsync(response, HttpStatusCode.UnsupportedMediaType, "Input requires application/json encoded as UTF-8.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (this.input?.CanWrite != true || this.logs.GetStatus().IsCompleted)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.Conflict, "Standard input is unavailable or the wrapped process has finished.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (!this.inputSlot.Wait(0))
+        {
+            await WriteErrorAsync(response, HttpStatusCode.TooManyRequests, "Another input request is pending. Wait before sending another line.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        byte[] bytes = new byte[MaximumInputBytes + 1];
+        try
+        {
+            if (request.ContentLength64 > MaximumInputBytes)
+            {
+                await WriteErrorAsync(response, HttpStatusCode.RequestEntityTooLarge, "Input requests must not exceed 32768 bytes.", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            int length = 0;
+            while (length < bytes.Length)
+            {
+                int count = await request.InputStream.ReadAsync(bytes.AsMemory(length), timeout.Token).AsTask().WaitAsync(timeout.Token).ConfigureAwait(false);
+                if (count == 0) break;
+                length += count;
+            }
+            if (length > MaximumInputBytes)
+            {
+                await WriteErrorAsync(response, HttpStatusCode.RequestEntityTooLarge, "Input requests must not exceed 32768 bytes.", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            string text;
+            try
+            {
+                using JsonDocument body = JsonDocument.Parse(bytes.AsMemory(0, length), new JsonDocumentOptions { MaxDepth = 4 });
+                if (body.RootElement.ValueKind != JsonValueKind.Object)
+                    throw new ArgumentException("Input must contain exactly one text string.");
+                string? value = null;
+                foreach (JsonProperty property in body.RootElement.EnumerateObject())
+                {
+                    if (property.Name != "text" || value is not null || property.Value.ValueKind != JsonValueKind.String)
+                        throw new ArgumentException("Input must contain exactly one text string.");
+                    value = property.Value.GetString();
+                }
+                text = value ?? throw new ArgumentException("Input must contain exactly one text string.");
+            }
+            catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+            {
+                throw new ArgumentException("Input must contain valid JSON and Unicode.");
+            }
+            await this.input.SendLineAsync(text, timeout.Token).ConfigureAwait(false);
+            await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(new { sent = true }, ViewerConstants.JsonOptions),
+                ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.RequestTimeout, "Input timed out; standard input has been closed.", cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            await WriteErrorAsync(response, timeout.IsCancellationRequested ? HttpStatusCode.RequestTimeout : HttpStatusCode.Conflict,
+                "Input could not be sent before the request expired or standard input closed.", cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.Conflict, "Standard input closed before the line could be sent.", cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Array.Clear(bytes);
+            this.inputSlot.Release();
         }
     }
 

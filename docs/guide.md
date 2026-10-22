@@ -650,7 +650,7 @@ $viewer = "C:\dev\LogStudio"
 - Ctrl+C after a completed run closes the viewer and returns the original child exit code.
 - In automation, use `--no-wait`: the wrapper exits when the child finishes, with the child's
   original exit code. Download logs before the viewer stops if you need a saved copy.
-- Standard input is inherited. Interactive `Console.ReadLine` / normal console input works.
+- Standard input is forwarded. Interactive `Console.ReadLine` / normal console input works.
 - Arguments are forwarded individually, with **no shell interpolation**. Quote arguments in
   your shell as usual. To wrap a shell pipeline, explicitly invoke your shell, e.g.
   `logstudio -- bash -c 'your command | another command'`.
@@ -662,6 +662,30 @@ $viewer = "C:\dev\LogStudio"
 ```bash
 ./artifacts/tool/logstudio --no-wait -- dotnet /path/to/SkillRunner.dll --skill-name=MySkill
 ```
+
+### Interactive input
+
+While a wrapped command is running, **Terminal input** below the logs lets you answer
+prompts without switching back to the original terminal. Type a response and press
+Enter or **Send input**. A submission sends the text plus one newline; an empty
+submission sends a blank line. Leading/trailing spaces are preserved.
+Browser text uses the console's input encoding; configure the console and child to use
+UTF-8 for full Unicode support. Characters the encoding cannot represent are rejected
+rather than silently replaced. Each line is limited to 4,096 characters; tabs are allowed
+but other control characters and embedded newlines are not.
+
+You can still type or pipe input through the original terminal. Browser input is
+available only while the wrapped child's stdin is open, even if log updates are paused.
+It disappears after stdin closes or the process exits, and is unavailable for saved
+sessions, `--listen-all`, or in-process/startup-hook viewers. Closing the wrapper's stdin
+(for example, a pipe reaching EOF) also closes child input; the browser does not keep it open.
+
+This sends input to the existing program, not a new shell command. It does not provide
+a pseudo-terminal, `Console.ReadKey`, terminal control keys, or a reliable indication that
+the program is currently waiting for input. Log Studio does not save or echo submissions,
+but the child can still print them into captured output. If sending fails, check the
+program output before retrying: input is never retried automatically. A blocked send
+times out after five seconds and closes stdin rather than hanging the viewer.
 
 ### Wrapper options
 

@@ -52,6 +52,7 @@ internal sealed class LogBuffer : IDisposable
             if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(this.StorageDirectory, DirectoryPermissions);
             this.journal = journal = CreateWriter(Path.Combine(this.StorageDirectory, JournalFileName));
             this.index = index = CreateWriter(Path.Combine(this.StorageDirectory, IndexFileName));
+            if (settings.Input is not null) settings.Input.Changed += this.InputChanged;
             ready = true;
         }
         finally
@@ -255,6 +256,7 @@ internal sealed class LogBuffer : IDisposable
         {
             if (this.disposed) return;
             this.disposed = true;
+            if (this.settings.Input is not null) this.settings.Input.Changed -= this.InputChanged;
             this.changed.TrySetResult();
             try
             {
@@ -351,7 +353,16 @@ internal sealed class LogBuffer : IDisposable
         this.settings.FlushEveryEntries,
         this.StorageDirectory,
         this.clearedThroughId,
-        this.settings.RunningApplications is not null);
+        this.settings.RunningApplications is not null,
+        !this.isCompleted && this.settings.Input?.CanWrite == true);
+
+    private void InputChanged()
+    {
+        lock (this.gate)
+        {
+            if (!this.disposed) this.Pulse();
+        }
+    }
 
     private void Pulse()
     {

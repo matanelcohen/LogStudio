@@ -366,6 +366,13 @@ pre, code, kbd { font-family: Consolas, "Courier New", Courier, monospace; }
   box-shadow: none;
   overflow: hidden;
 }
+.app:has(> .terminal-input) { grid-template-rows: auto auto minmax(0, 1fr) auto auto; }
+.terminal-input { padding: 0 24px 12px; min-width: 0; }
+.terminal-input form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.terminal-input label { display: inline-flex; align-items: center; gap: 6px; color: var(--cp-secondary-text); }
+.terminal-input input { flex: 1; min-width: 120px; min-height: 32px; padding: 5px 8px; border: 1px solid var(--cp-material-border); border-radius: 6px; background: var(--cp-control-material); color: var(--cp-text); font-family: var(--log-font-family); }
+.terminal-input p { margin-top: 5px; font-size: var(--ui-font-size, 14px); }
+.terminal-input [role="alert"] { color: var(--cp-danger); }
 .app-header, .brand, .header-actions, .panel-header, .paging, .filter-row, .search-row, .app-footer {
   display: flex;
   align-items: center;
@@ -845,6 +852,7 @@ mark { background: var(--cp-highlight); color: var(--cp-text); border-radius: 2p
   .workspace-region:has(.copilot-panel:not([hidden])) .workspace[data-fields="true"][data-inspector="true"] { height: auto; }
   .workspace-region:has(.copilot-panel:not([hidden])) .copilot-panel { flex: none; height: 60dvh; }
   .query-region { padding: 20px 12px 12px; }
+  .terminal-input { padding: 0 12px 12px; }
   .workspace-heading { margin-bottom: 16px; }
   .workspace-heading h2 { font-size: calc(23px * var(--ui-font-scale, 1)); }
   .discover-fields { border-right: 0; border-bottom: 1px solid var(--cp-border); }

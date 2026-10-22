@@ -1,6 +1,6 @@
 import {
   ApiRoutes, ClearActionHeader, ClearActionValue, ConditionFields, ConditionModes, ConditionOperators, CopilotChatActionValue, CopilotClearHistoryActionValue, CopilotConnectActionValue, DeleteSessionActionValue, ImportActionValue, importFormat, IncludeModes, MaximumCategorySuggestions, MaximumChatAnswerLength, MaximumChatRequestBytes, MaximumHighlights, MaximumPageSize, PageSize, QueryKeys, readChoice, RenameActionValue, SaveFiltersActionValue, Severities, Streams, UploadContentType, validateConditions, validateImportFile,
-  SelectApplicationActionValue, type RunningApplication, type RunningApplicationsState,
+  InputActionValue, MaximumInputLength, SelectApplicationActionValue, type RunningApplication, type RunningApplicationsState,
   type ChatMessage, type ChatOptions, type ChatResponse, type CopilotConnection, type ClearResult, type LogEntry, type LogPage, type SessionFilters, type SessionInfo, type ViewerStatus
 } from "./model";
 
@@ -54,6 +54,7 @@ export function readStatus(value: unknown): ViewerStatus {
     throw new Error("The server returned an invalid exit code.");
   return {
     listenAll: data.listenAll === undefined ? false : boolean(data.listenAll, "application selection mode"),
+    canWriteInput: data.canWriteInput === undefined ? false : boolean(data.canWriteInput, "terminal input availability"),
     applicationName: text(data.applicationName, "application name"),
     startedAt: timestamp(data.startedAt, "start time"),
     capacity: count(data.capacity, "capacity"),
@@ -110,6 +111,19 @@ export async function selectApplication(application: RunningApplication): Promis
   const data: unknown = await response.json();
   if (!response.ok) throw new ApiError(text(object(data).error, "application selection error"), response.status);
   return readApplications(data);
+}
+
+export async function sendInput(textValue: string): Promise<void> {
+  if (textValue.length > MaximumInputLength || /[\x00-\x08\x0a-\x1f\x7f-\x9f]/.test(textValue))
+    throw new Error("Send a single line of up to 4096 characters without control characters (tabs are allowed).");
+  const response = await fetch(ApiRoutes.Input, {
+    method: "POST",
+    headers: { [ClearActionHeader]: InputActionValue, "Content-Type": "application/json" },
+    body: JSON.stringify({ text: textValue })
+  });
+  const data = object(await response.json());
+  if (!response.ok) throw new ApiError(text(data.error, "input error"), response.status);
+  if (data.sent !== true) throw new Error("The server did not confirm that input was sent.");
 }
 
 function readEntry(value: unknown): LogEntry {

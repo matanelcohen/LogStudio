@@ -98,7 +98,8 @@ internal sealed record ViewerStatus(
     int FlushEveryEntries,
     string HistoryDirectory,
     long ClearedThroughId,
-    bool ListenAll = false);
+    bool ListenAll = false,
+    bool CanWriteInput = false);
 
 internal sealed record LogSnapshot(LogEntry[] Entries, ViewerStatus Status);
 

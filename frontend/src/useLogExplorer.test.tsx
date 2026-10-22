@@ -48,6 +48,25 @@ describe("bounded single-page requests", () => {
   });
 
   describe("metadata-only live updates", () => {
+    it("updates terminal input availability while paused without unfreezing logs", async () => {
+      vi.useFakeTimers();
+      EventSourceFixture.instances = [];
+      vi.stubGlobal("EventSource", EventSourceFixture);
+      const hook = renderHook(({ paused }) => useLiveStatus(paused), { initialProps: { paused: false } });
+      const running = { ...Status, isCompleted: false, completedAt: null, exitCode: null, canWriteInput: true };
+      act(() => EventSourceFixture.instances[0]?.emit(running));
+      await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+      expect(hook.result.current.status?.canWriteInput).toBe(true);
+      hook.rerender({ paused: true });
+      act(() => EventSourceFixture.instances[1]?.emit({
+        ...running, canWriteInput: false, lastId: 30000, revision: 30001
+      }));
+      expect(hook.result.current.status?.canWriteInput).toBe(false);
+      expect(hook.result.current.status?.lastId).toBe(Status.lastId);
+      act(() => EventSourceFixture.instances[1]?.emit({ ...running, revision: 30000 }));
+      expect(hook.result.current.status?.canWriteInput).toBe(false);
+    });
+
     it("freezes updates while paused and reconnects without storing log history", async () => {
       vi.useFakeTimers();
       EventSourceFixture.instances = [];
