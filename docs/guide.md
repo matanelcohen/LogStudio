@@ -263,6 +263,10 @@ commit a new package version and create a new matching tag instead.
 ## Optional Copilot log chat
 
 Click **Ask Copilot** in the header to open a chat panel on the left, alongside the log results.
+Use **Expand chat** in the panel header for a full-screen overlay above the workspace.
+**Restore chat**, Escape, or clicking the backdrop returns to the docked panel without losing
+your conversation, draft, model selection, or reading position. Expansion and restoration remain
+available while an answer streams. **Close chat** closes the panel; it is disabled while a question runs.
 The panel includes starter prompts, streamed Markdown replies, locally highlighted fenced code,
 tables, and a copy-answer action. The expanding composer stays at the bottom. Press **Enter** to send,
 or **Shift+Enter** for a new line.

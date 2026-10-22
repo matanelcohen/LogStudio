@@ -26,6 +26,97 @@ function ask(question = "Why did this fail?") {
 }
 
 describe("full-session log chat panel", () => {
+  it("preserves the conversation, draft, model choices and reading position when expanding and restoring", async () => {
+    const connect = vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
+    vi.mocked(api.fetchCopilotHistory).mockResolvedValue([
+      { role: "user", content: "Saved question" }, { role: "assistant", content: "Saved answer" }
+    ]);
+    const chat = vi.spyOn(api, "askCopilot");
+    render(<CopilotChatPanel status={Status} sessionId="saved" onClose={vi.fn()} returnFocus={vi.fn()} />);
+    await connectCli();
+    await screen.findByText("Saved answer");
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "AI model" }), { key: "Enter" });
+    fireEvent.keyDown(await screen.findByRole("option", { name: "Reasoning model" }), { key: "Enter" });
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Reasoning effort" }), { key: "Enter" });
+    fireEvent.keyDown(await screen.findByRole("option", { name: "High" }), { key: "Enter" });
+    fireEvent.change(screen.getByLabelText("Message Copilot"), { target: { value: "Keep this draft" } });
+    const log = screen.getByRole("log");
+    Object.defineProperties(log, { scrollHeight: { value: 1000 }, clientHeight: { value: 200 } });
+    log.scrollTop = 100;
+    fireEvent.scroll(log);
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Copilot chat" }));
+    expect(screen.getByRole("dialog", { name: "Ask Copilot about logs" }).getAttribute("aria-modal")).toBe("true");
+    expect(screen.getByRole("log").scrollTop).toBe(100);
+    expect(document.activeElement).toBe(screen.getByLabelText("Message Copilot"));
+    expect((screen.getByLabelText("Message Copilot") as HTMLTextAreaElement).value).toBe("Keep this draft");
+    expect(screen.getByRole("combobox", { name: "AI model" }).textContent).toContain("Reasoning model");
+    expect(screen.getByRole("combobox", { name: "Reasoning effort" }).textContent).toContain("High");
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore Copilot chat" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("complementary", { name: "Ask Copilot about logs" })).toBeDefined();
+    expect(screen.getByRole("log").textContent).toContain("Saved answer");
+    expect(screen.getByRole("log").scrollTop).toBe(100);
+    expect((screen.getByLabelText("Message Copilot") as HTMLTextAreaElement).value).toBe("Keep this draft");
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Expand Copilot chat" })));
+    expect(connect).toHaveBeenCalledOnce();
+    expect(api.fetchCopilotHistory).toHaveBeenCalledOnce();
+    expect(chat).not.toHaveBeenCalled();
+  });
+
+  it("dismisses an expanded model menu before restoring chat with Escape and isolates the background", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
+    const close = vi.fn();
+    const focus = vi.fn();
+    render(<>
+      <input aria-label="Search logs" />
+      <CopilotChatPanel status={Status} sessionId="" onClose={close} returnFocus={focus} />
+    </>);
+    await connectCli();
+    fireEvent.click(screen.getByRole("button", { name: "Expand Copilot chat" }));
+    expect(screen.getByLabelText("Search logs").closest('[aria-hidden="true"]')).not.toBeNull();
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "AI model" }), { key: "Enter" });
+    fireEvent.keyDown(await screen.findByRole("option", { name: "Reasoning model" }), { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBeDefined();
+    fireEvent.keyDown(screen.getByLabelText("Message Copilot"), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(close).not.toHaveBeenCalled();
+    expect(focus).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Search logs").closest('[aria-hidden="true"]')).toBeNull();
+    fireEvent.keyDown(screen.getByLabelText("Message Copilot"), { key: "Escape" });
+    expect(close).toHaveBeenCalledOnce();
+    expect(focus).toHaveBeenCalledOnce();
+  });
+
+  it("keeps streaming through layout changes and allows restoration while closing chat is disabled", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
+    let finish!: (value: ChatResponse) => void;
+    const chat = vi.spyOn(api, "askCopilot").mockImplementation((_session, _question, _messages, _options, update) => {
+      update?.("Partial response");
+      return new Promise(resolve => { finish = resolve; });
+    });
+    const close = vi.fn();
+    render(<CopilotChatPanel status={Status} sessionId="" onClose={close} returnFocus={vi.fn()} />);
+    await connectCli();
+    ask();
+    fireEvent.click(screen.getByRole("button", { name: "Expand Copilot chat" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Restore Copilot chat" }));
+    expect(screen.getByRole("log").textContent).toContain("Partial response");
+    fireEvent.click(screen.getByRole("button", { name: "Close Copilot chat" }));
+    expect(close).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Restore Copilot chat" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Expand Copilot chat" }));
+    fireEvent.keyDown(screen.getByRole("button", { name: "Restore Copilot chat" }), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await act(async () => finish({ answer: "Completed response", contextEntryCount: 1, contextTruncated: false }));
+    expect(screen.getByRole("log").textContent).toContain("Completed response");
+    expect(screen.getByRole("log").textContent).toContain("Why did this fail?");
+    expect(chat).toHaveBeenCalledOnce();
+    expect(api.fetchCopilotHistory).toHaveBeenCalledOnce();
+  });
+
   it("dismisses the model menu with Escape without closing chat", async () => {
     vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
     const close = vi.fn();
