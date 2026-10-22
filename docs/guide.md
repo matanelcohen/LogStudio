@@ -40,9 +40,12 @@ closed. Selecting a row opens its inspector. The initial columns focus on captur
 category, and message; sequence ID and stream remain available in **Columns**.
 **Explorer options** holds Wrap long lines, Follow newest entries, Clear view, and Refresh.
 
-Opaque surfaces, fine separators, compact controls, and readable monospace logs replace the
-previous glass dashboard. Light and Dark Mode use the Clawpilot palette. System typography,
-keyboard navigation, resize/reorder grips, and per-query filter chips remain available.
+The macOS-inspired workspace uses a frosted sidebar, translucent window chrome, rounded
+controls, and layered glass panels over a soft local gradient. Light and Dark Mode use
+coordinated blue accents; log rows stay mostly opaque for readable monospace text.
+The sidebar collapses to icons on smaller screens. System typography, keyboard navigation,
+resize/reorder grips, and per-query filter chips remain available. All visual materials
+are rendered locally with CSS, without external fonts, images, or downloads.
 
 Open **Settings** (the gear in the header) to choose the UI font and base size (12–18 px),
 plus an independent monospace font, size (10–24 px), and line spacing for log messages.
