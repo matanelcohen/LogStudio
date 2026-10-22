@@ -1,5 +1,5 @@
 export const PageSize = 250;
-export const MaximumPageSize = 1000;
+export const MaximumPageSize = 2_147_483_647;
 export const ClearActionHeader = "X-Log-Studio-Action";
 export const ClearActionValue = "clear";
 export const ImportActionValue = "import";

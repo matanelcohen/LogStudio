@@ -24,17 +24,21 @@ public sealed class LogControlsTests
     [InlineData(250)]
     [InlineData(500)]
     [InlineData(1000)]
+    [InlineData(1001)]
+    [InlineData(5000)]
+    [InlineData(int.MaxValue)]
     public void PageSizeAppliesToTailFilteredAndAdjacentPages(int size)
     {
         using LogBuffer store = new(new ConsoleLogViewerOptions().Validate());
         for (int index = 1; index <= HistorySize; index++) store.Append($"match-{index}", LogStream.Stdout);
         using LogHistoryReader reader = store.OpenHistory();
         NameValueCollection parameters = new() { [ViewerConstants.PageSizeQuery] = size.ToString(System.Globalization.CultureInfo.InvariantCulture) };
+        int expectedCount = Math.Min(size, HistorySize);
         LogSearchResult tail = LogQuery.Parse(parameters).Search(reader, CancellationToken.None);
         Assert.Equal(size, tail.PageSize);
-        Assert.Equal(size, tail.Entries.Length);
+        Assert.Equal(expectedCount, tail.Entries.Length);
         Assert.Equal(HistorySize, tail.MatchCount);
-        Assert.Equal(HistorySize - size + 1, tail.Entries[0].Id);
+        Assert.Equal(HistorySize - expectedCount + 1, tail.Entries[0].Id);
         parameters[ViewerConstants.SearchQuery] = "match-";
         LogSearchResult filtered = LogQuery.Parse(parameters).Search(reader, CancellationToken.None);
         Assert.Equal(tail.Entries, filtered.Entries);
@@ -42,13 +46,63 @@ public sealed class LogControlsTests
         parameters[ViewerConstants.AfterQuery] = "0";
         LogSearchResult oldest = LogQuery.Parse(parameters).Search(reader, CancellationToken.None);
         Assert.Equal(1, oldest.Entries[0].Id);
-        Assert.Equal(size, oldest.Entries[^1].Id);
+        Assert.Equal(expectedCount, oldest.Entries[^1].Id);
+        int adjacentCount = Math.Min(size, HistorySize - expectedCount);
+        foreach (string? search in new string?[] { null, "match-" })
+        {
+            parameters[ViewerConstants.SearchQuery] = search;
+            parameters[ViewerConstants.AfterQuery] = null;
+            parameters[ViewerConstants.BeforeQuery] = tail.Entries[0].Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            LogSearchResult older = LogQuery.Parse(parameters).Search(reader, CancellationToken.None);
+            Assert.Equal(Enumerable.Range(HistorySize - expectedCount - adjacentCount + 1, adjacentCount).Select(id => (long)id),
+                older.Entries.Select(entry => entry.Id));
+            parameters[ViewerConstants.BeforeQuery] = null;
+            parameters[ViewerConstants.AfterQuery] = oldest.Entries[^1].Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            LogSearchResult newer = LogQuery.Parse(parameters).Search(reader, CancellationToken.None);
+            Assert.Equal(Enumerable.Range(expectedCount + 1, adjacentCount).Select(id => (long)id), newer.Entries.Select(entry => entry.Id));
+        }
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("missing")]
+    public void LargePageSizesDoNotAllocateForMissingEntries(string? search)
+    {
+        using LogBuffer store = new(new ConsoleLogViewerOptions().Validate());
+        using LogHistoryReader reader = store.OpenHistory();
+        LogSearchResult page = LogQuery.Parse(new NameValueCollection
+        {
+            [ViewerConstants.PageSizeQuery] = int.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            [ViewerConstants.SearchQuery] = search,
+        }).Search(reader, CancellationToken.None);
+        Assert.Empty(page.Entries);
+        Assert.Equal(int.MaxValue, page.PageSize);
+        Assert.Equal(0, page.MatchCount);
+    }
+
+    [Theory]
+    [InlineData(1001)]
+    [InlineData(5000)]
+    [InlineData(int.MaxValue)]
+    public async Task SearchEndpointAcceptsLargeUserSelectedPageSizes(int size)
+    {
+        await using ConsoleLogViewer viewer = CaptureTests.StartServer();
+        for (int index = 1; index <= HistorySize; index++) viewer.Record($"match-{index}");
+        using HttpClient client = new();
+        foreach (string filter in new[] { "", "&q=match-" })
+        {
+            using JsonDocument page = JsonDocument.Parse(await client.GetStringAsync(new Uri(viewer.Url,
+                ViewerConstants.SearchRoute + "?pageSize=" + size.ToString(System.Globalization.CultureInfo.InvariantCulture) + filter)));
+            Assert.Equal(size, page.RootElement.GetProperty("pageSize").GetInt32());
+            Assert.Equal(Math.Min(size, HistorySize), page.RootElement.GetProperty("entries").GetArrayLength());
+        }
     }
 
     [Theory]
     [InlineData("0")]
     [InlineData("-1")]
-    [InlineData("1001")]
+    [InlineData("")]
+    [InlineData("2147483648")]
     [InlineData("invalid")]
     [InlineData("1.5")]
     public void InvalidPageSizesFailExplicitly(string size)
