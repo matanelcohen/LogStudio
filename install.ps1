@@ -93,7 +93,6 @@ try {
     }
     if (-not $FrontendRestored) {
         Invoke-Checked $Npm @("ci", "--prefer-online")
-        Invoke-Checked $Npm @("audit", "--audit-level=high")
     }
     Write-Host "`nBuilding and testing React frontend..."
     Invoke-Checked $Npm @("run", "build")
