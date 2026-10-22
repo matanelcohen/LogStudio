@@ -44,7 +44,10 @@ logstudio --open -- dotnet run --project ./path/to/App.csproj
 
 Keep using your existing command after `--`. The wrapped command still needs its own
 dependencies; for example, `dotnet run` requires your application's .NET SDK.
-The viewer opens at `http://127.0.0.1:<port>/` in your browser. Without `--open`, open the URL printed in the terminal.
+The viewer opens locally in your browser. Without `--open`, open the URL printed in the terminal.
+The CLI uses port `5177` on each run so browser settings carry over. If that port is busy,
+choose **Already running** to exit without launching a duplicate, or **New port** to start
+separately. Use `--port 0` for automatic port selection, especially in scripts.
 
 When the wrapped program asks for input, use **Terminal input** below the logs and press
 Enter or **Send input**. Each submission sends one line to the program, just like typing

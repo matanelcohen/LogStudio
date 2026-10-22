@@ -21,6 +21,8 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private const int LinuxAddressInUse = 98;
     private const int MacAddressInUse = 48;
     private const int WindowsAlreadyExists = 183;
+    private const int WindowsAddressInUse = 10048;
+    private const int UnixPrefixAlreadyRegistered = 400;
     private const int MaximumHistoryRequests = 4;
     private const int MaximumInputBytes = 32768;
     private const string NotFoundMessage = "Not found.";
@@ -81,6 +83,9 @@ internal sealed class HttpLogServer : IAsyncDisposable
 
     internal Uri Url { get; }
 
+    internal static bool IsAddressInUse(HttpListenerException exception) =>
+        exception.NativeErrorCode is LinuxAddressInUse or MacAddressInUse or WindowsAlreadyExists or WindowsAddressInUse or UnixPrefixAlreadyRegistered;
+
     public async ValueTask DisposeAsync()
     {
         this.shutdown.Cancel();
@@ -119,7 +124,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
             catch (HttpListenerException exception) when (
                 requestedPort == 0 &&
                 attempt + 1 < ViewerConstants.AutomaticPortAttempts &&
-                exception.NativeErrorCode is LinuxAddressInUse or MacAddressInUse or WindowsAlreadyExists)
+                IsAddressInUse(exception))
             {
                 // Port selection and HttpListener binding are separate operations; retry only a bind collision.
             }

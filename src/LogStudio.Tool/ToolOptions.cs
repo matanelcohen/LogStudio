@@ -6,6 +6,7 @@ namespace LogStudio.Tool;
 
 internal sealed record ToolOptions(int Port, int Capacity, int FlushEveryEntries, string? Name, bool OpenBrowser, bool WaitAfterExit, bool Help, bool Version, string Command, string[] Arguments, bool ListenAll = false)
 {
+    internal const int DefaultPort = 5177;
     internal const string CommandName = "logstudio";
     internal const string Separator = "--";
     internal const string HelpSwitch = "--help";
@@ -22,7 +23,7 @@ internal sealed record ToolOptions(int Port, int Capacity, int FlushEveryEntries
 
     internal static ToolOptions Parse(string[] args)
     {
-        int port = 0;
+        int port = DefaultPort;
         ConsoleLogViewerOptions defaults = new();
         int capacity = defaults.Capacity;
         int flushEvery = defaults.FlushEveryEntries;

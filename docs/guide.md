@@ -714,7 +714,7 @@ times out after five seconds and closes stdin rather than hanging the viewer.
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--open` | Off | Open the default browser |
-| `--port <number>` | `0` | Bind only `127.0.0.1`; zero chooses an available port |
+| `--port <number>` | `5177` | Bind only `127.0.0.1`; reuse this port across runs, or use zero to choose an available port |
 | `--capacity <count>` | `0` (unlimited) | Zero keeps all entries; a positive integer opts into bounded history |
 | `--flush-every <count>` | `1000` | Flush fixed-size journal buffers every N entries; reads and completion also flush |
 | `--name <name>` | Unique random name | Session display name; editable in **Sessions → Rename** |
@@ -722,7 +722,18 @@ times out after five seconds and closes stdin rather than hanging the viewer.
 | `--help` / `-h` | | Usage |
 | `--version` | | Print the installed Log Studio version and exit; no child command required |
 
-A requested explicit port that is occupied is an error, not an automatic port change.
+If the default or an explicitly requested port is occupied, an interactive terminal asks
+whether Log Studio is **Already running** (`A`, Enter, or Esc exits without starting a viewer
+or child command) or should **Start on a new port** (`N` selects an available port).
+An occupied port may belong to another application; Log Studio does not stop it or assume
+it is a trusted viewer. To use an existing viewer, open its previously printed secret
+session URL. `--open` applies only to newly started viewers.
+
+With redirected stdin, Log Studio never prompts or consumes input meant for the child:
+an occupied port fails promptly with guidance to use `--port 0` or another explicit port.
+Use `--port 0` for concurrent runs and scripts that should always select a free port.
+These CLI choices apply to both wrapped commands and `--listen-all`; in-process viewers
+and startup hooks retain their automatic-port default and never prompt.
 Invalid wrapper options exit with code `2`; launch / viewer errors exit with code `1`.
 If a descendant keeps an output pipe open after its parent exits, output draining is limited
 to five seconds and any cutoff is explicitly reported.
