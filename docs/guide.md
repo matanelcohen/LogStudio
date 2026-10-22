@@ -105,8 +105,11 @@ Only new `ILogger` events after selection are captured; earlier events, arbitrar
 `Console.WriteLine` output, and other processes' stdout/stderr are not available.
 Use the normal command wrapper when you need console output.
 
-Switching apps stops the previous listener and replaces the current capture
-history, so export any history you want to keep first. Once all captured processes
+Switching apps stops the previous listener without deleting its logs. Each app
+keeps its own capture history; selecting it again restores its earlier logs and
+continues capturing new events. Only the selected app is captured, so events
+emitted while another app is selected are not collected. Clearing session logs
+affects only the selected app's history. Once all captured processes
 in a group exit, capture stops; a later independent run is not attached automatically.
 Select the app again to start a new capture. Ctrl+C disconnects the viewer
 without stopping the external application. `--listen-all` cannot be combined with

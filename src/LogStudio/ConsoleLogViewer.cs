@@ -18,10 +18,12 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
     private readonly object writersGate = new();
     private readonly List<CapturingTextWriter> writers = new();
     private readonly ViewerSettings settings;
-    private readonly LogBuffer logs;
+    private readonly LogChangeSignal changes = new();
+    private readonly Dictionary<string, ViewerSession> applicationSessions = new(StringComparer.Ordinal);
+    private readonly List<ViewerSession> histories = new();
+    private ViewerSession currentSession;
     private readonly HttpLogServer server;
     private readonly TelemetryRecorder telemetry;
-    private readonly SessionCatalog sessions;
     private readonly TextWriter originalOut;
     private readonly TextWriter originalError;
     private readonly CancellationTokenSource shutdown = new();
@@ -35,13 +37,12 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
         this.settings = settings;
         this.originalOut = Console.Out;
         this.originalError = Console.Error;
-        this.logs = new LogBuffer(settings);
+        this.currentSession = this.CreateSession(settings.ApplicationName);
         bool started = false;
         try
         {
-            this.sessions = new SessionCatalog(settings);
             this.telemetry = new TelemetryRecorder(settings);
-            this.server = new HttpLogServer(settings, this.logs, this.originalError, this.ClearCore, this.sessions, this.RenameCore,
+            this.server = new HttpLogServer(settings, this.GetCurrentSession, this.originalError,
                 telemetry: this.telemetry);
             this.flushTask = this.FlushIdleAsync();
             started = true;
@@ -51,7 +52,7 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
             if (!started)
             {
                 this.telemetry?.Dispose();
-                this.logs.Dispose();
+                this.currentSession.Logs.Dispose();
                 this.shutdown.Dispose();
             }
         }
@@ -61,7 +62,7 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
     public Uri Url => this.server.Url;
 
     /// <summary>Gets the private temporary history directory. It is deleted when the viewer is disposed.</summary>
-    public string HistoryDirectory => this.logs.StorageDirectory;
+    public string HistoryDirectory => this.GetCurrentSession().Logs.StorageDirectory;
 
     /// <summary>Starts the viewer. Call before creating a host or logger to capture its console output.</summary>
     /// <param name="options">Optional settings. Only one viewer can own console capture at a time.</param>
@@ -119,7 +120,7 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
         lock (this.lifecycleGate)
         {
             ObjectDisposedException.ThrowIf(this.disposeTask is not null, this);
-            CapturingTextWriter writer = new(output, this.logs, stream, this.settings.MaxLineLength);
+            CapturingTextWriter writer = new(output, this.currentSession.Logs, stream, this.settings.MaxLineLength);
             lock (this.writersGate)
             {
                 this.writers.Add(writer);
@@ -150,43 +151,83 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
         lock (this.lifecycleGate)
         {
             ObjectDisposedException.ThrowIf(this.disposeTask is not null, this);
-            this.logs.Append(message, stream, severity: severity, category: category);
+            this.currentSession.Logs.Append(message, stream, severity: severity, category: category);
         }
     }
 
     /// <summary>Gets a stable, oldest-first copy of the currently retained entries.</summary>
     /// <returns>A snapshot that materializes retained history in the caller's memory.</returns>
     /// <remarks>Use the browser's paged search or streaming export for large runs. History is deleted on disposal.</remarks>
-    public IReadOnlyList<LogEntry> GetLogs() => this.logs.Snapshot().Entries;
+    public IReadOnlyList<LogEntry> GetLogs() => this.GetCurrentSession().Logs.Snapshot().Entries;
 
     /// <summary>Deletes all captured session logs through this call without stopping capture.</summary>
     /// <returns>The number of entries deleted from the journal, including entries hidden by retention.</returns>
-    public long ClearLogs() => this.ClearCore().DeletedCount;
+    public long ClearLogs() => this.GetCurrentSession().Clear().DeletedCount;
 
     /// <summary>Changes the current session's display name without changing its identity or captured logs.</summary>
     /// <param name="name">A nonblank name containing at most 128 characters.</param>
-    public void RenameSession(string name) => this.RenameCore(name);
+    public void RenameSession(string name) => this.GetCurrentSession().Rename(name);
 
-    private SessionInfo RenameCore(string name)
+    private ViewerSession GetCurrentSession()
+    {
+        lock (this.lifecycleGate) return this.currentSession;
+    }
+
+    private SessionInfo RenameCore(LogBuffer logs, SessionCatalog sessions, string name)
     {
         name = SessionCatalog.ValidateName(name);
         lock (this.lifecycleGate)
         {
             ObjectDisposedException.ThrowIf(this.disposeTask is not null, this);
-            this.logs.GetStatus();
-            this.sessions.UpdateCurrentName(name);
-            this.logs.Rename(name);
-            return this.sessions.Describe(this.logs.GetStatus());
+            logs.GetStatus();
+            sessions.UpdateCurrentName(name);
+            logs.Rename(name);
+            return sessions.Describe(logs.GetStatus());
         }
     }
 
-    private LogClearResult ClearCore()
+    private LogClearResult ClearCore(LogBuffer logs)
     {
         lock (this.lifecycleGate)
         {
             ObjectDisposedException.ThrowIf(this.disposeTask is not null, this);
             this.FlushWriters();
-            return this.logs.Clear();
+            return logs.Clear();
+        }
+    }
+
+    internal void SelectApplicationHistory(string identity, string name)
+    {
+        name = SessionCatalog.ValidateName(name);
+        lock (this.lifecycleGate)
+        {
+            ObjectDisposedException.ThrowIf(this.disposeTask is not null, this);
+            if (!this.applicationSessions.TryGetValue(identity, out ViewerSession? session))
+            {
+                session = this.applicationSessions.Count == 0 ? this.currentSession : this.CreateSession(name);
+                session.Rename(name);
+                this.applicationSessions.Add(identity, session);
+            }
+
+            this.currentSession = session;
+            session.Logs.NotifyChanged();
+        }
+    }
+
+    private ViewerSession CreateSession(string name)
+    {
+        LogBuffer logs = new(this.settings with { ApplicationName = name }, this.changes);
+        SessionCatalog catalog = new(this.settings);
+        ViewerSession session = new(logs, catalog, () => this.ClearCore(logs), value => this.RenameCore(logs, catalog, value));
+        try
+        {
+            this.histories.Add(session);
+            return session;
+        }
+        catch
+        {
+            logs.Dispose();
+            throw;
         }
     }
 
@@ -201,8 +242,12 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
             {
                 ObjectDisposedException.ThrowIf(this.disposeTask is not null, this);
                 this.FlushWriters();
-                this.logs.Complete(exitCode);
-                this.sessions.Save(this.logs, closing: true);
+                foreach (ViewerSession session in this.histories)
+                {
+                    session.Logs.Complete(exitCode);
+                    session.Catalog.Save(session.Logs, closing: true);
+                }
+                if (this.histories.Count > 1) this.currentSession.Logs.NotifyChanged();
             }
         }
         finally
@@ -313,14 +358,24 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
         {
             try
             {
-                try
+                Exception? failure = null;
+                foreach (ViewerSession session in this.histories)
                 {
-                    this.sessions.Save(this.logs);
+                    try
+                    {
+                        session.Catalog.Save(session.Logs);
+                    }
+                    catch (Exception exception)
+                    {
+                        failure ??= exception;
+                    }
+                    finally
+                    {
+                        try { session.Logs.Dispose(); }
+                        catch (Exception exception) { failure ??= exception; }
+                    }
                 }
-                finally
-                {
-                    this.logs.Dispose();
-                }
+                if (failure is not null) throw failure;
             }
             finally
             {

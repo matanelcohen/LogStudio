@@ -110,6 +110,34 @@ describe("bounded single-page requests", () => {
       expect(hook.result.current.status?.retainedCount).toBe(0);
     });
 
+    it("loads another app's history while paused without treating its IDs as expired entries", async () => {
+      vi.useFakeTimers();
+      EventSourceFixture.instances = [];
+      vi.stubGlobal("EventSource", EventSourceFixture);
+      const hook = renderHook(({ paused }) => useLiveStatus(paused), { initialProps: { paused: false } });
+      act(() => EventSourceFixture.instances[0]?.emit({ ...Status, listenAll: true, lastId: 1 }));
+      await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+      hook.rerender({ paused: true });
+      const switched = {
+        ...Status, listenAll: true, historyDirectory: "/private/temp/another-app",
+        firstId: 100, lastId: 150, revision: Status.revision + 1
+      };
+      act(() => EventSourceFixture.instances[1]?.emit(switched));
+      await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+      expect(hook.result.current.status).toMatchObject(switched);
+      expect(hook.result.current.gap).toBeNull();
+      act(() => EventSourceFixture.instances[1]?.emit({ ...Status, listenAll: true }));
+      await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+      expect(hook.result.current.status?.historyDirectory).toBe(switched.historyDirectory);
+      act(() => EventSourceFixture.instances[1]?.emit({
+        ...Status, listenAll: true, firstId: 1, lastId: 1, revision: switched.revision + 1
+      }));
+      await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+      expect(hook.result.current.status?.historyDirectory).toBe(Status.historyDirectory);
+      expect(hook.result.current.status?.lastId).toBe(1);
+      expect(hook.result.current.gap).toBeNull();
+    });
+
     it("applies ordered name updates while paused without changing the log snapshot", async () => {
       vi.useFakeTimers();
       EventSourceFixture.instances = [];
@@ -194,6 +222,40 @@ describe("bounded single-page requests", () => {
     await act(async () => resolvers[1]?.(new Response(JSON.stringify(current))));
     expect(hook.result.current.page?.entries).toEqual([]);
     expect(hook.result.current.page?.status.clearedThroughId).toBe(20000);
+  });
+
+  it("discards the previous app's page and in-flight response when switching histories", async () => {
+    vi.useFakeTimers();
+    const resolvers: ((response: Response) => void)[] = [];
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(resolve => resolvers.push(resolve))));
+    const query = defaultQuery();
+    const otherDirectory = "/private/temp/another-app";
+    const hook = renderHook(({ directory }) => useLogPage(query, Cursor, null, 1, false, 0, directory), {
+      initialProps: { directory: Status.historyDirectory }
+    });
+    await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+    await act(async () => resolvers[0]?.(new Response(JSON.stringify(fixturePage()))));
+    expect(hook.result.current.page?.entries).toEqual([Entry]);
+    act(() => hook.result.current.refresh());
+    await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+    hook.rerender({ directory: otherDirectory });
+    expect(hook.result.current.page).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+    await act(async () => resolvers[1]?.(new Response(JSON.stringify(fixturePage()))));
+    expect(hook.result.current.page).toBeNull();
+    const current = { ...fixturePage(), status: { ...Status, historyDirectory: otherDirectory } };
+    await act(async () => resolvers[2]?.(new Response(JSON.stringify(current))));
+    expect(hook.result.current.page?.status.historyDirectory).toBe(otherDirectory);
+  });
+
+  it("rejects responses from a different app even when the clear checkpoint matches", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(fixturePage()))));
+    const query = defaultQuery();
+    const hook = renderHook(() => useLogPage(query, Cursor, null, 1, false, 0, "/private/temp/another-app"));
+    await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+    expect(hook.result.current.page).toBeNull();
+    expect(hook.result.current.error).toContain("selected application changed");
   });
 
   it("surfaces query errors and clears them after a successful retry", async () => {

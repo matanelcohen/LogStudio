@@ -34,8 +34,9 @@ export function useLiveStatus(paused: boolean) {
         const value: unknown = JSON.parse(event.data);
         const next = readStatus(value);
         if (latest.current && next.revision < latest.current.revision) return;
+        const switched = latest.current !== null && next.historyDirectory !== latest.current.historyDirectory;
         const cleared = next.clearedThroughId > (latest.current?.clearedThroughId ?? 0);
-        if (paused && !cleared) {
+        if (paused && !cleared && !switched) {
           if (latest.current) {
             latest.current = { ...latest.current, applicationName: next.applicationName, canWriteInput: next.canWriteInput, revision: next.revision };
           }
@@ -43,7 +44,8 @@ export function useLiveStatus(paused: boolean) {
             { ...status, applicationName: next.applicationName, canWriteInput: next.canWriteInput, revision: next.revision });
           return;
         }
-        if (!cleared && resumeThrough.current !== null && next.firstId > resumeThrough.current + 1)
+        if (switched) setGap(null);
+        if (!cleared && !switched && resumeThrough.current !== null && next.firstId > resumeThrough.current + 1)
           setGap("Some entries expired under the explicit retention limit while this tab was disconnected.");
         resumeThrough.current = null;
         latest.current = next;
@@ -74,8 +76,8 @@ export function useLiveStatus(paused: boolean) {
   return { status, connection, error, gap, reconnect, applyStatus };
 }
 
-export function useLogPage(query: QueryState, cursor: PageCursor, maximumId: number | null, revision: number, paused: boolean, clearedThroughId = 0) {
-  const key = JSON.stringify({ query, cursor, maximumId, clearedThroughId });
+export function useLogPage(query: QueryState, cursor: PageCursor, maximumId: number | null, revision: number, paused: boolean, clearedThroughId = 0, historyDirectory = "") {
+  const key = JSON.stringify({ query, cursor, maximumId, clearedThroughId, historyDirectory });
   const [response, setResponse] = useState<{ key: string; page: LogPage | null; error: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
@@ -97,6 +99,7 @@ export function useLogPage(query: QueryState, cursor: PageCursor, maximumId: num
       try {
         const result = await fetchPage(buildQueryParameters(query, cursor, maximumId), controller.signal);
         if (!active) return;
+        if (historyDirectory && result.status.historyDirectory !== historyDirectory) throw new Error("The selected application changed. Refresh the current history.");
         if (result.status.clearedThroughId < clearedThroughId) throw new Error("Session history changed during the request. Refresh the current history.");
         setResponse({ key, page: result, error: null });
       } catch (error) {
