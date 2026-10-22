@@ -148,6 +148,19 @@ describe("log-first workspace", () => {
     expect(screen.getByRole("log").textContent).toContain("Existing answer");
   });
 
+  it("returns to the Ask Copilot opener when closing an expanded chat", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue({ version: "test CLI", models: [] });
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Copilot" }));
+    await screen.findByRole("combobox", { name: "AI model" });
+    fireEvent.click(screen.getByRole("button", { name: "Expand Copilot chat" }));
+    expect(screen.getByRole("dialog", { name: "Ask Copilot about logs" })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Close Copilot chat" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("complementary", { name: "Ask Copilot about logs" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Ask Copilot" })));
+  });
+
   it("retains an in-flight Copilot response while inspecting a log", async () => {
     vi.spyOn(api, "connectCopilot").mockResolvedValue({ version: "test CLI", models: [] });
     let finish!: (value: ChatResponse) => void;

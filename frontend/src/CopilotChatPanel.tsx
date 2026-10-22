@@ -1,5 +1,6 @@
-import { ArrowDown, ArrowUp, Check, Copy, LoaderCircle, MessageSquare, RotateCcw, Sparkles, SquarePen, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { ArrowDown, ArrowUp, Check, Copy, LoaderCircle, Maximize2, MessageSquare, Minimize2, RotateCcw, Sparkles, SquarePen, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
@@ -30,7 +31,9 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
   const [historyAttempt, setHistoryAttempt] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const panel = useRef<HTMLElement>(null);
+  const expandButton = useRef<HTMLButtonElement>(null);
   const focusOnOpen = useRef(true);
   const [streamedAnswer, setStreamedAnswer] = useState("");
   const [following, setFollowing] = useState(true);
@@ -40,6 +43,31 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
   const questionInput = useRef<HTMLTextAreaElement>(null);
   const conversation = useRef<HTMLDivElement>(null);
   const followMessages = useRef(true);
+  const scrollPosition = useRef(0);
+  const readingAnchor = useRef<{ index: number; fraction: number } | null>(null);
+  const restoredScroll = useRef<{ log: HTMLDivElement; top: number } | null>(null);
+  const restoreConversation = useCallback((log: HTMLDivElement, reflow = false) => {
+    let top = followMessages.current ? log.scrollHeight : scrollPosition.current;
+    const anchor = readingAnchor.current;
+    const message = anchor && log.children.item(anchor.index);
+    if (!followMessages.current && reflow && message) {
+      const bounds = message.getBoundingClientRect();
+      top = log.scrollTop + bounds.top - log.getBoundingClientRect().top + bounds.height * anchor.fraction;
+    }
+    log.scrollTop = top;
+    scrollPosition.current = log.scrollTop;
+    restoredScroll.current = { log, top: log.scrollTop };
+  }, []);
+  const attachConversation = useCallback((log: HTMLDivElement | null) => {
+    conversation.current = log;
+    if (log) restoreConversation(log, true);
+  }, [restoreConversation]);
+  const resizeQuestion = useCallback((input: HTMLTextAreaElement | null) => {
+    questionInput.current = input;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${Math.min(180, Math.max(60, input.scrollHeight))}px`;
+  }, []);
   const entryCount = Math.max(0, (status?.lastId ?? 0) - (status?.clearedThroughId ?? 0));
   const selectedModel = connection?.models.find(candidate => candidate.id === model);
 
@@ -74,20 +102,17 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
 
   useEffect(() => {
     const log = conversation.current;
-    if (!hidden && log && followMessages.current) log.scrollTop = log.scrollHeight;
-  }, [messages, streamedAnswer, busy, hidden]);
+    if (!hidden && log) restoreConversation(log);
+  }, [messages, streamedAnswer, busy, hidden, restoreConversation]);
 
   useEffect(() => {
-    const input = questionInput.current;
-    if (!input) return;
-    input.style.height = "auto";
-    input.style.height = `${Math.min(180, Math.max(60, input.scrollHeight))}px`;
-  }, [question, hidden]);
+    resizeQuestion(questionInput.current);
+  }, [question, hidden, resizeQuestion]);
 
   function close() {
     if (busy) return;
     onClose();
-    returnFocus();
+    if (!expanded) returnFocus();
   }
 
   async function copyAnswer(content: string, index: number) {
@@ -140,20 +165,24 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
     }
   }
 
-  return <aside ref={panel} className="copilot-panel" hidden={hidden} aria-labelledby="copilotTitle" onKeyDown={event => {
-    if (event.key === "Escape" && !busy && !event.defaultPrevented && panel.current?.contains(event.target as Node)) {
+  const chatPanel = <aside ref={panel} className={`copilot-panel${expanded ? " copilot-fullscreen" : ""}`} hidden={hidden} aria-label="Ask Copilot about logs" onKeyDown={event => {
+    if (event.key === "Escape" && !expanded && !busy && !event.defaultPrevented && panel.current?.contains(event.target as Node)) {
       event.stopPropagation(); close();
     }
   }}>
     <header className="copilot-header">
       <MessageSquare size={19} aria-hidden="true" />
       <div className="copilot-heading">
-        <h2 id="copilotTitle">Ask Copilot about logs</h2>
+        <Dialog.Title>Ask Copilot about logs</Dialog.Title>
         <p title={status?.applicationName}>{status?.applicationName ?? "Selected session"}</p>
       </div>
       <button className="icon-button ghost-button" disabled={busy || !historyLoaded || (!messages.length && !question && !error)} aria-label="New chat" title="New chat"
         onClick={() => { void newChat(); }}>
         <SquarePen size={17} />
+      </button>
+      <button ref={expandButton} className="icon-button ghost-button" aria-label={expanded ? "Restore Copilot chat" : "Expand Copilot chat"}
+        title={expanded ? "Restore chat" : "Expand chat"} onClick={() => setExpanded(value => !value)}>
+        {expanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
       </button>
       <button className="icon-button ghost-button" disabled={busy} aria-label="Close Copilot chat" title="Close chat" onClick={close}><X size={17} /></button>
     </header>
@@ -166,12 +195,20 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
             onClick={() => { setQuestion(prompt); questionInput.current?.focus(); }}>{prompt}<ArrowUp size={13} aria-hidden="true" /></button>)}
         </div>
       </div>}
-      <div ref={conversation} className="copilot-messages" role="log" aria-label="Copilot conversation" aria-live="polite"
+      <div ref={attachConversation} className="copilot-messages" role="log" aria-label="Copilot conversation" aria-live="polite"
         aria-busy={busy}
         onScroll={event => {
           const log = event.currentTarget;
+          const restored = restoredScroll.current;
+          restoredScroll.current = null;
+          if (restored?.log === log && restored.top === log.scrollTop) return;
+          scrollPosition.current = log.scrollTop;
           followMessages.current = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
           setFollowing(followMessages.current);
+          const top = log.getBoundingClientRect().top;
+          const index = Array.from(log.children).findIndex(message => message.getBoundingClientRect().bottom > top);
+          const bounds = log.children.item(index)?.getBoundingClientRect();
+          readingAnchor.current = bounds && bounds.height > 0 ? { index, fraction: Math.max(0, (top - bounds.top) / bounds.height) } : null;
         }}>
         {messages.map((message, index) => <div className={`copilot-message ${message.role}`} key={index}>
           <span className="copilot-message-author">{message.role === "user" ? "You" : "Copilot"}</span>
@@ -199,7 +236,7 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
         <button type="button" aria-label="Retry chat history" onClick={() => setHistoryAttempt(value => value + 1)}><RotateCcw size={14} />Retry</button></div>}
       <form className="copilot-composer" onSubmit={event => { event.preventDefault(); void submit(); }}>
         <label className="visually-hidden" htmlFor="copilotQuestion">Message Copilot</label>
-        <textarea ref={questionInput} id="copilotQuestion" value={question} maxLength={MaximumChatQuestionLength} disabled={busy}
+        <textarea ref={resizeQuestion} id="copilotQuestion" value={question} maxLength={MaximumChatQuestionLength} disabled={busy}
           rows={2} placeholder="Ask about this session…" onChange={event => setQuestion(event.target.value)}
           onKeyDown={event => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
@@ -225,4 +262,15 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
         !connection ? "Copilot is unavailable. Your draft is preserved." : "Enter to send · Shift+Enter for a new line"}</div>
     </div>
   </aside>;
+
+  return <Dialog.Root open={expanded && !hidden} onOpenChange={setExpanded}>
+    {expanded && !hidden ? <Dialog.Portal>
+      <Dialog.Overlay className="dialog-overlay" />
+      <Dialog.Content asChild aria-modal="true" aria-describedby={undefined}
+        onOpenAutoFocus={event => { event.preventDefault(); (busy ? expandButton.current : questionInput.current)?.focus(); }}
+        onCloseAutoFocus={event => { event.preventDefault(); if (panel.current) expandButton.current?.focus(); else returnFocus(); }}>
+        {chatPanel}
+      </Dialog.Content>
+    </Dialog.Portal> : chatPanel}
+  </Dialog.Root>;
 }
