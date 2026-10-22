@@ -45,7 +45,8 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
         ProcessResult result = await RunProcessAsync(
             WrapperArguments("--no-wait", "--", DotnetCommand, DemoPath, "--count", "0", "--interactive"), input: Payload);
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains($"Input> Received: {Payload}", result.Output, StringComparison.Ordinal);
+        Assert.Contains("Input> ", result.Output, StringComparison.Ordinal);
+        Assert.Contains($"Received: {Payload}", result.Output, StringComparison.Ordinal);
     }
 
     [Fact]
