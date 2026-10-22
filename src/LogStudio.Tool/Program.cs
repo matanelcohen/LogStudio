@@ -65,6 +65,10 @@ internal static class Program
                 ? await ListenAsync(options, cancellation.Token).ConfigureAwait(false)
                 : await RunAsync(options, cancellation.Token).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            return InterruptedExitCode;
+        }
         catch (ArgumentException exception)
         {
             Console.Error.WriteLine($"Invalid viewer options: {exception.Message}");
@@ -109,7 +113,7 @@ internal static class Program
     private static async Task<int> ListenAsync(ToolOptions options, CancellationToken cancellationToken)
     {
         await using RunningApplicationsCollector collector = new();
-        await using ConsoleLogViewer viewer = ConsoleLogViewer.Start(new ConsoleLogViewerOptions
+        await using ConsoleLogViewer? viewer = await ViewerStartup.StartAsync(new ConsoleLogViewerOptions
         {
             CaptureConsole = false,
             RunningApplications = collector,
@@ -120,7 +124,8 @@ internal static class Program
             OpenBrowser = options.OpenBrowser,
             SaveSession = true,
             SessionsDirectory = Environment.GetEnvironmentVariable(ToolOptions.SessionsDirectoryEnvironmentVariable),
-        });
+        }, cancellationToken).ConfigureAwait(false);
+        if (viewer is null) return 0;
         try
         {
             collector.Viewer = viewer;
@@ -143,7 +148,7 @@ internal static class Program
     private static async Task<int> RunAsync(ToolOptions options, CancellationToken cancellationToken)
     {
         using ProcessInput processInput = new();
-        await using ConsoleLogViewer viewer = ConsoleLogViewer.Start(new ConsoleLogViewerOptions
+        await using ConsoleLogViewer? viewer = await ViewerStartup.StartAsync(new ConsoleLogViewerOptions
         {
             CaptureConsole = false,
             Port = options.Port,
@@ -157,7 +162,8 @@ internal static class Program
             RunArguments = options.Arguments,
             RunWorkingDirectory = Environment.CurrentDirectory,
             Input = processInput,
-        });
+        }, cancellationToken).ConfigureAwait(false);
+        if (viewer is null) return 0;
         using TextWriter stdout = viewer.CreateCaptureWriter(Console.Out, LogStream.Stdout);
         using TextWriter stderr = viewer.CreateCaptureWriter(Console.Error, LogStream.Stderr);
         ProcessStartInfo startInfo = new(options.Command)
@@ -330,7 +336,7 @@ internal static class Program
     private static void PrintHelp()
     {
         Console.WriteLine(
-            """
+            $"""
             Log Studio - live console log wrapper
 
             Usage:
@@ -339,7 +345,7 @@ internal static class Program
 
             Options:
               --open             Open the browser automatically.
-              --port <number>    Localhost port; 0 selects an available port (default).
+              --port <number>    Localhost port (default: {ToolOptions.DefaultPort}); 0 selects an available port.
               --capacity <count> Optional retention limit; 0 keeps all entries (default).
               --flush-every <n>  Flush journal buffers every n entries (default: 1000).
               --name <name>      Display name for this run (default: unique random name).
@@ -357,6 +363,8 @@ internal static class Program
             Standard input is forwarded, so interactive console input still works.
             Browser Terminal input sends one line while the child's standard input is open.
             By default the viewer stays available after the child finishes.
+            If the port is occupied, choose already running or start on a new port.
+            Redirected input never prompts; use --port 0 for automatic selection.
             History is unlimited by default and stored in private temporary files.
             Reads and completion also flush pending entries. Files are deleted on exit.
             Use --no-wait in scripts to preserve normal process lifetime and exit codes.
