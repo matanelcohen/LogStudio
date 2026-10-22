@@ -138,6 +138,25 @@ describe("bounded single-page requests", () => {
       expect(hook.result.current.gap).toBeNull();
     });
 
+    it("ignores a late clear response for an app that is no longer selected", async () => {
+      vi.useFakeTimers();
+      EventSourceFixture.instances = [];
+      vi.stubGlobal("EventSource", EventSourceFixture);
+      const hook = renderHook(() => useLiveStatus(false));
+      act(() => EventSourceFixture.instances[0]?.emit({ ...Status, listenAll: true }));
+      await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+      const switched = {
+        ...Status, listenAll: true, historyDirectory: "/private/temp/another-app",
+        revision: Status.revision + 1
+      };
+      act(() => EventSourceFixture.instances[0]?.emit(switched));
+      await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+      act(() => hook.result.current.applyStatus({
+        ...Status, listenAll: true, clearedThroughId: Status.lastId, revision: switched.revision + 1
+      }));
+      expect(hook.result.current.status).toMatchObject(switched);
+    });
+
     it("applies ordered name updates while paused without changing the log snapshot", async () => {
       vi.useFakeTimers();
       EventSourceFixture.instances = [];

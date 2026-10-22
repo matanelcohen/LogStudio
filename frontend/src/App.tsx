@@ -151,6 +151,7 @@ export default function App() {
     setClearError(null);
     try {
       const result = await clearSessionLogs(query.sessionId);
+      if (!archived && historyDirectory && seenHistory.current !== historyDirectory) return;
       if (!archived) live.applyStatus(result.status);
       setSelected(null);
       setPause(null);

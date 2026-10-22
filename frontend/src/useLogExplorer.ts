@@ -69,7 +69,7 @@ export function useLiveStatus(paused: boolean) {
 
   const reconnect = useCallback(() => setRetry(value => value + 1), []);
   const applyStatus = useCallback((next: ViewerStatus) => {
-    if (latest.current && next.revision < latest.current.revision) return;
+    if (latest.current && (next.revision < latest.current.revision || next.historyDirectory !== latest.current.historyDirectory)) return;
     latest.current = next;
     setStatus(next);
   }, []);

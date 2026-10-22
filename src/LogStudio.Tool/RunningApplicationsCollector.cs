@@ -438,8 +438,10 @@ internal sealed class RunningApplicationsCollector : IRunningApplications
         Attachment[] attachments;
         lock (this.stateGate)
         {
-            attachments = selection.Attachments.Where(attachment =>
-                this.selected is not Selection active || active == selection || !active.Attachments.Contains(attachment)).ToArray();
+            // A failed scope change may still borrow connections owned by the active selection.
+            if (this.selected is Selection active && active != selection)
+                selection.Attachments.ExceptWith(active.Attachments);
+            attachments = selection.Attachments.ToArray();
             selection.Attachments.Clear();
         }
         await Task.WhenAll(attachments.Select(StopAsync)).ConfigureAwait(false);

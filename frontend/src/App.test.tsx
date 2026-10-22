@@ -265,6 +265,29 @@ describe("log-first workspace", () => {
       expect(screen.getByRole("button", { name: "Pause" })).toBeDefined();
     });
 
+    it("does not reset the new app's investigation when the previous app's clear finishes", async () => {
+      let finish!: (result: { deletedCount: number; status: typeof Status }) => void;
+      vi.spyOn(api, "clearSessionLogs").mockReturnValue(new Promise(resolve => { finish = resolve; }));
+      const applyStatus = vi.fn();
+      const first = { ...Status, listenAll: true, isCompleted: false };
+      vi.mocked(useLiveStatus).mockReturnValue({
+        status: first, connection: "live", error: null, gap: null, reconnect, applyStatus
+      });
+      const { rerender } = render(<App />);
+      fireEvent.click(screen.getByRole("button", { name: "Clear logs" }));
+      fireEvent.click(screen.getByRole("button", { name: "Delete session logs" }));
+      vi.mocked(useLiveStatus).mockReturnValue({
+        status: { ...first, historyDirectory: "/private/temp/another-app", revision: first.revision + 1 },
+        connection: "live", error: null, gap: null, reconnect, applyStatus
+      });
+      rerender(<App />);
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      await act(async () => finish({ deletedCount: first.lastId, status: { ...first, clearedThroughId: first.lastId } }));
+      expect(applyStatus).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "Resume" })).toBeDefined();
+      expect(screen.queryByText(/Deleted .* session entries/)).toBeNull();
+    });
+
     it("keeps a failed selection visible after refreshing discovery", async () => {
       vi.spyOn(api, "selectApplication").mockRejectedValue(new Error("The application exited."));
       render(<App />);
