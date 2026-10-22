@@ -199,7 +199,9 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
         aria-busy={busy}
         onScroll={event => {
           const log = event.currentTarget;
-          if (restoredScroll.current?.log === log && restoredScroll.current.top === log.scrollTop) return;
+          const restored = restoredScroll.current;
+          restoredScroll.current = null;
+          if (restored?.log === log && restored.top === log.scrollTop) return;
           scrollPosition.current = log.scrollTop;
           followMessages.current = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
           setFollowing(followMessages.current);

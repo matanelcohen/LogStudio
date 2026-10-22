@@ -121,6 +121,27 @@ describe("full-session log chat panel", () => {
     expect(screen.getByRole("button", { name: "Latest message" })).toBeDefined();
   });
 
+  it("resumes following when the reader scrolls back to a previously restored bottom position", async () => {
+    vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
+    vi.spyOn(api, "askCopilot").mockResolvedValue({ answer: "New answer", contextEntryCount: 1, contextTruncated: false });
+    render(<CopilotChatPanel status={Status} sessionId="" onClose={vi.fn()} returnFocus={vi.fn()} />);
+    await connectCli();
+    const log = screen.getByRole("log");
+    Object.defineProperties(log, { scrollHeight: { value: 1000 }, clientHeight: { value: 200 } });
+    ask();
+    await screen.findByText("New answer");
+    expect(log.scrollTop).toBe(1000);
+    fireEvent.scroll(log);
+    log.scrollTop = 100;
+    fireEvent.scroll(log);
+    expect(screen.getByRole("button", { name: "Latest message" })).toBeDefined();
+    log.scrollTop = 1000;
+    fireEvent.scroll(log);
+    expect(screen.queryByRole("button", { name: "Latest message" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Expand Copilot chat" }));
+    expect(screen.queryByRole("button", { name: "Latest message" })).toBeNull();
+  });
+
   it("keeps streaming through layout changes and allows restoration while closing chat is disabled", async () => {
     vi.spyOn(api, "connectCopilot").mockResolvedValue(Setup);
     let finish!: (value: ChatResponse) => void;
