@@ -23,7 +23,9 @@
       <_Parameter1>ToolPath</_Parameter1>
       <_Parameter2>$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '../../src/LogStudio.Tool/bin/$(Configuration)/net10.0/LogStudio.Tool.dll'))</_Parameter2>
     </AssemblyAttribute>
-    <Compile Include="$(MedeinaRepositoryRoot)/test/shared/Medeina.Console.Color/ColorConsole.cs"
-             Link="ExistingMedeina/ColorConsole.cs" Condition="'$(MedeinaRepositoryRoot)' != ''" />
+    <Compile Include="$(MedeinaRepositoryRoot)/test/shared/Medeina.Console.Color/ColorConsole.cs" Link="ExistingMedeina/ColorConsole.cs" Condition="'$(MedeinaRepositoryRoot)' != ''" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\LogStudio.Desktop\LogStudio.Desktop.csproj" />
   </ItemGroup>
 </Project>

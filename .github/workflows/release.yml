@@ -102,6 +102,29 @@ jobs:
             & "./artifacts/publish/logstudio$extension" --help
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
+      - name: Publish self-contained desktop application
+        shell: pwsh
+        env:
+          RELEASE_RID: ${{ matrix.rid }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          dotnet publish src/LogStudio.Desktop/LogStudio.Desktop.csproj -c Release -r $env:RELEASE_RID --self-contained true -p:PackAsTool=false -p:PublishSingleFile=false -p:PublishTrimmed=false -o artifacts/desktop-publish
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item README.md, src/LogStudio/dependency-notices.txt, frontend/dist/third-party-notices.txt artifacts/desktop-publish/
+          Copy-Item src/LogStudio.Desktop/dependency-notices.txt artifacts/desktop-publish/desktop-dependency-notices.txt
+          $extension = if ($IsWindows) { ".exe" } else { "" }
+          if ([Runtime.InteropServices.RuntimeInformation]::RuntimeIdentifier -eq $env:RELEASE_RID) {
+            & "./artifacts/desktop-publish/LogStudio.Desktop$extension" --help
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if ($env:RELEASE_RID.StartsWith("osx-")) {
+            $contents = "artifacts/desktop-bundle/Log Studio.app/Contents"
+            New-Item -ItemType Directory -Path "$contents/MacOS" -Force | Out-Null
+            Copy-Item artifacts/desktop-publish/* "$contents/MacOS/" -Recurse
+            $version = $env:RELEASE_TAG.Split("-")[0]
+            $plist = (Get-Content packaging/Info.plist -Raw).Replace("@VERSION@", $version)
+            [IO.File]::WriteAllText("$contents/Info.plist", $plist, [Text.UTF8Encoding]::new($false))
+          }
       - name: Archive application and checksum
         shell: pwsh
         env:
@@ -121,6 +144,24 @@ jobs:
           }
           $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           [IO.File]::WriteAllText("$archive.sha256", "$hash  $name`n", [Text.Encoding]::ASCII)
+          $name = "logstudio-desktop-$env:RELEASE_RID$extension"
+          $archive = Join-Path "artifacts/release" $name
+          if ($IsWindows) {
+            Compress-Archive -Path artifacts/desktop-publish/* -DestinationPath $archive
+          } else {
+            $source = "artifacts/desktop-publish"
+            $executable = "$source/LogStudio.Desktop"
+            if ($env:RELEASE_RID.StartsWith("osx-")) {
+              $source = "artifacts/desktop-bundle"
+              $executable = "$source/Log Studio.app/Contents/MacOS/LogStudio.Desktop"
+            }
+            chmod +x $executable
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            tar -czf $archive -C $source .
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText("$archive.sha256", "$hash  $name`n", [Text.Encoding]::ASCII)
       - name: Verify native compiled-release installation
         shell: pwsh
         env:
@@ -129,6 +170,7 @@ jobs:
           if ([Runtime.InteropServices.RuntimeInformation]::RuntimeIdentifier -eq $env:RELEASE_RID) {
             $extension = if ($IsWindows) { ".zip" } else { ".tar.gz" }
             $env:LOGSTUDIO_TEST_ARCHIVE = (Resolve-Path "artifacts/release/logstudio-$env:RELEASE_RID$extension").Path
+            $env:LOGSTUDIO_TEST_DESKTOP_ARCHIVE = (Resolve-Path "artifacts/release/logstudio-desktop-$env:RELEASE_RID$extension").Path
             $env:LOGSTUDIO_TEST_RID = $env:RELEASE_RID
             node --test tests/installers/releases.test.mjs
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -163,9 +205,11 @@ jobs:
           for rid in linux-x64 linux-arm64 osx-x64 osx-arm64 win-x64 win-arm64; do
             extension=tar.gz
             if [[ "$rid" == win-* ]]; then extension=zip; fi
-            asset="logstudio-$rid.$extension"
-            for file in "$asset" "$asset.sha256"; do
-              [[ -s "artifacts/release/$file" ]] || { echo "Missing release asset: $file" >&2; exit 1; }
+            for application in logstudio logstudio-desktop; do
+              asset="$application-$rid.$extension"
+              for file in "$asset" "$asset.sha256"; do
+                [[ -s "artifacts/release/$file" ]] || { echo "Missing release asset: $file" >&2; exit 1; }
+              done
             done
           done
       - name: Publish GitHub Release
