@@ -138,7 +138,7 @@ PATH, use the command printed by the installer. No sudo or shell-profile edits a
 ```bash
 # Pin a release or choose user-writable directories:
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.sh \
-  | bash -s -- --version 1.7.0 --install-dir "$HOME/.local/share/logstudio" --bin-dir "$HOME/.local/bin"
+  | bash -s -- --version 1.7.1 --install-dir "$HOME/.local/share/logstudio" --bin-dir "$HOME/.local/bin"
 logstudio --open -- dotnet run --project ./path/to/App.csproj
 ```
 
@@ -151,7 +151,7 @@ Invoke-WebRequest -UseBasicParsing https://github.com/matanelcohen/LogStudio/rel
 logstudio --open -- dotnet run --project .\path\to\App.csproj
 ```
 
-Use `& $installer -Version 1.7.0 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
+Use `& $installer -Version 1.7.1 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
 version or choose a directory. If execution policy blocks the script, use the process-only
 override described below; when launching a separate PowerShell process, add the printed
 `bin` directory to PATH in your current terminal yourself. The installer otherwise updates
@@ -259,7 +259,7 @@ does not verify Windows-specific execution.
 ### Publishing compiled releases
 
 Set and commit the package version in `Directory.Build.props`, then push a matching tag
-on that commit, such as `1.7.0` (or `1.7.0-rc.1` for a prerelease). Versions and tags
+on that commit, such as `1.7.1` (or `1.7.1-rc.1` for a prerelease). Versions and tags
 must not have a `v` prefix. The
 [compiled-release workflow](../.github/workflows/release.yml) validates the tag, restores,
 builds, tests the frontend/backend and installer contracts, and verifies a source install.
