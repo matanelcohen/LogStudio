@@ -11,6 +11,10 @@ Install the standalone app, then launch **Log Studio** from your applications me
 It starts in `--listen-all` mode: choose **Running app** to capture new `ILogger` events.
 Closing the window disconnects capture without stopping your application.
 
+![Log Studio running in a native Photino.NET desktop window, listening to a selected .NET demo application](appscreenshot/desktop-listen-all.png)
+
+The desktop app on Linux, capturing synthetic `ILogger` events from the included demo.
+
 **macOS / Linux:**
 
 ```bash
