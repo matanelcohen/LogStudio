@@ -13,6 +13,12 @@ const releaseWorkflow = readFileSync(new URL("../../.github/workflows/release.ym
 const releaseRids = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64"];
 const windows = process.platform === "win32";
 
+function releaseStep(name, workflow = releaseWorkflow) {
+  const match = workflow.replace(/\r\n/g, "\n").match(new RegExp(`      - name: ${name}\\n[\\s\\S]*?        run: \\|\\n((?:          .*\\n)+)`));
+  assert.ok(match, name);
+  return match[1].replace(/^          /gm, "");
+}
+
 function run(command, args, env = {}, options = {}) {
   const result = spawnSync(command, args, {
     cwd: tmpdir(),
@@ -187,6 +193,16 @@ for (const [name, lineEnding] of [["LF", "\n"], ["CRLF", "\r\n"]]) {
       assert.equal(targets.get(rid), rid.startsWith("win-") ? "windows-latest" : "ubuntu-latest", rid);
     }
   });
+
+  test(`release packaging scripts can be extracted with ${name} line endings`, () => {
+    const workflow = releaseWorkflow.replace(/\r?\n/g, lineEnding);
+    for (const step of ["Publish self-contained desktop application", "Archive application and checksum", "Verify desktop archive contents"]) {
+      const script = releaseStep(step, workflow);
+      assert.ok(script.length > 0);
+      assert.equal(script, releaseStep(step, releaseWorkflow.replace(/\r?\n/g, "\n")));
+      assert.doesNotMatch(script, /\r/);
+    }
+  });
 }
 
 test("desktop releases preserve full self-contained publishes independently of the CLI", () => {
@@ -222,14 +238,9 @@ for (const rid of releaseRids.filter((rid) => rid.startsWith("win-") === windows
     writeFileSync(cli, "CLI apphost", { mode: 0o755 });
     mkdirSync(join(f.directory, "packaging"));
     cpSync(new URL("../../packaging/Info.plist", import.meta.url), join(f.directory, "packaging", "Info.plist"));
-    const step = (name) => {
-      const match = releaseWorkflow.match(new RegExp(`      - name: ${name}\\n[\\s\\S]*?        run: \\|\\n((?:          .*\\n)+)`));
-      assert.ok(match, name);
-      return match[1].replace(/^          /gm, "");
-    };
-    const publish = step("Publish self-contained desktop application");
-    const archive = step("Archive application and checksum");
-    const verify = step("Verify desktop archive contents");
+    const publish = releaseStep("Publish self-contained desktop application");
+    const archive = releaseStep("Archive application and checksum");
+    const verify = releaseStep("Verify desktop archive contents");
     const result = run("pwsh", ["-NoProfile", "-Command", `
 $ErrorActionPreference = "Stop"
 function dotnet {
@@ -630,14 +641,16 @@ test("Windows desktop waits for WinExe help, installs a Start Menu shortcut, and
   assert.equal(existsSync(shortcutPath(f)), true);
   const inspect = () => run("pwsh", ["-NoProfile", "-Command", `
     $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($env:MOCK_SHORTCUT)
-    if ($shortcut.TargetPath -ne (Join-Path $env:MOCK_INSTALL_DIR "desktop-bin/LogStudio.Desktop.exe")) { throw "Wrong shortcut target" }
+    if ($shortcut.TargetPath -ne (Join-Path (Join-Path $env:MOCK_INSTALL_DIR "desktop-bin") "LogStudio.Desktop.exe")) { throw "Wrong shortcut target" }
     if ($shortcut.WorkingDirectory -ne (Join-Path $env:MOCK_INSTALL_DIR "desktop-bin")) { throw "Wrong shortcut working directory" }
   `], { MOCK_SHORTCUT: shortcutPath(f), MOCK_INSTALL_DIR: f.install });
-  assert.equal(inspect().status, 0);
+  const installedShortcut = inspect();
+  assert.equal(installedShortcut.status, 0, installedShortcut.stdout + installedShortcut.stderr);
   assert.equal(run(join(f.install, "desktop-bin", "LogStudio.Desktop.exe"), ["--help"]).status, 0);
   const update = f.powershell("-Desktop");
   assert.equal(update.status, 0, update.stdout + update.stderr);
-  assert.equal(inspect().status, 0);
+  const updatedShortcut = inspect();
+  assert.equal(updatedShortcut.status, 0, updatedShortcut.stdout + updatedShortcut.stderr);
   assert.equal(readdirSync(f.install).filter((name) => name.startsWith("desktop-release.")).length, 2);
 });
 
