@@ -20,6 +20,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
 {
     private const int LinuxAddressInUse = 98;
     private const int MacAddressInUse = 48;
+    private const int WindowsSharingViolation = 32;
     private const int WindowsAlreadyExists = 183;
     private const int WindowsAddressInUse = 10048;
     private const int UnixPrefixAlreadyRegistered = 400;
@@ -83,7 +84,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
     internal Uri Url { get; }
 
     internal static bool IsAddressInUse(HttpListenerException exception) =>
-        exception.NativeErrorCode is LinuxAddressInUse or MacAddressInUse or WindowsAlreadyExists or WindowsAddressInUse or UnixPrefixAlreadyRegistered;
+        exception.NativeErrorCode is LinuxAddressInUse or MacAddressInUse or WindowsSharingViolation or WindowsAlreadyExists or WindowsAddressInUse or UnixPrefixAlreadyRegistered;
 
     public async ValueTask DisposeAsync()
     {
