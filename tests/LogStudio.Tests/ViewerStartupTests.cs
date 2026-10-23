@@ -133,11 +133,13 @@ public sealed class ViewerStartupTests
     [Theory]
     [InlineData(98, true)]
     [InlineData(48, true)]
+    [InlineData(32, true)]
     [InlineData(183, true)]
     [InlineData(10048, true)]
     [InlineData(400, true)]
     [InlineData(5, false)]
     [InlineData(13, false)]
+    [InlineData(2, false)]
     public void OnlyAddressInUseErrorsAllowAnotherPort(int errorCode, bool expected)
     {
         Assert.Equal(expected, HttpLogServer.IsAddressInUse(new HttpListenerException(errorCode)));

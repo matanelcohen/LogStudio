@@ -124,6 +124,13 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
                 return;
             }
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            // The child's output code page can be lossy even when stdin accepts the original text.
+            ProcessResult baseline = await RunProcessAsync(
+                new[] { DemoPath, "--count", "0", "--interactive" }, input: text);
+            Assert.Equal(0, baseline.ExitCode);
+            const string echoPrefix = "Received: ";
+            Assert.Contains(echoPrefix, baseline.Output, StringComparison.Ordinal);
+            string expectedEcho = baseline.Output[baseline.Output.IndexOf(echoPrefix, StringComparison.Ordinal)..].Split('\r', '\n')[0];
             while (true)
             {
                 using JsonDocument snapshot = await GetSnapshotAsync(client, url, timeout.Token);
@@ -131,7 +138,7 @@ public sealed class ProcessTests : IClassFixture<ProcessArchivesFixture>
                 {
                     Assert.False(snapshot.RootElement.GetProperty("status").GetProperty("canWriteInput").GetBoolean());
                     Assert.Contains(snapshot.RootElement.GetProperty("entries").EnumerateArray(), entry =>
-                        entry.GetProperty("message").GetString()?.Contains("Received: " + text, StringComparison.Ordinal) == true);
+                        entry.GetProperty("message").GetString()?.Contains(expectedEcho, StringComparison.Ordinal) == true);
                     break;
                 }
                 await Task.Delay(20, timeout.Token);
