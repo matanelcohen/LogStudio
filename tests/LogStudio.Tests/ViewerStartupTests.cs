@@ -50,7 +50,11 @@ public sealed class ViewerStartupTests
         using HttpResponseMessage response = await client.GetAsync(viewer.Url);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using HttpResponseMessage root = await client.GetAsync(viewer.Url.GetLeftPart(UriPartial.Authority));
-        Assert.Equal(HttpStatusCode.NotFound, root.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, root.StatusCode);
+        using HttpRequestMessage crossOrigin = new(HttpMethod.Get, viewer.Url);
+        crossOrigin.Headers.Add(ViewerConstants.OriginHeader, "https://example.invalid");
+        using HttpResponseMessage denied = await client.SendAsync(crossOrigin);
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
         Assert.Equal(port, ((IPEndPoint)occupied.LocalEndpoint).Port);
     }
 
