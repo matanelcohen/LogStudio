@@ -98,6 +98,21 @@ Both support `--version X.Y.Z` / `-Version X.Y.Z` for pinned releases and custom
 Rerun the same installer to update. Desktop assets are named `logstudio-desktop-<rid>.tar.gz`
 (Unix) or `.zip` (Windows); CLI archives and NuGet tool packages remain unchanged.
 
+Launchers and default installation locations:
+
+- **Linux:** `~/.local/share/logstudio-desktop`, with `~/.local/bin/logstudio-desktop` and
+  `${XDG_DATA_HOME:-~/.local/share}/applications/logstudio-desktop.desktop`.
+- **macOS:** `~/.local/share/logstudio-desktop`, with `~/Applications/Log Studio.app` and
+  `~/.local/bin/logstudio-desktop` pointing to the installed application bundle.
+- **Windows:** `%LOCALAPPDATA%\LogStudioDesktop`, with a **Log Studio** Start Menu shortcut
+  and a `desktop-bin` junction. The installer adds that directory to its current session's PATH only.
+
+To uninstall the desktop app, remove its application launcher and executable link, then its
+installation directory. On Windows, remove the Start Menu shortcut and `desktop-bin` junction
+first (`cmd /c rmdir "%LOCALAPPDATA%\LogStudioDesktop\desktop-bin"`), then the installation
+directory. This leaves the separately installed CLI untouched. Saved sessions and WebView settings
+live in the OS application-data directory and are not removed by uninstalling the binaries.
+
 Desktop runtime requirements:
 
 - **Windows x64 / ARM64:** Microsoft Edge WebView2 Runtime (Evergreen). Install it from

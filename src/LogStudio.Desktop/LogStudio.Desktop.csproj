@@ -1,7 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <OutputType Condition="$(RuntimeIdentifier.StartsWith('win-')) or ('$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Windows')))">WinExe</OutputType>
+  </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\LogStudio.Tool\LogStudio.Tool.csproj" />
+    <ProjectReference Include="../LogStudio.Tool/LogStudio.Tool.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -9,10 +12,5 @@
     <InternalsVisibleTo Include="LogStudio.Tests" />
     <None Update="dependency-notices.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
-
-  <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <OutputType Condition="$([MSBuild]::IsOSPlatform('Windows')) or $(RuntimeIdentifier.StartsWith('win-'))">WinExe</OutputType>
-  </PropertyGroup>
 
 </Project>

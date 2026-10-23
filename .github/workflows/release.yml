@@ -162,6 +162,33 @@ jobs:
           }
           $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           [IO.File]::WriteAllText("$archive.sha256", "$hash  $name`n", [Text.Encoding]::ASCII)
+      - name: Verify desktop archive contents
+        shell: pwsh
+        env:
+          RELEASE_RID: ${{ matrix.rid }}
+        run: |
+          $extension = if ($IsWindows) { ".zip" } else { ".tar.gz" }
+          $archive = "artifacts/release/logstudio-desktop-$env:RELEASE_RID$extension"
+          if ($IsWindows) {
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $archive).Path)
+            try { $entries = @($zip.Entries | ForEach-Object { $_.FullName.Replace("\", "/") }) }
+            finally { $zip.Dispose() }
+          } else {
+            $entries = @(tar -tzf $archive | ForEach-Object { $_ -replace '^\./', '' })
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $prefix = ""
+          $nativeExtension = ".so"
+          if ($env:RELEASE_RID.StartsWith("win-")) { $nativeExtension = ".dll" }
+          if ($env:RELEASE_RID.StartsWith("osx-")) {
+            $nativeExtension = ".dylib"
+            $prefix = "Log Studio.app/Contents/MacOS/"
+            if ($entries -notcontains "Log Studio.app/Contents/Info.plist") { throw "Desktop archive is missing bundle metadata." }
+          }
+          foreach ($file in @("LogStudio.dll", "LogStudio.Desktop.dll", "Photino.NET.dll", "Photino.Native$nativeExtension", "desktop-dependency-notices.txt", "dependency-notices.txt")) {
+            if ($entries -notcontains "$prefix$file") { throw "Desktop archive is missing $file." }
+          }
       - name: Verify native compiled-release installation
         shell: pwsh
         env:

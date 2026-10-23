@@ -12,6 +12,7 @@
     <Using Include="System" Condition="'$(MedeinaRepositoryRoot)' != ''" />
     <ProjectReference Include="../../src/LogStudio/LogStudio.csproj" />
     <ProjectReference Include="../../src/LogStudio.Tool/LogStudio.Tool.csproj" />
+    <ProjectReference Include="../../src/LogStudio.Desktop/LogStudio.Desktop.csproj" />
     <ProjectReference Include="../../samples/LogStudio.Demo/LogStudio.Demo.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup>
@@ -23,9 +24,7 @@
       <_Parameter1>ToolPath</_Parameter1>
       <_Parameter2>$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '../../src/LogStudio.Tool/bin/$(Configuration)/net10.0/LogStudio.Tool.dll'))</_Parameter2>
     </AssemblyAttribute>
-    <Compile Include="$(MedeinaRepositoryRoot)/test/shared/Medeina.Console.Color/ColorConsole.cs" Link="ExistingMedeina/ColorConsole.cs" Condition="'$(MedeinaRepositoryRoot)' != ''" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\..\src\LogStudio.Desktop\LogStudio.Desktop.csproj" />
+    <Compile Include="$(MedeinaRepositoryRoot)/test/shared/Medeina.Console.Color/ColorConsole.cs"
+             Link="ExistingMedeina/ColorConsole.cs" Condition="'$(MedeinaRepositoryRoot)' != ''" />
   </ItemGroup>
 </Project>

@@ -216,6 +216,7 @@ for (const rid of releaseRids.filter((rid) => rid.startsWith("win-") === windows
     };
     const publish = step("Publish self-contained desktop application");
     const archive = step("Archive application and checksum");
+    const verify = step("Verify desktop archive contents");
     const result = run("pwsh", ["-NoProfile", "-Command", `
 $ErrorActionPreference = "Stop"
 function dotnet {
@@ -224,13 +225,16 @@ function dotnet {
   $extension = if ($IsWindows) { ".exe" } else { "" }
   if ($IsWindows) { Copy-Item $env:MOCK_NODE "$output/LogStudio.Desktop.exe" }
   else { [IO.File]::WriteAllText("$output/LogStudio.Desktop", "#!/bin/sh" + [char]10 + '[ "$1" = "--help" ]' + [char]10); chmod +x "$output/LogStudio.Desktop" }
-  foreach ($name in @("LogStudio.dll", "LogStudio.Desktop.dll", "LogStudio.Desktop.deps.json", "LogStudio.Desktop.runtimeconfig.json", "Photino.NET.dll", "native.fixture")) {
+  $nativeExtension = if ($env:RELEASE_RID.StartsWith("win-")) { ".dll" } elseif ($env:RELEASE_RID.StartsWith("osx-")) { ".dylib" } else { ".so" }
+  foreach ($name in @("LogStudio.dll", "LogStudio.Desktop.dll", "LogStudio.Desktop.deps.json", "LogStudio.Desktop.runtimeconfig.json", "Photino.NET.dll", "Photino.Native$nativeExtension")) {
     [IO.File]::WriteAllText("$output/$name", "published dependency")
   }
+  Copy-Item src/LogStudio.Desktop/dependency-notices.txt "$output/dependency-notices.txt"
   $global:LASTEXITCODE = 0
 }
 ${publish}
 ${archive}
+${verify}
 `], { RELEASE_RID: rid, RELEASE_TAG: "1.0.3-rc.1", MOCK_NODE: process.execPath }, { cwd: f.directory });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     const extension = windows ? "zip" : "tar.gz";
@@ -249,15 +253,26 @@ ${archive}
       : run("tar", ["-xzf", path, "-C", extracted]);
     assert.equal(unpack.status, 0, unpack.stderr);
     const binaries = rid.startsWith("osx-") ? join(extracted, "Log Studio.app", "Contents", "MacOS") : extracted;
-    for (const file of ["LogStudio.dll", "LogStudio.Desktop.dll", "LogStudio.Desktop.deps.json", "LogStudio.Desktop.runtimeconfig.json", "Photino.NET.dll", "native.fixture", "desktop-dependency-notices.txt", "dependency-notices.txt", "third-party-notices.txt"]) {
+    const native = `Photino.Native${rid.startsWith("win-") ? ".dll" : rid.startsWith("osx-") ? ".dylib" : ".so"}`;
+    for (const file of ["LogStudio.dll", "LogStudio.Desktop.dll", "LogStudio.Desktop.deps.json", "LogStudio.Desktop.runtimeconfig.json", "Photino.NET.dll", native, "desktop-dependency-notices.txt", "dependency-notices.txt", "third-party-notices.txt"]) {
       assert.equal(existsSync(join(binaries, file)), true, file);
     }
+    assert.equal(readFileSync(join(binaries, "desktop-dependency-notices.txt"), "utf8"), "src/LogStudio.Desktop/dependency-notices.txt");
+    assert.equal(readFileSync(join(binaries, "dependency-notices.txt"), "utf8"), "src/LogStudio/dependency-notices.txt");
     assert.equal(existsSync(join(binaries, windows ? "LogStudio.Desktop.exe" : "LogStudio.Desktop")), true);
     if (rid.startsWith("osx-")) {
       const plist = readFileSync(join(extracted, "Log Studio.app", "Contents", "Info.plist"), "utf8");
       assert.doesNotMatch(plist, /@VERSION@/);
       assert.match(plist, /<string>1\.0\.3<\/string>/);
     }
+    rmSync(join(binaries, native));
+    const incomplete = windows
+      ? run("pwsh", ["-NoProfile", "-Command", "Compress-Archive -Path \"$env:MOCK_EXTRACTED/*\" -DestinationPath $env:MOCK_ARCHIVE -Force"], { MOCK_EXTRACTED: extracted, MOCK_ARCHIVE: path })
+      : run("tar", ["-czf", path, "-C", extracted, "."]);
+    assert.equal(incomplete.status, 0, incomplete.stderr);
+    const rejected = run("pwsh", ["-NoProfile", "-Command", verify], { RELEASE_RID: rid }, { cwd: f.directory });
+    assert.notEqual(rejected.status, 0);
+    assert.ok(rejected.stderr.includes(`Desktop archive is missing ${native}`), rejected.stderr);
   });
 }
 
