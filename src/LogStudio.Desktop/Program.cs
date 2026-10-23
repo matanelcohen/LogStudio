@@ -71,13 +71,23 @@ internal static class Program
         }
     }
 
-    internal static void Run(ToolOptions options, Action<Uri> showWindow, string? sessionsDirectory = null)
+    internal static void Run(ToolOptions options, Action<Uri, Action> showWindow, string? sessionsDirectory = null)
     {
         DesktopSession session = DesktopSession.StartAsync(options, sessionsDirectory).GetAwaiter().GetResult();
         try
         {
             // Keep Photino's message loop on the original STA/main thread on Windows and macOS.
-            showWindow(session.Viewer.Url);
+            showWindow(session.Viewer.Url, () =>
+            {
+                try
+                {
+                    session.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                }
+                catch (Exception exception)
+                {
+                    Console.Error.WriteLine($"Could not save the desktop session: {exception}");
+                }
+            });
         }
         finally
         {
@@ -85,10 +95,11 @@ internal static class Program
         }
     }
 
-    private static void ShowWindow(Uri url)
+    private static void ShowWindow(Uri url, Action shutdown)
     {
         string profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LogStudio", "WebView");
         Directory.CreateDirectory(profile);
+        using IDisposable? termination = OperatingSystem.IsMacOS() ? new MacApplicationLifetime(shutdown) : null;
         new PhotinoWindow()
             .SetTitle("Log Studio")
             .SetUseOsDefaultSize(false)
@@ -104,6 +115,11 @@ internal static class Program
             .SetIgnoreCertificateErrorsEnabled(false)
             .SetDevToolsEnabled(false)
             .SetLogVerbosity(0)
+            .RegisterWindowClosingHandler((_, _) =>
+            {
+                shutdown();
+                return false;
+            })
             .Load(url)
             .WaitForClose();
     }

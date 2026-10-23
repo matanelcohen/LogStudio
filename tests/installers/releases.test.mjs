@@ -102,8 +102,17 @@ function desktopArchive(f, rid = "linux-x64", missing = "") {
   for (const name of ["LogStudio.dll", "LogStudio.Desktop.dll"]) {
     if (missing !== name) writeFileSync(join(binaries, name), "fixture");
   }
+  const native = `Photino.Native${win ? ".dll" : mac ? ".dylib" : ".so"}`;
+  if (missing !== native) writeFileSync(join(binaries, native), missing === "empty-native" ? "" : "native fixture");
   if (missing !== "executable") {
-    if (win) cpSync(process.execPath, join(binaries, "LogStudio.Desktop.exe"));
+    if (win) {
+      const executable = readFileSync(process.execPath);
+      const pe = executable.readUInt32LE(0x3c);
+      assert.equal(executable.toString("ascii", pe, pe + 4), "PE\0\0");
+      // Exercise WinExe process-wait behavior without requiring a compiler or SDK.
+      executable.writeUInt16LE(2, pe + 24 + 68);
+      writeFileSync(join(binaries, "LogStudio.Desktop.exe"), executable);
+    }
     else writeFileSync(join(binaries, "LogStudio.Desktop"), '#!/bin/sh\n[ "$1" = "--help" ]\n', { mode: 0o755 });
   }
   if (mac && missing !== "Info.plist") {
@@ -191,6 +200,10 @@ test("desktop releases preserve full self-contained publishes independently of t
   assert.match(plist, /<key>CFBundleExecutable<\/key>\s*<string>LogStudio\.Desktop<\/string>/);
   assert.match(plist, /<key>CFBundlePackageType<\/key>\s*<string>APPL<\/string>/);
   assert.match(plist, /<key>NSHighResolutionCapable<\/key>\s*<true\/>/);
+  assert.match(plist, /<key>NSAppTransportSecurity<\/key>\s*<dict>\s*<key>NSAllowsLocalNetworking<\/key>\s*<true\/>/);
+  assert.doesNotMatch(plist, /NSAllowsArbitraryLoads/);
+  assert.match(readFileSync(powershellInstaller, "utf8"), /& \$Executable --help \| Out-Null/);
+  assert.match(releaseWorkflow, /& "\.\/artifacts\/desktop-publish\/LogStudio\.Desktop\$extension" --help \| Out-Host/);
 });
 
 for (const rid of releaseRids.filter((rid) => rid.startsWith("win-") === windows)) {
@@ -500,7 +513,8 @@ test("Bash desktop checksum failures preserve the desktop launcher and CLI", { s
 
 for (const [rid, missing] of [
   ["linux-x64", "executable"], ["linux-x64", "LogStudio.dll"], ["linux-x64", "LogStudio.Desktop.dll"],
-  ["osx-arm64", "Info.plist"], ["osx-x64", "LogStudio.dll"]
+  ["osx-arm64", "Info.plist"], ["osx-x64", "LogStudio.dll"],
+  ["linux-x64", "Photino.Native.so"], ["osx-x64", "Photino.Native.dylib"], ["linux-x64", "empty-native"]
 ]) {
   test(`Bash desktop refuses ${rid} archives without ${missing}`, { skip: windows }, (t) => {
     const f = fixture(t);
@@ -605,7 +619,7 @@ for (const desktop of [false, true]) {
   });
 }
 
-test("Windows desktop installs a per-user Start Menu shortcut and preserves a separate CLI", { skip: !windows }, (t) => {
+test("Windows desktop waits for WinExe help, installs a Start Menu shortcut, and preserves CLI", { skip: !windows }, (t) => {
   const f = fixture(t);
   mkdirSync(join(f.install, "bin"), { recursive: true });
   writeFileSync(join(f.install, "bin", "logstudio.exe"), "unrelated CLI must not be touched");
@@ -627,7 +641,7 @@ test("Windows desktop installs a per-user Start Menu shortcut and preserves a se
   assert.equal(readdirSync(f.install).filter((name) => name.startsWith("desktop-release.")).length, 2);
 });
 
-for (const missing of ["executable", "LogStudio.dll", "LogStudio.Desktop.dll"]) {
+for (const missing of ["executable", "LogStudio.dll", "LogStudio.Desktop.dll", "Photino.Native.dll", "empty-native"]) {
   test(`Windows desktop refuses archives missing ${missing}`, { skip: !windows }, (t) => {
     const f = fixture(t);
     desktopArchive(f, windowsRid(), missing);

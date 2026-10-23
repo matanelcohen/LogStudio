@@ -112,7 +112,7 @@ public sealed class DesktopTests
         string directory = Path.Combine(Path.GetTempPath(), "logstudio-desktop-test-" + Guid.NewGuid().ToString("N"));
         try
         {
-            void ShowWindow(Uri address)
+            void ShowWindow(Uri address, Action shutdown)
             {
                 url = address;
                 Assert.Equal(thread, Environment.CurrentManagedThreadId);
@@ -132,6 +132,27 @@ public sealed class DesktopTests
             Assert.NotNull(url);
             using TcpListener released = new(IPAddress.Loopback, url.Port);
             released.Start();
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void NativeTerminationSavesAndStopsSessionBeforeReturningFromWindowLoop()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "logstudio-desktop-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            DesktopProgram.Run(DesktopOptions.Parse(["--port", "0"]), (url, shutdown) =>
+            {
+                shutdown();
+                shutdown();
+                using TcpListener released = new(IPAddress.Loopback, url.Port);
+                released.Start();
+                Assert.NotEmpty(Directory.GetFiles(directory, "*", SearchOption.AllDirectories));
+            }, directory);
         }
         finally
         {

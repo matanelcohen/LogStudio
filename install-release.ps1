@@ -86,6 +86,12 @@ try {
     if ($Desktop -and -not (Test-Path -LiteralPath (Join-Path $ReleaseDir "LogStudio.Desktop.dll") -PathType Leaf)) {
         throw "The desktop archive is missing LogStudio.Desktop.dll."
     }
+    if ($Desktop) {
+        $NativeLibrary = Join-Path $ReleaseDir "Photino.Native.dll"
+        if (-not (Test-Path -LiteralPath $NativeLibrary -PathType Leaf) -or (Get-Item -LiteralPath $NativeLibrary).Length -eq 0) {
+            throw "The desktop archive is missing a nonempty Photino.Native.dll."
+        }
+    }
     & $Executable --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Installed tool verification failed." }
     $BinDir = Join-Path $InstallDir $(if ($Desktop) { "desktop-bin" } else { "bin" })

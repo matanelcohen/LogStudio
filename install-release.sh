@@ -150,6 +150,11 @@ if [[ "$Desktop" == true ]]; then
   if [[ ! -f "$PayloadDir/LogStudio.Desktop.dll" || "$Platform" == osx && ! -f "$ReleaseDir/Log Studio.app/Contents/Info.plist" ]]; then
     printf 'The desktop archive is missing LogStudio.Desktop.dll or bundle metadata.\n' >&2; exit 1
   fi
+  NativeExtension="so"
+  if [[ "$Platform" == osx ]]; then NativeExtension="dylib"; fi
+  if [[ ! -f "$PayloadDir/Photino.Native.$NativeExtension" || ! -s "$PayloadDir/Photino.Native.$NativeExtension" ]]; then
+    printf 'The desktop archive is missing a nonempty Photino.Native.%s.\n' "$NativeExtension" >&2; exit 1
+  fi
 fi
 chmod +x "$Executable"
 "$Executable" --help >/dev/null

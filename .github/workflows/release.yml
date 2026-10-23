@@ -114,7 +114,7 @@ jobs:
           Copy-Item src/LogStudio.Desktop/dependency-notices.txt artifacts/desktop-publish/desktop-dependency-notices.txt
           $extension = if ($IsWindows) { ".exe" } else { "" }
           if ([Runtime.InteropServices.RuntimeInformation]::RuntimeIdentifier -eq $env:RELEASE_RID) {
-            & "./artifacts/desktop-publish/LogStudio.Desktop$extension" --help
+            & "./artifacts/desktop-publish/LogStudio.Desktop$extension" --help | Out-Host
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           if ($env:RELEASE_RID.StartsWith("osx-")) {

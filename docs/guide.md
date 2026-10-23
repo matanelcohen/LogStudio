@@ -112,6 +112,8 @@ installation directory. On Windows, remove the Start Menu shortcut and `desktop-
 first (`cmd /c rmdir "%LOCALAPPDATA%\LogStudioDesktop\desktop-bin"`), then the installation
 directory. This leaves the separately installed CLI untouched. Saved sessions and WebView settings
 live in the OS application-data directory and are not removed by uninstalling the binaries.
+If you deliberately used one custom install directory for both modes, remove only its
+`desktop-release.*` directories after removing the desktop launchers/junction; keep CLI releases.
 
 Desktop runtime requirements:
 
