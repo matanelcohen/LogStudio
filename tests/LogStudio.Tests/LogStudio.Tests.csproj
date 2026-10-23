@@ -12,6 +12,7 @@
     <Using Include="System" Condition="'$(MedeinaRepositoryRoot)' != ''" />
     <ProjectReference Include="../../src/LogStudio/LogStudio.csproj" />
     <ProjectReference Include="../../src/LogStudio.Tool/LogStudio.Tool.csproj" />
+    <ProjectReference Include="../../src/LogStudio.Desktop/LogStudio.Desktop.csproj" />
     <ProjectReference Include="../../samples/LogStudio.Demo/LogStudio.Demo.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup>

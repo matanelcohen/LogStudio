@@ -12,6 +12,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="LogStudio.Tests" />
+    <InternalsVisibleTo Include="LogStudio.Desktop" />
     <ProjectReference Include="../LogStudio/LogStudio.csproj" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />
     <None Include="../../frontend/dist/third-party-notices.txt" Pack="true" PackagePath="/" />

@@ -1,11 +1,41 @@
 # Log Studio
 
 Turn your C# / .NET app or console command into a live, searchable log workspace.
-Same command. No app changes. One local browser tab.
+Choose a running app in a native desktop window, or keep using the command-line browser viewer.
 
 ## Install
 
-### macOS / Linux
+### Desktop app (Photino.NET)
+
+Install the standalone app, then launch **Log Studio** from your applications menu—no terminal required.
+It starts in `--listen-all` mode: choose **Running app** to capture new `ILogger` events.
+Closing the window disconnects capture without stopping your application.
+
+![Log Studio running in a native Photino.NET desktop window, listening to a selected .NET demo application](appscreenshot/desktop-listen-all.png)
+
+The desktop app on Linux, capturing synthetic `ILogger` events from the included demo.
+
+**macOS / Linux:**
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.sh | bash -s -- --desktop
+```
+
+**Windows PowerShell:**
+
+```powershell
+$installer = Join-Path $env:TEMP "logstudio-install-release.ps1"
+Invoke-WebRequest -UseBasicParsing https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.ps1 -OutFile $installer
+& $installer -Desktop
+```
+
+Self-contained releases support x64 and ARM64. Windows needs the **Microsoft Edge WebView2 Runtime**;
+Linux needs **GTK 3, WebKitGTK 4.1, and libnotify** (on Ubuntu/Debian:
+`sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0 libnotify4`). macOS uses the system WebKit.
+These prerequisites are not installed automatically. The app and its embedded viewer work offline.
+See [desktop installation](docs/guide.md#install-the-desktop-app) for launchers, updates, and uninstalling.
+
+### CLI: macOS / Linux
 
 Install the latest compiled release without cloning, building, or installing .NET or Node.js:
 
@@ -19,7 +49,7 @@ The installer verifies the release's SHA-256 checksum and links `logstudio` into
 `~/.local/bin`. If that directory is not in PATH, use the command printed by the installer.
 No sudo or shell-profile changes are needed.
 
-### Windows
+### CLI: Windows
 
 Run in PowerShell without an administrator shell:
 
@@ -37,6 +67,9 @@ Checksums detect corrupt downloads; they are not independent signatures. Downloa
 inspect the installer first if you do not want to pipe a remote script into Bash.
 
 ### Run your command
+
+The CLI is still available separately: omit `--desktop` / `-Desktop` when installing.
+Desktop installation does not replace an existing CLI installation.
 
 ```bash
 logstudio --open -- dotnet run --project ./path/to/App.csproj

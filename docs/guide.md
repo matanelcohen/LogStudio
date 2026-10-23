@@ -9,8 +9,9 @@ telemetry capture and APIs remain available.
 
 ## Under the hood
 
-The primary entry point is a **NuGet-packaged .NET wrapper tool**: keep using your existing command,
-without changing the application, logging providers, configuration, or repository.
+The **Photino.NET desktop app** opens the embedded viewer in a native window and starts in
+listen-all mode. The **NuGet-packaged .NET wrapper tool** remains available: keep using your
+existing command without changing the application, logging providers, configuration, or repository.
 History lives in private temporary files; neither the capture process nor the browser keeps the entire run in RAM.
 All browser assets are embedded and work offline.
 
@@ -66,7 +67,77 @@ return to automatic appearance. Increased-contrast and reduced-transparency pref
 blur and use opaque, stronger-bordered surfaces. Reduced-motion disables control transitions.
 Browsers without backdrop-filter support use opaque surfaces.
 
-## Quick start: wrapper (recommended)
+## Quick start
+
+### Install the desktop app
+
+The standalone desktop app runs the same local server and running-app collector as
+`logstudio --listen-all`, inside a Photino.NET window instead of a browser tab.
+No target is attached automatically. Select **Running app** to begin; closing the window
+stops diagnostics capture, saves session history, and stops the localhost server without
+terminating any selected application.
+
+**macOS / Linux:**
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.sh \
+  | bash -s -- --desktop
+```
+
+**Windows PowerShell:**
+
+```powershell
+$installer = Join-Path $env:TEMP "logstudio-install-release.ps1"
+Invoke-WebRequest -UseBasicParsing https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.ps1 -OutFile $installer
+& $installer -Desktop
+```
+
+The installers verify SHA-256 checksums and install for the current user, without administrator
+access. Desktop and CLI installations are independent; omit the desktop switch to install the CLI.
+Both support `--version X.Y.Z` / `-Version X.Y.Z` for pinned releases and custom install directories.
+Rerun the same installer to update. Desktop assets are named `logstudio-desktop-<rid>.tar.gz`
+(Unix) or `.zip` (Windows); CLI archives and NuGet tool packages remain unchanged.
+
+Launchers and default installation locations:
+
+- **Linux:** `~/.local/share/logstudio-desktop`, with `~/.local/bin/logstudio-desktop` and
+  `${XDG_DATA_HOME:-~/.local/share}/applications/logstudio-desktop.desktop`.
+- **macOS:** `~/.local/share/logstudio-desktop`, with `~/Applications/Log Studio.app` and
+  `~/.local/bin/logstudio-desktop` pointing to the installed application bundle.
+- **Windows:** `%LOCALAPPDATA%\LogStudioDesktop`, with a **Log Studio** Start Menu shortcut
+  and a `desktop-bin` junction. The installer adds that directory to its current session's PATH only.
+
+To uninstall the desktop app, remove its application launcher and executable link, then its
+installation directory. On Windows, remove the Start Menu shortcut and `desktop-bin` junction
+first (`cmd /c rmdir "%LOCALAPPDATA%\LogStudioDesktop\desktop-bin"`), then the installation
+directory. This leaves the separately installed CLI untouched. Saved sessions and WebView settings
+live in the OS application-data directory and are not removed by uninstalling the binaries.
+If you deliberately used one custom install directory for both modes, remove only its
+`desktop-release.*` directories after removing the desktop launchers/junction; keep CLI releases.
+
+Desktop runtime requirements:
+
+- **Windows x64 / ARM64:** Microsoft Edge WebView2 Runtime (Evergreen). Install it from
+  [Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/) if it is not already present.
+- **Linux x64 / ARM64:** a graphical desktop, glibc, GTK 3, WebKitGTK **4.1**, libnotify,
+  and the usual .NET native prerequisites. On Ubuntu/Debian:
+  `sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0 libnotify4`. WebKitGTK 4.0 alone is insufficient.
+- **macOS Intel / Apple Silicon:** system WebKit. Release bundles are not signed or notarized;
+  follow your organization's Gatekeeper policy for trusted downloaded applications.
+
+No .NET SDK, Node.js, browser download, or runtime CDN is needed for a compiled desktop release.
+The installer does not install operating-system dependencies or disable browser security.
+
+The app uses port **5177** when available and automatically chooses another localhost port if busy,
+without a console prompt or connecting to an unverified existing server. Preferences stored by
+the viewer are origin/port scoped, so a fallback port has separate settings. Desktop WebView files
+are stored under `LogStudio/WebView` in the OS local application-data directory; managed startup
+failures are recorded in `LogStudio/desktop-error.log` there.
+
+For development, build the frontend first, then run
+`dotnet run --project src/LogStudio.Desktop`. Desktop options include `--port`, `--capacity`,
+`--flush-every`, and `--name`; `--help` and `--version` work without a graphical session.
+Command wrapping, `--open`, and `--no-wait` belong to the CLI, not the desktop launcher.
 
 ### Choose a running .NET app
 

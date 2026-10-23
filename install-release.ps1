@@ -3,6 +3,7 @@
 param(
     [string]$Version = "latest",
     [string]$InstallDir = "",
+    [switch]$Desktop,
     [switch]$Help
 )
 
@@ -11,8 +12,10 @@ $PSNativeCommandUseErrorActionPreference = $false
 if ($Help) {
     Write-Host @"
 Download and install a compiled Windows Log Studio release (no SDK or Node.js required).
-Usage: ./install-release.ps1 [-Version X.Y.Z] [-InstallDir <directory>]
+Usage: ./install-release.ps1 [-Desktop] [-Version X.Y.Z] [-InstallDir <directory>]
 Supports x64 and ARM64. Default: latest release in %LOCALAPPDATA%\LogStudio.
+Use -Desktop for the standalone app in %LOCALAPPDATA%\LogStudioDesktop and a per-user Start Menu shortcut.
+The CLI is left unchanged. Requires the system WebView2 runtime; no OS dependencies are installed.
 No administrator access or persistent PATH changes. -Help downloads nothing.
 "@
     exit 0
@@ -22,6 +25,8 @@ $TemporaryDir = $null
 $ReleaseDir = $null
 $PendingBin = $null
 $PreviousBin = $null
+$BinReplaced = $false
+$PendingShortcut = $null
 $Installed = $false
 $PreviousSecurityProtocol = [Net.ServicePointManager]::SecurityProtocol
 try {
@@ -37,9 +42,13 @@ try {
         "ARM64" { "arm64" }
         default { throw "Unsupported CPU architecture; releases support x64 and ARM64." }
     }
-    if (-not $InstallDir) { $InstallDir = Join-Path $env:LOCALAPPDATA "LogStudio" }
+    if (-not $InstallDir) {
+        $InstallDir = Join-Path $env:LOCALAPPDATA $(if ($Desktop) { "LogStudioDesktop" } else { "LogStudio" })
+    }
     $InstallDir = [IO.Path]::GetFullPath($InstallDir)
-    $Asset = "logstudio-win-$Architecture.zip"
+    $Application = if ($Desktop) { "logstudio-desktop" } else { "logstudio" }
+    $ReleasePrefix = if ($Desktop) { "desktop-release" } else { "release" }
+    $Asset = "$Application-win-$Architecture.zip"
     $Repository = "https://github.com/matanelcohen/LogStudio"
     $DownloadUrl = if ($Version -eq "latest") { "$Repository/releases/latest/download" } else { "$Repository/releases/download/$Version" }
     $TemporaryDir = Join-Path ([IO.Path]::GetTempPath()) ("logstudio-download." + [Guid]::NewGuid().ToString("N"))
@@ -67,15 +76,48 @@ try {
             }
         }
     } finally { $Zip.Dispose() }
-    $ReleaseDir = Join-Path $InstallDir ("release." + [Guid]::NewGuid().ToString("N"))
+    $ReleaseDir = Join-Path $InstallDir ("$ReleasePrefix." + [Guid]::NewGuid().ToString("N"))
     Expand-Archive -LiteralPath $Archive -DestinationPath $ReleaseDir
-    $Executable = Join-Path $ReleaseDir "logstudio.exe"
+    $ExecutableName = if ($Desktop) { "LogStudio.Desktop.exe" } else { "logstudio.exe" }
+    $Executable = Join-Path $ReleaseDir $ExecutableName
     if (-not (Test-Path -LiteralPath $Executable -PathType Leaf) -or -not (Test-Path -LiteralPath (Join-Path $ReleaseDir "LogStudio.dll") -PathType Leaf)) {
         throw "The archive is missing the executable or LogStudio.dll."
     }
+    if ($Desktop -and -not (Test-Path -LiteralPath (Join-Path $ReleaseDir "LogStudio.Desktop.dll") -PathType Leaf)) {
+        throw "The desktop archive is missing LogStudio.Desktop.dll."
+    }
+    if ($Desktop) {
+        $NativeLibrary = Join-Path $ReleaseDir "Photino.Native.dll"
+        if (-not (Test-Path -LiteralPath $NativeLibrary -PathType Leaf) -or (Get-Item -LiteralPath $NativeLibrary).Length -eq 0) {
+            throw "The desktop archive is missing a nonempty Photino.Native.dll."
+        }
+    }
     & $Executable --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Installed tool verification failed." }
-    $BinDir = Join-Path $InstallDir "bin"
+    $BinDir = Join-Path $InstallDir $(if ($Desktop) { "desktop-bin" } else { "bin" })
+    if ($Desktop) {
+        $ShortcutPath = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Log Studio.lnk"
+        $ShortcutTarget = Join-Path $BinDir $ExecutableName
+        $ShortcutDescription = "Log Studio desktop (installed by install-release.ps1)"
+        $Shell = New-Object -ComObject WScript.Shell
+        if (Test-Path -LiteralPath $ShortcutPath) {
+            $ExistingShortcut = Get-Item -LiteralPath $ShortcutPath -Force
+            if ($ExistingShortcut.PSIsContainer -or $ExistingShortcut.LinkType) {
+                throw "Refusing to replace an unrelated shortcut or directory: $ShortcutPath"
+            }
+            $Shortcut = $Shell.CreateShortcut($ShortcutPath)
+            if ($Shortcut.TargetPath -ne $ShortcutTarget -or $Shortcut.Description -ne $ShortcutDescription) {
+                throw "Refusing to replace an unrelated shortcut: $ShortcutPath"
+            }
+        }
+        [void][IO.Directory]::CreateDirectory((Split-Path -Parent $ShortcutPath))
+        $PendingShortcut = Join-Path (Split-Path -Parent $ShortcutPath) (".logstudio.pending." + [Guid]::NewGuid().ToString("N") + ".lnk")
+        $Shortcut = $Shell.CreateShortcut($PendingShortcut)
+        $Shortcut.TargetPath = $ShortcutTarget
+        $Shortcut.WorkingDirectory = $BinDir
+        $Shortcut.Description = $ShortcutDescription
+        $Shortcut.Save()
+    }
     $ExistingBin = Get-Item -LiteralPath $BinDir -Force -ErrorAction SilentlyContinue
     if ($ExistingBin) {
         if ($ExistingBin.LinkType -ne "Junction") {
@@ -83,7 +125,7 @@ try {
         }
         $Target = [IO.Path]::GetFullPath(@($ExistingBin.Target)[0])
         $TargetParent = Split-Path -Parent $Target
-        if ($TargetParent.TrimEnd("\") -ne $InstallDir.TrimEnd("\") -or (Split-Path -Leaf $Target) -notlike "release.*") {
+        if ($TargetParent.TrimEnd("\") -ne $InstallDir.TrimEnd("\") -or (Split-Path -Leaf $Target) -notlike "$ReleasePrefix.*") {
             throw "Refusing to replace an unrelated junction: $BinDir"
         }
     }
@@ -94,21 +136,31 @@ try {
         Move-Item -LiteralPath $BinDir -Destination $PreviousBin
     }
     Move-Item -LiteralPath $PendingBin -Destination $BinDir
+    $BinReplaced = $true
+    if ($Desktop) { Move-Item -LiteralPath $PendingShortcut -Destination $ShortcutPath -Force }
     $Installed = $true
     if ($PreviousBin) { [IO.Directory]::Delete($PreviousBin) }
     if (($env:PATH -split ";") -notcontains $BinDir) { $env:PATH = "$BinDir;$env:PATH" }
     Write-Host "`nInstalled Log Studio at $Executable"
     Write-Host "Added $BinDir to PATH for this session only; add it to your user PATH for future terminals."
-    Write-Host "Run: logstudio --open -- your-command"
+    if ($Desktop) {
+        Write-Host "Launch Log Studio from the Start Menu or run: LogStudio.Desktop"
+    } else {
+        Write-Host "Run: logstudio --open -- your-command"
+    }
 } catch {
     Write-Error $_.Exception.Message -ErrorAction Continue
     exit 1
 } finally {
     [Net.ServicePointManager]::SecurityProtocol = $PreviousSecurityProtocol
-    if (-not $Installed -and $PreviousBin -and (Test-Path -LiteralPath $PreviousBin)) {
-        Move-Item -LiteralPath $PreviousBin -Destination $BinDir
+    if (-not $Installed) {
+        if ($BinReplaced) { [IO.Directory]::Delete($BinDir) }
+        if ($PreviousBin -and (Test-Path -LiteralPath $PreviousBin)) {
+            Move-Item -LiteralPath $PreviousBin -Destination $BinDir
+        }
     }
     if ($PendingBin -and (Test-Path -LiteralPath $PendingBin)) { [IO.Directory]::Delete($PendingBin) }
+    if ($PendingShortcut -and (Test-Path -LiteralPath $PendingShortcut)) { Remove-Item -LiteralPath $PendingShortcut -Force }
     if ($TemporaryDir -and (Test-Path -LiteralPath $TemporaryDir)) { Remove-Item -LiteralPath $TemporaryDir -Recurse -Force }
     if (-not $Installed -and $ReleaseDir -and (Test-Path -LiteralPath $ReleaseDir)) { Remove-Item -LiteralPath $ReleaseDir -Recurse -Force }
 }
