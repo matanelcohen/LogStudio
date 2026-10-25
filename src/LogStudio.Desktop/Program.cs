@@ -1,4 +1,5 @@
 using System;
+using System.Drawing;
 using System.IO;
 using System.Reflection;
 using LogStudio.Tool;
@@ -95,17 +96,26 @@ internal static class Program
         }
     }
 
+    internal static Size GetInitialWindowSize(Size workArea)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workArea.Width, nameof(workArea));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workArea.Height, nameof(workArea));
+        // Keep space for native title bars even on short displays.
+        return new Size(
+            Math.Min(1280, workArea.Width - workArea.Width / 10),
+            Math.Min(800, Math.Max(1, workArea.Height - Math.Max(80, workArea.Height / 10))));
+    }
+
     private static void ShowWindow(Uri url, Action shutdown)
     {
         string profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LogStudio", "WebView");
         Directory.CreateDirectory(profile);
         using IDisposable? termination = OperatingSystem.IsMacOS() ? new MacApplicationLifetime(shutdown) : null;
-        new PhotinoWindow()
+        PhotinoWindow window = new PhotinoWindow()
             .SetTitle("Log Studio")
             .SetIconFile(Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "logstudio.ico" : "logstudio.png"))
-            .SetUseOsDefaultSize(false)
-            .SetSize(1280, 800)
-            .SetMinSize(800, 500)
+            .SetUseOsDefaultSize(true)
+            .SetResizable(true)
             .SetTemporaryFilesPath(profile)
             .SetGrantBrowserPermissions(false)
             .SetMediaAutoplayEnabled(false)
@@ -115,7 +125,18 @@ internal static class Program
             .SetWebSecurityEnabled(true)
             .SetIgnoreCertificateErrorsEnabled(false)
             .SetDevToolsEnabled(false)
-            .SetLogVerbosity(0)
+            .SetLogVerbosity(0);
+        window
+            .RegisterWindowCreatedHandler((_, _) =>
+            {
+                Rectangle workArea = window.MainMonitor.WorkArea;
+                Size size = GetInitialWindowSize(workArea.Size);
+                // Native resizing can be asynchronous; center using the requested size.
+                window.SetMinSize(Math.Min(640, size.Width), Math.Min(400, size.Height))
+                    .SetSize(size)
+                    .MoveTo(workArea.Left + (workArea.Width - size.Width) / 2,
+                        workArea.Top + (workArea.Height - size.Height) / 2, allowOutsideWorkArea: true);
+            })
             .RegisterWindowClosingHandler((_, _) =>
             {
                 shutdown();

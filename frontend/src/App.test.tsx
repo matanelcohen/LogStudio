@@ -439,6 +439,57 @@ describe("log-first workspace", () => {
     expect(screen.getByRole("button", { name: "Toggle inspector" }).getAttribute("aria-pressed")).toBe("true");
   });
 
+  it("resizes the log table without losing the selected entry or open panels", () => {
+    let resize = () => {};
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: () => void) { resize = callback; }
+      observe() {}
+      disconnect() {}
+    });
+    render(<App />);
+    const scroll = screen.getByLabelText("Scrollable log entries");
+    const table = screen.getByRole("table", { name: "Captured logs" });
+    fireEvent.click(screen.getByRole("button", { name: "Available fields" }));
+    fireEvent.click(screen.getByRole("row", { name: /Hello/ }));
+
+    for (const width of [1200, 720, 420, 1600]) {
+      Object.defineProperty(scroll, "clientWidth", { configurable: true, value: width });
+      act(() => resize());
+      const columnsWidth = Array.from(table.querySelectorAll("col")).reduce((sum, column) => sum + parseFloat(column.style.width), 0);
+      expect(columnsWidth).toBe(Math.max(620, width));
+      expect(screen.getByRole("complementary", { name: "Entry inspector" }).textContent).toContain(Entry.message);
+      expect(screen.getByRole("complementary", { name: "Discover fields" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Toggle inspector" }).getAttribute("aria-pressed")).toBe("true");
+    }
+  });
+
+  it("keeps narrow and short workspaces scrollable and adapts panels to their available width", () => {
+    const { container } = render(<><style>{styles}</style><App /></>);
+    const rules = Array.from(container.querySelector("style")!.sheet!.cssRules);
+    function declaration(rules: CSSRule[], selector: string, property: string) {
+      return rules.filter((rule): rule is CSSStyleRule => rule.type === CSSRule.STYLE_RULE)
+        .filter(rule => rule.selectorText.split(",").map(value => value.trim()).includes(selector))
+        .map(rule => rule.style.getPropertyValue(property)).filter(Boolean).at(-1);
+    }
+    expect(declaration(rules, ".app", "min-width")).toBe("0");
+    expect(declaration(rules, ".app", "grid-template-columns")).toBe("minmax(0, 1fr)");
+    expect(declaration(rules, ".app", "grid-template-rows")).toBe("max-content max-content minmax(376px, 1fr) max-content");
+    expect(declaration(rules, ".app", "overflow")).toBe("auto");
+    for (const selector of [".header-actions", ".search-row", ".table-tools", ".paging", ".app-footer", ".workspace-region"]) {
+      expect(declaration(rules, selector, "flex-wrap"), selector).toBe("wrap");
+    }
+    for (const selector of [".condition-dialog", ".clear-dialog", ".sessions-dialog", ".session-management-panel", ".import-dialog", ".settings-dialog", ".menu-content", ".popover"]) {
+      expect(declaration(rules, selector, "max-height"), selector).toContain("100dvh");
+      expect(declaration(rules, selector, "overflow"), selector).toBe("auto");
+    }
+    expect(declaration(rules, ".workspace", "container")).toBe("log-workspace / inline-size");
+    const narrow = rules.find((rule): rule is CSSContainerRule =>
+      rule.cssText.startsWith("@container log-workspace (max-width: 760px)"))!;
+    expect(declaration(Array.from(narrow.cssRules), ".workspace > .workspace-layout", "flex-direction")).toBe("column");
+    expect(declaration(Array.from(narrow.cssRules), ".workspace > .workspace-layout", "overflow")).toBe("auto");
+    expect(container.querySelector(".workspace > .workspace-layout > .log-panel")).not.toBeNull();
+  });
+
   describe("multiline log rows", () => {
     const error: LogEntry = {
       ...Entry, severity: "error",
