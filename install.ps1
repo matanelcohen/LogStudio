@@ -5,6 +5,8 @@ param(
     [switch]$Global,
     [switch]$Offline,
     [switch]$Online,
+    [switch]$Cli,
+    [switch]$Desktop,
     [string]$NuGetSource = "",
     [switch]$Help
 )
@@ -14,6 +16,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 $ProjectRoot = $PSScriptRoot
 $Solution = Join-Path $ProjectRoot "LogStudio.sln"
 $LibraryProject = Join-Path $ProjectRoot "src/LogStudio/LogStudio.csproj"
+$DesktopProject = Join-Path $ProjectRoot "src/LogStudio.Desktop/LogStudio.Desktop.csproj"
 $Frontend = Join-Path $ProjectRoot "frontend"
 $Artifacts = Join-Path $ProjectRoot "artifacts"
 $PackageId = "LogStudio.Tool"
@@ -22,15 +25,19 @@ $Configuration = "Release"
 $NuGetFallback = "https://www.nuget.org/api/v2/"
 $WindowsPlatform = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
 $InstallCache = $null
+$DesktopPublish = $null
 
 if ($Help) {
     Write-Host @"
 Build, test, pack, and install Log Studio from local source.
 
-Usage: ./install.ps1 [-Global | -Local] [-Offline | -Online] [-NuGetSource <source>]
+Usage: ./install.ps1 [-Cli | -Desktop] [-Global | -Local] [-Offline | -Online] [-NuGetSource <source>]
 
+Installs both the CLI and desktop app by default.
+  -Cli      Install only the CLI.
+  -Desktop  Install only the desktop app.
   -Global   Install for the current user (default); no administrator access required.
-  -Local    Install into artifacts/tool without changing the global tool.
+  -Local    Install into artifacts/tool and artifacts/desktop without user application launchers.
   -Offline  Require cached dependencies; never try the network.
   -Online   Require the configured online restore and vulnerability lookup.
   -NuGetSource <source>  Use an explicit NuGet feed instead of NuGet.Config.
@@ -48,6 +55,7 @@ if (($Local -and $Global) -or ($Offline -and $Online)) {
     Write-Error "Choose one installation scope and one restore mode."
     exit 2
 }
+if ($Cli -and $Desktop) { Write-Error "Choose only one of -Cli and -Desktop."; exit 2 }
 
 function Find-Application([string]$Name, [string]$SetupMessage) {
     $application = Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -157,39 +165,71 @@ try {
     $PackagePath = Join-Path $Artifacts "$PackageId.$Version.nupkg"
     if (-not (Test-Path -LiteralPath $PackagePath -PathType Leaf)) { throw "The expected package was not produced: $PackagePath" }
 
-    if ($Local) {
-        $ToolDirectory = Join-Path $Artifacts "tool"
-        $ToolScope = @("--tool-path", $ToolDirectory)
-    } else {
-        $DotnetHome = if ($env:DOTNET_CLI_HOME) { $env:DOTNET_CLI_HOME } else { [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile) }
-        $ToolDirectory = Join-Path $DotnetHome ".dotnet/tools"
-        $ToolScope = @("--global")
+    if (-not $Cli) {
+        Write-Host "`nPublishing the desktop app..."
+        $DesktopPublish = Join-Path $Artifacts (".desktop-publish." + [Guid]::NewGuid().ToString("N"))
+        Invoke-Checked $Dotnet @("publish", $DesktopProject, "--configuration", $Configuration, "--no-build", "--no-restore", "-p:PackAsTool=false", "--output", $DesktopPublish)
+        if (-not $WindowsPlatform -and (& uname -s) -eq "Darwin") {
+            $Bundle = "$DesktopPublish.bundle"
+            $Contents = Join-Path $Bundle "Log Studio.app/Contents"
+            [void][IO.Directory]::CreateDirectory($Contents)
+            Move-Item -LiteralPath $DesktopPublish -Destination (Join-Path $Contents "MacOS")
+            $DesktopPublish = $Bundle
+            $Plist = (Get-Content -LiteralPath (Join-Path $ProjectRoot "packaging/Info.plist") -Raw).Replace("@VERSION@", $Version.Split("-")[0])
+            [IO.File]::WriteAllText((Join-Path $Contents "Info.plist"), $Plist, [Text.UTF8Encoding]::new($false))
+        }
     }
-    [void][IO.Directory]::CreateDirectory($ToolDirectory)
-    $InstallCache = Join-Path $Artifacts (".install-cache." + [Guid]::NewGuid().ToString("N"))
-    [void][IO.Directory]::CreateDirectory($InstallCache)
-    $InstalledTools = & $Dotnet tool list @ToolScope
-    if ($LASTEXITCODE -ne 0) { throw "Could not read the selected tool installation scope." }
-    if ($InstalledTools | Where-Object { ($_ -split "\s+")[0] -ieq $PackageId }) {
-        Write-Host "`nReplacing the existing Log Studio installation..."
-        Invoke-Checked $Dotnet (@("tool", "uninstall", $PackageId) + $ToolScope)
+
+    if (-not $Desktop) {
+        if ($Local) {
+            $ToolDirectory = Join-Path $Artifacts "tool"
+            $ToolScope = @("--tool-path", $ToolDirectory)
+        } else {
+            $DotnetHome = if ($env:DOTNET_CLI_HOME) { $env:DOTNET_CLI_HOME } else { [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile) }
+            $ToolDirectory = Join-Path $DotnetHome ".dotnet/tools"
+            $ToolScope = @("--global")
+        }
+        [void][IO.Directory]::CreateDirectory($ToolDirectory)
+        $InstallCache = Join-Path $Artifacts (".install-cache." + [Guid]::NewGuid().ToString("N"))
+        [void][IO.Directory]::CreateDirectory($InstallCache)
+        $InstalledTools = & $Dotnet tool list @ToolScope
+        if ($LASTEXITCODE -ne 0) { throw "Could not read the selected tool installation scope." }
+        if ($InstalledTools | Where-Object { ($_ -split "\s+")[0] -ieq $PackageId }) {
+            Write-Host "`nReplacing the existing Log Studio installation..."
+            Invoke-Checked $Dotnet (@("tool", "uninstall", $PackageId) + $ToolScope)
+        }
+        Write-Host "`nInstalling $PackageId..."
+        $env:NUGET_PACKAGES = $InstallCache
+        Invoke-Checked $Dotnet (@("tool", "install", $PackageId) + $ToolScope + @("--version", $Version, "--configfile", (Join-Path $ProjectRoot "NuGet.Local.Config")))
+        $env:NUGET_PACKAGES = $PreviousPackageCache
+        $ExecutableName = if ($WindowsPlatform) { "$ToolCommand.exe" } else { $ToolCommand }
+        $Executable = Join-Path $ToolDirectory $ExecutableName
+        if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) { throw "Installation returned without the expected executable: $Executable" }
+        & $Executable --help | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Installed tool verification failed." }
+        Write-Host "`nInstalled Log Studio $Version at $Executable"
+        if ($Local) {
+            Write-Host "Run: & `"$Executable`" --open -- dotnet run --project ./path/to/App.csproj"
+        } else {
+            $PathEntries = $env:PATH -split [IO.Path]::PathSeparator
+            if ($PathEntries -notcontains $ToolDirectory) { Write-Host "Add $ToolDirectory to your user PATH to run logstudio from any directory." }
+            Write-Host "Run: logstudio --open -- dotnet run --project ./path/to/App.csproj"
+        }
     }
-    Write-Host "`nInstalling $PackageId..."
-    $env:NUGET_PACKAGES = $InstallCache
-    Invoke-Checked $Dotnet (@("tool", "install", $PackageId) + $ToolScope + @("--version", $Version, "--configfile", (Join-Path $ProjectRoot "NuGet.Local.Config")))
-    $env:NUGET_PACKAGES = $PreviousPackageCache
-    $ExecutableName = if ($WindowsPlatform) { "$ToolCommand.exe" } else { $ToolCommand }
-    $Executable = Join-Path $ToolDirectory $ExecutableName
-    if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) { throw "Installation returned without the expected executable: $Executable" }
-    & $Executable --help | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Installed tool verification failed." }
-    Write-Host "`nInstalled Log Studio $Version at $Executable"
-    if ($Local) {
-        Write-Host "Run: & `"$Executable`" --open -- dotnet run --project ./path/to/App.csproj"
-    } else {
-        $PathEntries = $env:PATH -split [IO.Path]::PathSeparator
-        if ($PathEntries -notcontains $ToolDirectory) { Write-Host "Add $ToolDirectory to your user PATH to run logstudio from any directory." }
-        Write-Host "Run: logstudio --open -- dotnet run --project ./path/to/App.csproj"
+    if (-not $Cli) {
+        if ($WindowsPlatform) {
+            $DesktopArguments = @{ Desktop = $true; PublishDir = $DesktopPublish }
+            if ($Local) {
+                $DesktopArguments.InstallDir = Join-Path $Artifacts "desktop"
+                $DesktopArguments.NoLauncher = $true
+            }
+            & (Join-Path $ProjectRoot "install-release.ps1") @DesktopArguments
+            if ($LASTEXITCODE -ne 0) { throw "Desktop installation failed with exit code $LASTEXITCODE." }
+        } else {
+            $DesktopArguments = @((Join-Path $ProjectRoot "install-release.sh"), "--desktop", "--publish-dir", $DesktopPublish)
+            if ($Local) { $DesktopArguments += @("--install-dir", (Join-Path $Artifacts "desktop"), "--bin-dir", (Join-Path $Artifacts "tool"), "--no-launcher") }
+            Invoke-Checked (Find-Application "bash" "Bash is required to install the desktop app on macOS or Linux.") $DesktopArguments
+        }
     }
 } catch {
     Write-Error $_.Exception.Message -ErrorAction Continue
@@ -202,6 +242,9 @@ try {
             throw "Refusing to remove an unexpected installation cache: $InstallCache"
         }
         Remove-Item -LiteralPath $InstallCache -Recurse -Force
+    }
+    if ($DesktopPublish -and (Test-Path -LiteralPath $DesktopPublish -PathType Container)) {
+        Remove-Item -LiteralPath $DesktopPublish -Recurse -Force
     }
     if ($LocationPushed) { Pop-Location }
 }

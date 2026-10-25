@@ -5,10 +5,11 @@ Choose a running app in a native desktop window, or keep using the command-line 
 
 ## Install
 
-### Desktop app (Photino.NET)
+### Desktop app + CLI
 
-Install the standalone app, then launch **Log Studio** from your applications menu—no terminal required.
-It starts in `--listen-all` mode: choose **Running app** to capture new `ILogger` events.
+One install includes both the **Photino.NET desktop app** and the **`logstudio` CLI**.
+Launch **Log Studio** from your applications menu—no terminal required.
+The desktop starts in `--listen-all` mode: choose **Running app** to capture new `ILogger` events.
 Closing the window disconnects capture without stopping your application.
 
 ![Log Studio running in a native Photino.NET desktop window, listening to a selected .NET demo application](appscreenshot/desktop-listen-all.png)
@@ -18,7 +19,7 @@ The desktop app on Linux, capturing synthetic `ILogger` events from the included
 **macOS / Linux:**
 
 ```bash
-curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.sh | bash -s -- --desktop
+curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.sh | bash
 ```
 
 **Windows PowerShell:**
@@ -26,7 +27,7 @@ curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/
 ```powershell
 $installer = Join-Path $env:TEMP "logstudio-install-release.ps1"
 Invoke-WebRequest -UseBasicParsing https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.ps1 -OutFile $installer
-& $installer -Desktop
+& $installer
 ```
 
 Self-contained releases support x64 and ARM64. Windows needs the **Microsoft Edge WebView2 Runtime**;
@@ -35,41 +36,23 @@ Linux needs **GTK 3, WebKitGTK 4.1, and libnotify** (on Ubuntu/Debian:
 These prerequisites are not installed automatically. The app and its embedded viewer work offline.
 See [desktop installation](docs/guide.md#install-the-desktop-app) for launchers, updates, and uninstalling.
 
-### CLI: macOS / Linux
-
-Install the latest compiled release without cloning, building, or installing .NET or Node.js:
-
-```bash
-curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.sh | bash
-```
-
-Supports x64 and ARM64. Linux requires glibc (not Alpine/musl) and the
+No cloning, building, .NET SDK, or Node.js is needed. Linux requires glibc (not Alpine/musl) and the
 [native dependencies required by .NET](https://learn.microsoft.com/dotnet/core/install/linux).
-The installer verifies the release's SHA-256 checksum and links `logstudio` into
-`~/.local/bin`. If that directory is not in PATH, use the command printed by the installer.
+The installer verifies both release archives' SHA-256 checksums before switching either app.
+On macOS / Linux it links `logstudio` and `logstudio-desktop` into `~/.local/bin`.
+If that directory is not in PATH, use the command printed by the installer.
 No sudo or shell-profile changes are needed.
 
-### CLI: Windows
-
-Run in PowerShell without an administrator shell:
-
-```powershell
-$installer = Join-Path $env:TEMP "logstudio-install-release.ps1"
-Invoke-WebRequest -UseBasicParsing https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.ps1 -OutFile $installer
-& $installer
-```
-
-Supports x64 and ARM64, verifies the release's SHA-256 checksum, and installs to
-`%LOCALAPPDATA%\LogStudio`. PATH is updated for the current PowerShell session only.
+On Windows it installs to `%LOCALAPPDATA%\LogStudio` and `%LOCALAPPDATA%\LogStudioDesktop`,
+with a **Log Studio** Start Menu shortcut. PATH is updated for the current PowerShell session only.
+Use `--cli` / `-Cli` for CLI-only installation (including headless machines), or
+`--desktop` / `-Desktop` for desktop-only installation; these leave the other app unchanged.
 For execution-policy guidance, pinned versions, custom directories, or uninstall steps,
 see the [installation guide](docs/guide.md#install-a-compiled-release-fastest).
 Checksums detect corrupt downloads; they are not independent signatures. Download and
 inspect the installer first if you do not want to pipe a remote script into Bash.
 
 ### Run your command
-
-The CLI is still available separately: omit `--desktop` / `-Desktop` when installing.
-Desktop installation does not replace an existing CLI installation.
 
 ```bash
 logstudio --open -- dotnet run --project ./path/to/App.csproj
@@ -109,7 +92,7 @@ cd LogStudio
 ```
 
 On macOS / Linux, run `./install.sh`. On Windows PowerShell, run `.\install.ps1`.
-The installer builds, verifies, and installs the tool for your user.
+The installer builds, verifies, and installs both the CLI and desktop app for your user.
 See the [source installation guide](docs/guide.md#build-test-and-install-from-source) for details.
 
 ## Logs

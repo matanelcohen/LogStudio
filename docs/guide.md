@@ -88,7 +88,7 @@ terminating any selected application.
 
 ```bash
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.sh \
-  | bash -s -- --desktop
+  | bash
 ```
 
 **Windows PowerShell:**
@@ -96,13 +96,17 @@ curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/
 ```powershell
 $installer = Join-Path $env:TEMP "logstudio-install-release.ps1"
 Invoke-WebRequest -UseBasicParsing https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.ps1 -OutFile $installer
-& $installer -Desktop
+& $installer
 ```
 
 The installers verify SHA-256 checksums and install for the current user, without administrator
-access. Desktop and CLI installations are independent; omit the desktop switch to install the CLI.
+access. **Both the desktop app and CLI are installed together by default.**
+Use `--cli` / `-Cli` to install only the CLI, or `--desktop` / `-Desktop` to install only
+the desktop app without changing the CLI. CLI-only installation does not need desktop dependencies.
 Both support `--version X.Y.Z` / `-Version X.Y.Z` for pinned releases and custom install directories.
-Rerun the same installer to update. Desktop assets are named `logstudio-desktop-<rid>.tar.gz`
+Rerun the same installer to update both apps. Both archives are verified before either existing
+installation is switched; failed verification leaves both apps unchanged.
+Desktop assets are named `logstudio-desktop-<rid>.tar.gz`
 (Unix) or `.zip` (Windows); CLI archives and NuGet tool packages remain unchanged.
 
 Launchers and default installation locations:
@@ -112,7 +116,15 @@ Launchers and default installation locations:
 - **macOS:** `~/.local/share/logstudio-desktop`, with `~/Applications/Log Studio.app` and
   `~/.local/bin/logstudio-desktop` pointing to the installed application bundle.
 - **Windows:** `%LOCALAPPDATA%\LogStudioDesktop`, with a **Log Studio** Start Menu shortcut
-  and a `desktop-bin` junction. The installer adds that directory to its current session's PATH only.
+  and a `desktop-bin` junction. The installer adds the CLI's `bin` and desktop's `desktop-bin`
+  directories to its current session's PATH only.
+
+All desktop launchers use the bundled Log Studio icon, including the Windows executable and
+macOS application bundle. The macOS installer places the published `.icns` asset into the
+bundle's `Contents/Resources` directory before adding the application launcher.
+The CLI keeps its existing default location (`~/.local/share/logstudio`
+on Unix, `%LOCALAPPDATA%\LogStudio` on Windows). A custom `--install-dir` / `-InstallDir`
+holds both apps in separate `release.*` and `desktop-release.*` subdirectories.
 
 To uninstall the desktop app, remove its application launcher and executable link, then its
 installation directory. On Windows, remove the Start Menu shortcut and `desktop-bin` junction
@@ -204,13 +216,18 @@ a child command or `--no-wait`; the existing wrapper mode is unchanged.
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.sh | bash
 ```
 
-The installer detects x64 / ARM64, downloads the self-contained release and verifies its
-SHA-256 checksum before installing. Linux releases require glibc (not Alpine/musl) and the
+The installer detects x64 / ARM64 and installs **both the CLI and desktop app**.
+It downloads the two self-contained releases and verifies both SHA-256 checksums before
+changing either installation. Use `--cli` / `-Cli` for a CLI-only, headless installation,
+or `--desktop` / `-Desktop` for desktop only.
+Linux releases require glibc (not Alpine/musl) and the
 [native dependencies required by .NET](https://learn.microsoft.com/dotnet/core/install/linux).
 macOS releases support Intel and Apple Silicon. The wrapped command still needs its own
 dependencies; wrapping `dotnet run` still requires your application's .NET SDK.
+The desktop also needs the [platform WebView dependencies](#install-the-desktop-app).
 
-The executable is linked into `~/.local/bin/logstudio`. If that directory is not already in
+The executables are linked into `~/.local/bin/logstudio` and `~/.local/bin/logstudio-desktop`,
+with an applications-menu launcher for the desktop. If that directory is not already in
 PATH, use the command printed by the installer. No sudo or shell-profile edits are made.
 
 ```bash
@@ -232,17 +249,20 @@ logstudio --open -- dotnet run --project .\path\to\App.csproj
 Use `& $installer -Version 1.8.0 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
 version or choose a directory. If execution policy blocks the script, use the process-only
 override described below; when launching a separate PowerShell process, add the printed
-`bin` directory to PATH in your current terminal yourself. The installer otherwise updates
+`bin` and `desktop-bin` directories to PATH in your current terminal yourself. The installer otherwise updates
 PATH for the current PowerShell session only, never the persistent user or system PATH.
 
-Windows releases support x64 and ARM64 and default to `%LOCALAPPDATA%\LogStudio`.
+Windows releases support x64 and ARM64 and default to `%LOCALAPPDATA%\LogStudio` (CLI)
+and `%LOCALAPPDATA%\LogStudioDesktop` (desktop), with a **Log Studio** Start Menu shortcut.
 The Windows `bin` directory is a junction to the verified release, so `logstudio.exe`
 runs directly without a batch wrapper altering command arguments.
 Each installation uses a fresh `release.*` directory; an update switches the link/junction
 only after verification, preserving older releases and any running process.
-To uninstall, remove the Unix `logstudio` link and installation directory; on Windows,
+To uninstall the CLI, remove the Unix `logstudio` link and installation directory; on Windows,
 remove the `bin` junction first (`cmd /c rmdir "%LOCALAPPDATA%\LogStudio\bin"`), then the
 installation directory. Unused older `release.*` directories can be removed once no process is using them.
+Remove the desktop's launcher, link/junction and directory as described in
+[desktop installation](#install-the-desktop-app) to uninstall both.
 Checksums detect corrupt downloads; they are not independent signatures. Download scripts
 to a file and inspect them first if you do not want to pipe a remote script into Bash.
 The quick-install URLs become available after the first successful release workflow.
@@ -285,8 +305,12 @@ PowerShell 7 is also supported, including on macOS / Linux (`pwsh -NoProfile -Fi
 Both entry points resolve paths relative to the script, so they can be invoked from another
 directory or a clone path containing spaces.
 
-The installer restores, builds, runs frontend and backend tests, packs both NuGets, and installs the fresh tool
-**globally for your user**. It can be invoked from any directory. It does not modify shell profiles,
+The installer restores, builds, runs frontend and backend tests, packs both NuGets, and installs
+**both apps for your user**: the CLI as a global .NET tool and the desktop with its native
+application launcher and icon. The desktop is published locally, not downloaded from a release;
+it uses the installed .NET runtime and the same platform WebView prerequisites as compiled releases.
+Use `--cli` / `-Cli` or `--desktop` / `-Desktop` to install only one app.
+It can be invoked from any directory. It does not modify shell profiles,
 application source, or unrelated global tools. Re-running it replaces the existing Log Studio
 installation even when the package version is unchanged, using a fresh temporary NuGet cache.
 By default it tries cached dependencies first, so a fully cached build does not fail because
@@ -302,7 +326,7 @@ The React build requires Node.js **22.12+** and npm. The installed `logstudio` t
 require only .NET; Node is never needed to view logs or run a wrapped command.
 
 ```bash
-# Project-local tool instead of global installation:
+# Project-local CLI and desktop, without applications-menu launchers:
 ./install.sh --local
 
 # If NuGet.org is unavailable and dependencies are already cached:
@@ -329,8 +353,11 @@ dependencies and targeting packs; it cannot download a missing dependency and do
 an online package-vulnerability check. New computers normally need internet access for their
 first install. Neither script disables TLS certificate validation or removes dependencies to
 make a restore succeed.
+Project-local installs place the CLI in `artifacts/tool` and the desktop in `artifacts/desktop`;
+on Unix `artifacts/tool/logstudio-desktop` launches it, and on Windows use
+`artifacts/desktop/desktop-bin/LogStudio.Desktop.exe`.
 
-The [installer CI](../.github/workflows/install.yml) exercises clean Linux, Windows, and macOS installs.
+The [installer CI](../.github/workflows/install.yml) exercises clean Linux and Windows installs.
 Use its Windows job as the native Windows validation result; running PowerShell on macOS alone
 does not verify Windows-specific execution.
 
@@ -349,7 +376,13 @@ viewer, runtime files, and dependency notices; running them needs no installed .
 macOS archives are cross-published on Ubuntu; no macOS runners are required. Native execution
 checks run only when the runner matches the target runtime, so macOS binaries still need
 verification on a Mac. Publication requires all six platform/architecture archives and checksums.
+Each target has separate CLI and desktop archives, and the default installer downloads both.
 Prereleases do not replace GitHub's latest stable release used by the default installer.
+
+Desktop icon assets live in `packaging/logstudio.svg` (editable source), `.png`, `.ico`, and
+`.icns`. To regenerate the committed native formats after editing the SVG, install the
+developer tool `rsvg-convert` (librsvg), then run `node packaging/generate-icons.mjs`.
+Normal builds and installs use the committed assets and need no image tools.
 
 The workflow can also be run manually with an existing version tag; reruns replace that
 tag's assets. It publishes GitHub release assets, not packages to NuGet.org.

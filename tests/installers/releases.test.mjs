@@ -51,14 +51,14 @@ function fixture(t) {
   const bash = (...args) => run("bash", [bashInstaller, "--install-dir", install, "--bin-dir", bin, ...args], { ...env, PATH: `${tools}:${process.env.PATH}` });
   const psWrapper = join(directory, "download-mock.ps1");
   writeFileSync(psWrapper, `
-param([string]$Version = "latest", [switch]$Desktop)
+param([string]$Version = "latest", [switch]$Cli, [switch]$Desktop)
 function Invoke-WebRequest {
   param([switch]$UseBasicParsing, [string]$Uri, [string]$OutFile)
   if ($Uri -notlike "https://github.com/matanelcohen/LogStudio/releases/*") { throw "Unexpected download URL: $Uri" }
   Add-Content -LiteralPath $env:MOCK_LOG -Value $Uri
   Copy-Item -LiteralPath (Join-Path $env:MOCK_DOWNLOAD_DIR ([Uri]$Uri).Segments[-1]) -Destination $OutFile
 }
-& $env:MOCK_INSTALLER -InstallDir $env:MOCK_INSTALL_DIR -Version $Version -Desktop:$Desktop
+& $env:MOCK_INSTALLER -InstallDir $env:MOCK_INSTALL_DIR -Version $Version -Cli:$Cli -Desktop:$Desktop
 exit $LASTEXITCODE
 `);
   const powershell = (...args) => run("pwsh", ["-NoProfile", "-File", psWrapper, ...args], {
@@ -78,7 +78,9 @@ echo "$url" >> "$MOCK_LOG"
 cp "$MOCK_DOWNLOAD_DIR/\${url##*/}" "$output"
 `, { mode: 0o755 });
   }
-  return { directory, downloads, install, bin, home, data, env, bash, powershell };
+  const cli = (...args) => bash("--cli", ...args);
+  const psCli = (...args) => powershell("-Cli", ...args);
+  return { directory, downloads, install, bin, home, data, env, bash, powershell, cli, psCli };
 }
 
 function checksum(f, asset, hash) {
@@ -107,6 +109,9 @@ function desktopArchive(f, rid = "linux-x64", missing = "") {
   mkdirSync(binaries, { recursive: true });
   for (const name of ["LogStudio.dll", "LogStudio.Desktop.dll"]) {
     if (missing !== name) writeFileSync(join(binaries, name), "fixture");
+  }
+  for (const name of ["logstudio.png", "logstudio.ico", "logstudio.icns"]) {
+    if (missing !== name) cpSync(new URL(`../../packaging/${name}`, import.meta.url), join(binaries, name));
   }
   const native = `Photino.Native${win ? ".dll" : mac ? ".dylib" : ".so"}`;
   if (missing !== native) writeFileSync(join(binaries, native), missing === "empty-native" ? "" : "native fixture");
@@ -138,6 +143,20 @@ function windowsRid() {
   return `win-${cpu === "ARM64" ? "arm64" : "x64"}`;
 }
 
+function windowsArchive(f) {
+  const payload = join(f.directory, "cli-payload");
+  mkdirSync(payload);
+  cpSync(process.execPath, join(payload, "logstudio.exe"));
+  writeFileSync(join(payload, "LogStudio.dll"), "fixture");
+  const asset = `logstudio-${windowsRid()}.zip`;
+  const result = run("pwsh", ["-NoProfile", "-Command", "Compress-Archive -Path \"$env:MOCK_PAYLOAD/*\" -DestinationPath $env:MOCK_ARCHIVE"], {
+    MOCK_PAYLOAD: payload, MOCK_ARCHIVE: join(f.downloads, asset)
+  });
+  assert.equal(result.status, 0, result.stderr);
+  checksum(f, asset);
+  return asset;
+}
+
 function shortcutPath(f) {
   return join(f.data, "Microsoft", "Windows", "Start Menu", "Programs", "Log Studio.lnk");
 }
@@ -152,6 +171,7 @@ test("release installer help needs no SDK, repository checkout, or downloads", (
     assert.match(result.stdout, /compiled/);
     assert.match(result.stdout, /[Vv]ersion/);
     assert.match(result.stdout, /[Dd]esktop/);
+    assert.match(result.stdout, /both.*CLI.*desktop/i);
   }
 });
 
@@ -222,6 +242,44 @@ test("desktop releases preserve full self-contained publishes independently of t
   assert.match(releaseWorkflow, /& "\.\/artifacts\/desktop-publish\/LogStudio\.Desktop\$extension" --help \| Out-Host/);
 });
 
+test("desktop icons contain valid native formats at small and high-DPI sizes", () => {
+  const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const pngSize = (bytes) => {
+    assert.deepEqual(bytes.subarray(0, 8), pngSignature);
+    assert.equal(bytes.readUInt32BE(16), bytes.readUInt32BE(20));
+    return bytes.readUInt32BE(16);
+  };
+  assert.equal(pngSize(readFileSync(new URL("../../packaging/logstudio.png", import.meta.url))), 512);
+  const ico = readFileSync(new URL("../../packaging/logstudio.ico", import.meta.url));
+  assert.equal(ico.readUInt16LE(0), 0);
+  assert.equal(ico.readUInt16LE(2), 1);
+  const sizes = [];
+  let end = 6 + 16 * ico.readUInt16LE(4);
+  for (let index = 0; index < ico.readUInt16LE(4); index++) {
+    const entry = 6 + index * 16;
+    const offset = ico.readUInt32LE(entry + 12);
+    const length = ico.readUInt32LE(entry + 8);
+    assert.equal(offset, end);
+    assert.equal(ico[entry], ico[entry + 1]);
+    assert.equal(pngSize(ico.subarray(offset, offset + length)), ico[entry] || 256);
+    sizes.push(ico[entry] || 256);
+    end += length;
+  }
+  assert.equal(end, ico.length);
+  assert.deepEqual(sizes, [16, 32, 48, 64, 128, 256]);
+  const icns = readFileSync(new URL("../../packaging/logstudio.icns", import.meta.url));
+  assert.equal(icns.toString("ascii", 0, 4), "icns");
+  assert.equal(icns.readUInt32BE(4), icns.length);
+  let offset = 8;
+  for (const [size, type] of [[16, "icp4"], [32, "icp5"], [64, "icp6"], [128, "ic07"], [256, "ic08"], [512, "ic09"], [1024, "ic10"]]) {
+    assert.equal(icns.toString("ascii", offset, offset + 4), type);
+    const length = icns.readUInt32BE(offset + 4);
+    assert.equal(pngSize(icns.subarray(offset + 8, offset + length)), size);
+    offset += length;
+  }
+  assert.equal(offset, icns.length);
+});
+
 for (const rid of releaseRids.filter((rid) => rid.startsWith("win-") === windows)) {
   test(`release packaging retains every desktop dependency and metadata for ${rid}`, (t) => {
     const f = fixture(t);
@@ -253,13 +311,14 @@ function dotnet {
   foreach ($name in @("LogStudio.dll", "LogStudio.Desktop.dll", "LogStudio.Desktop.deps.json", "LogStudio.Desktop.runtimeconfig.json", "Photino.NET.dll", "Photino.Native$nativeExtension")) {
     [IO.File]::WriteAllText("$output/$name", "published dependency")
   }
+  Copy-Item "$env:MOCK_ICONS/logstudio.png", "$env:MOCK_ICONS/logstudio.ico", "$env:MOCK_ICONS/logstudio.icns" "$output/"
   Copy-Item src/LogStudio.Desktop/dependency-notices.txt "$output/dependency-notices.txt"
   $global:LASTEXITCODE = 0
 }
 ${publish}
 ${archive}
 ${verify}
-`], { RELEASE_RID: rid, RELEASE_TAG: "1.0.3-rc.1", MOCK_NODE: process.execPath }, { cwd: f.directory });
+`], { RELEASE_RID: rid, RELEASE_TAG: "1.0.3-rc.1", MOCK_NODE: process.execPath, MOCK_ICONS: fileURLToPath(new URL("../../packaging", import.meta.url)) }, { cwd: f.directory });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     const extension = windows ? "zip" : "tar.gz";
     for (const application of ["logstudio", "logstudio-desktop"]) {
@@ -278,7 +337,7 @@ ${verify}
     assert.equal(unpack.status, 0, unpack.stderr);
     const binaries = rid.startsWith("osx-") ? join(extracted, "Log Studio.app", "Contents", "MacOS") : extracted;
     const native = `Photino.Native${rid.startsWith("win-") ? ".dll" : rid.startsWith("osx-") ? ".dylib" : ".so"}`;
-    for (const file of ["LogStudio.dll", "LogStudio.Desktop.dll", "LogStudio.Desktop.deps.json", "LogStudio.Desktop.runtimeconfig.json", "Photino.NET.dll", native, "desktop-dependency-notices.txt", "dependency-notices.txt", "third-party-notices.txt"]) {
+    for (const file of ["LogStudio.dll", "LogStudio.Desktop.dll", "LogStudio.Desktop.deps.json", "LogStudio.Desktop.runtimeconfig.json", "Photino.NET.dll", native, "logstudio.png", "logstudio.ico", "logstudio.icns", "desktop-dependency-notices.txt", "dependency-notices.txt", "third-party-notices.txt"]) {
       assert.equal(existsSync(join(binaries, file)), true, file);
     }
     assert.equal(readFileSync(join(binaries, "desktop-dependency-notices.txt"), "utf8"), "src/LogStudio.Desktop/dependency-notices.txt");
@@ -288,6 +347,8 @@ ${verify}
       const plist = readFileSync(join(extracted, "Log Studio.app", "Contents", "Info.plist"), "utf8");
       assert.doesNotMatch(plist, /@VERSION@/);
       assert.match(plist, /<string>1\.0\.3<\/string>/);
+      assert.match(plist, /<key>CFBundleIconFile<\/key>\s*<string>logstudio\.icns<\/string>/);
+      assert.deepEqual(readFileSync(join(binaries, "logstudio.icns")), readFileSync(new URL("../../packaging/logstudio.icns", import.meta.url)));
     }
     rmSync(join(binaries, native));
     const incomplete = windows
@@ -365,8 +426,154 @@ ${script}
 
 test("Bash validates options before downloads", { skip: windows }, (t) => {
   const f = fixture(t);
-  for (const args of [["--version"], ["--bin-dir"], ["--install-dir", "--help"], ["--unknown"]]) {
+  for (const args of [["--version"], ["--bin-dir"], ["--install-dir", "--help"], ["--unknown"], ["--cli", "--desktop"], ["--publish-dir", f.downloads]]) {
     assert.equal(f.bash(...args).status, 2);
+  }
+  assert.equal(existsSync(f.env.MOCK_LOG), false);
+});
+
+test("PowerShell rejects contradictory app selections before downloads", (t) => {
+  const f = fixture(t);
+  const result = f.powershell("-Cli", "-Desktop");
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Choose only one of -Cli and -Desktop/);
+  assert.equal(existsSync(f.env.MOCK_LOG), false);
+});
+
+for (const [os, arch, rid] of [
+  ["Linux", "x86_64", "linux-x64"], ["Linux", "aarch64", "linux-arm64"],
+  ["Darwin", "x86_64", "osx-x64"], ["Darwin", "arm64", "osx-arm64"]
+]) {
+  test(`Bash installs and updates both apps by default for ${rid}`, { skip: windows }, (t) => {
+    const f = fixture(t);
+    f.env.MOCK_OS = os;
+    f.env.MOCK_ARCH = arch;
+    unixArchive(f, rid);
+    desktopArchive(f, rid);
+    const installed = f.bash("--version", "1.0.3-rc.1");
+    assert.equal(installed.status, 0, installed.stdout + installed.stderr);
+    const cli = readlinkSync(join(f.bin, "logstudio"));
+    const desktop = readlinkSync(join(f.bin, "logstudio-desktop"));
+    const launcher = os === "Darwin" ? join(f.home, "Applications", "Log Studio.app") : join(f.data, "applications", "logstudio-desktop.desktop");
+    const original = readlinkSync(launcher);
+    if (os === "Darwin") {
+      assert.deepEqual(readFileSync(join(original, "Contents", "Resources", "logstudio.icns")), readFileSync(new URL("../../packaging/logstudio.icns", import.meta.url)));
+    }
+    assert.equal(run(cli, ["--help"]).status, 0);
+    assert.equal(run(desktop, ["--help"]).status, 0);
+    const requests = readFileSync(f.env.MOCK_LOG, "utf8").trim().split(/\r?\n/);
+    assert.equal(requests.length, 4);
+    assert.ok(requests.every((url) => url.includes("/releases/download/1.0.3-rc.1/")));
+    const updated = f.bash();
+    assert.equal(updated.status, 0, updated.stdout + updated.stderr);
+    assert.notEqual(readlinkSync(join(f.bin, "logstudio")), cli);
+    assert.notEqual(readlinkSync(join(f.bin, "logstudio-desktop")), desktop);
+    assert.notEqual(readlinkSync(launcher), original);
+    for (const path of [cli, desktop, original]) assert.equal(existsSync(path), true);
+  });
+}
+
+test("Bash combined install preserves the default component directories", { skip: windows }, (t) => {
+  const f = fixture(t);
+  unixArchive(f);
+  desktopArchive(f);
+  const result = run("bash", ["-s", "--", "--bin-dir", f.bin], {
+    ...f.env, PATH: `${join(f.directory, "tools")}:${process.env.PATH}`
+  }, { input: readFileSync(bashInstaller, "utf8") });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  for (const application of ["logstudio", "logstudio-desktop"]) {
+    assert.ok(readlinkSync(join(f.bin, application)).startsWith(join(f.home, ".local", "share", application) + "/"));
+  }
+});
+
+test("Bash combined install verifies both apps before changing either", { skip: windows }, (t) => {
+  const f = fixture(t);
+  unixArchive(f);
+  const asset = desktopArchive(f);
+  checksum(f, asset, "0".repeat(64));
+  const first = f.bash();
+  assert.notEqual(first.status, 0);
+  assert.match(first.stderr, /checksum verification failed/);
+  assert.deepEqual(readdirSync(f.install), []);
+  assert.equal(existsSync(join(f.bin, "logstudio")), false);
+  checksum(f, asset);
+  assert.equal(f.bash().status, 0);
+  const cli = readlinkSync(join(f.bin, "logstudio"));
+  const desktop = readlinkSync(join(f.bin, "logstudio-desktop"));
+  const launcher = join(f.data, "applications", "logstudio-desktop.desktop");
+  const previous = readlinkSync(launcher);
+  checksum(f, asset, "0".repeat(64));
+  assert.notEqual(f.bash().status, 0);
+  assert.equal(readlinkSync(join(f.bin, "logstudio")), cli);
+  assert.equal(readlinkSync(join(f.bin, "logstudio-desktop")), desktop);
+  assert.equal(readlinkSync(launcher), previous);
+  assert.equal(readdirSync(f.install).length, 2);
+});
+
+test("Bash rolls back both apps if activating the application launcher fails", { skip: windows }, (t) => {
+  const f = fixture(t);
+  unixArchive(f);
+  desktopArchive(f);
+  assert.equal(f.bash().status, 0);
+  const launcher = join(f.data, "applications", "logstudio-desktop.desktop");
+  const paths = [join(f.bin, "logstudio"), join(f.bin, "logstudio-desktop"), launcher];
+  const originals = paths.map((path) => readlinkSync(path));
+  f.env.MOCK_FAIL_PATH = launcher;
+  writeFileSync(join(f.directory, "tools", "mv"), `#!/bin/sh
+for destination do :; done
+if [ "$destination" = "$MOCK_FAIL_PATH" ]; then echo "Simulated launcher activation failure" >&2; exit 1; fi
+exec /bin/mv "$@"
+`, { mode: 0o755 });
+  const result = f.bash();
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Simulated launcher activation failure/);
+  assert.deepEqual(paths.map((path) => readlinkSync(path)), originals);
+  assert.equal(readdirSync(f.install).length, 2);
+});
+
+test("Bash installs a local desktop publish without downloads or user launchers", { skip: windows }, (t) => {
+  const f = fixture(t);
+  desktopArchive(f);
+  const result = f.bash("--desktop", "--publish-dir", join(f.directory, "desktop-payload-linux-x64"), "--no-launcher");
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(run(join(f.bin, "logstudio-desktop"), ["--help"]).status, 0);
+  assert.equal(existsSync(f.env.MOCK_LOG), false);
+  assert.equal(existsSync(join(f.data, "applications")), false);
+});
+
+test("Bash still installs older desktop releases without a bundled icon", { skip: windows }, (t) => {
+  const f = fixture(t);
+  desktopArchive(f, "linux-x64", "logstudio.png");
+  const result = f.bash("--desktop");
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.doesNotMatch(readFileSync(join(f.data, "applications", "logstudio-desktop.desktop"), "utf8"), /^Icon=/m);
+});
+
+test("source installers build macOS bundles whose icons are finalized during installation", { skip: windows }, (t) => {
+  const f = fixture(t);
+  f.env.MOCK_OS = "Darwin";
+  desktopArchive(f, "osx-x64");
+  const binaries = join(f.directory, "desktop-payload-osx-x64", "Log Studio.app", "Contents", "MacOS");
+  const root = fileURLToPath(new URL("../../", import.meta.url));
+  const bashSource = readFileSync(new URL("../../install.sh", import.meta.url), "utf8");
+  const psSource = readFileSync(new URL("../../install.ps1", import.meta.url), "utf8");
+  const bashBundle = bashSource.match(/  if \[\[ "\$\(uname -s\)" == Darwin \]\]; then\n([\s\S]*?)\n  fi/);
+  const psBundle = psSource.match(/        if \(-not \$WindowsPlatform -and \(& uname -s\) -eq "Darwin"\) \{\n([\s\S]*?)\n        \}/);
+  assert.ok(bashBundle);
+  assert.ok(psBundle);
+  for (const [name, command, args] of [
+    ["bash", "bash", ["-eu", "-c", `DesktopPublish="$MOCK_PUBLISH"; ProjectRoot="$MOCK_ROOT"; Version="1.8.0";\n${bashBundle[1]}`]],
+    ["powershell", "pwsh", ["-NoProfile", "-Command", `$ErrorActionPreference = "Stop"; $DesktopPublish = $env:MOCK_PUBLISH; $ProjectRoot = $env:MOCK_ROOT; $Version = "1.8.0";\n${psBundle[1]}`]]
+  ]) {
+    const publish = join(f.directory, `${name} local publish`);
+    cpSync(binaries, publish, { recursive: true });
+    const bundled = run(command, args, { MOCK_PUBLISH: publish, MOCK_ROOT: root });
+    assert.equal(bundled.status, 0, bundled.stdout + bundled.stderr);
+    const installed = f.bash("--desktop", "--publish-dir", `${publish}.bundle`);
+    assert.equal(installed.status, 0, installed.stdout + installed.stderr);
+    const launcher = join(f.home, "Applications", "Log Studio.app");
+    assert.deepEqual(readFileSync(join(launcher, "Contents", "Resources", "logstudio.icns")), readFileSync(new URL("../../packaging/logstudio.icns", import.meta.url)));
+    assert.equal(run(join(launcher, "Contents", "MacOS", "LogStudio.Desktop"), ["--help"]).status, 0);
   }
   assert.equal(existsSync(f.env.MOCK_LOG), false);
 });
@@ -374,7 +581,7 @@ test("Bash validates options before downloads", { skip: windows }, (t) => {
 test("Bash installer also works when piped to bash -s", { skip: windows }, (t) => {
   const f = fixture(t);
   unixArchive(f);
-  const result = run("bash", ["-s", "--", "--install-dir", f.install, "--bin-dir", f.bin], {
+  const result = run("bash", ["-s", "--", "--cli", "--install-dir", f.install, "--bin-dir", f.bin], {
     ...f.env, PATH: `${join(f.directory, "tools")}:${process.env.PATH}`
   }, { input: readFileSync(bashInstaller, "utf8") });
   assert.equal(result.status, 0, result.stderr);
@@ -390,13 +597,13 @@ for (const [os, arch, rid] of [
     f.env.MOCK_OS = os;
     f.env.MOCK_ARCH = arch;
     const asset = unixArchive(f, rid);
-    const result = f.bash("--version", "1.0.3-rc.1");
+    const result = f.cli("--version", "1.0.3-rc.1");
     assert.equal(result.status, 0, result.stderr);
     const link = readlinkSync(join(f.bin, "logstudio"));
     assert.equal(existsSync(link), true);
     assert.ok(readFileSync(f.env.MOCK_LOG, "utf8").includes(`/releases/download/1.0.3-rc.1/${asset}`));
     assert.equal(run(join(f.bin, "logstudio"), ["--help"]).status, 0);
-    assert.equal(f.bash().status, 0);
+    assert.equal(f.cli().status, 0);
     assert.notEqual(readlinkSync(join(f.bin, "logstudio")), link);
     assert.equal(existsSync(link), true, "updates retain the previous verified release");
     assert.match(readFileSync(f.env.MOCK_LOG, "utf8"), /releases\/latest\/download/);
@@ -407,7 +614,7 @@ test("Bash downloads stable releases using the exact unprefixed version", { skip
   const f = fixture(t);
   const asset = unixArchive(f);
   for (const version of ["1.0.2", "1.0.3"]) {
-    const result = f.bash("--version", version);
+    const result = f.cli("--version", version);
     assert.equal(result.status, 0, result.stderr);
     assert.ok(readFileSync(f.env.MOCK_LOG, "utf8").includes(`/releases/download/${version}/${asset}`));
   }
@@ -416,10 +623,10 @@ test("Bash downloads stable releases using the exact unprefixed version", { skip
 test("Bash checksum failure leaves an existing installation untouched", { skip: windows }, (t) => {
   const f = fixture(t);
   const asset = unixArchive(f);
-  assert.equal(f.bash().status, 0);
+  assert.equal(f.cli().status, 0);
   const original = readlinkSync(join(f.bin, "logstudio"));
   checksum(f, asset, "0".repeat(64));
-  const result = f.bash();
+  const result = f.cli();
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /checksum verification failed/);
   assert.equal(readlinkSync(join(f.bin, "logstudio")), original);
@@ -440,11 +647,11 @@ test("Bash aborts on missing downloads and unsupported platforms", { skip: windo
 test("Bash refuses unrelated executables and incomplete archives", { skip: windows }, (t) => {
   const f = fixture(t);
   unixArchive(f, "linux-x64", false);
-  assert.match(f.bash().stderr, /archive is missing/);
+  assert.match(f.cli().stderr, /archive is missing/);
   assert.equal(readdirSync(f.install).length, 0);
   mkdirSync(f.bin, { recursive: true });
   writeFileSync(join(f.bin, "logstudio"), "unrelated");
-  assert.match(f.bash().stderr, /Refusing to replace/);
+  assert.match(f.cli().stderr, /Refusing to replace/);
   assert.equal(readFileSync(join(f.bin, "logstudio"), "utf8"), "unrelated");
 });
 
@@ -457,7 +664,7 @@ for (const [os, arch, rid] of [
     f.env.MOCK_OS = os;
     f.env.MOCK_ARCH = arch;
     unixArchive(f, rid);
-    assert.equal(f.bash().status, 0);
+    assert.equal(f.cli().status, 0);
     const cli = readlinkSync(join(f.bin, "logstudio"));
     const asset = desktopArchive(f, rid);
     const installed = f.bash("--desktop", "--version", "1.0.3-rc.1");
@@ -471,11 +678,13 @@ for (const [os, arch, rid] of [
     assert.equal(existsSync(target), true);
     if (os === "Darwin") {
       assert.equal(executable, join(target, "Contents", "MacOS", "LogStudio.Desktop"));
+      assert.deepEqual(readFileSync(join(target, "Contents", "Resources", "logstudio.icns")), readFileSync(new URL("../../packaging/logstudio.icns", import.meta.url)));
     } else {
       const contents = readFileSync(launcher, "utf8");
       assert.match(contents, /^\[Desktop Entry\]/);
       assert.ok(contents.includes(`Exec="${executable}"`), contents);
       assert.match(contents, /Terminal=false/);
+      assert.ok(contents.includes(`Icon=${join(executable, "..", "logstudio.png")}`), contents);
     }
     const requests = readFileSync(f.env.MOCK_LOG, "utf8");
     assert.ok(requests.includes(`/releases/download/1.0.3-rc.1/${asset}`));
@@ -505,7 +714,7 @@ test("Bash desktop defaults keep CLI releases separate and honor the default Lin
 test("Bash desktop checksum failures preserve the desktop launcher and CLI", { skip: windows }, (t) => {
   const f = fixture(t);
   unixArchive(f);
-  assert.equal(f.bash().status, 0);
+  assert.equal(f.cli().status, 0);
   const cli = readlinkSync(join(f.bin, "logstudio"));
   const asset = desktopArchive(f);
   assert.equal(f.bash("--desktop").status, 0);
@@ -591,7 +800,7 @@ for (const desktop of [false, true]) {
     const archive = run("tar", ["-czPf", join(f.downloads, asset), outside]);
     assert.equal(archive.status, 0, archive.stderr);
     checksum(f, asset);
-    const result = f.bash(...(desktop ? ["--desktop"] : []));
+    const result = f.bash(desktop ? "--desktop" : "--cli");
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /unsafe paths/);
     assert.equal(existsSync(f.install), false);
@@ -605,10 +814,55 @@ test("Windows checksum failure installs nothing", { skip: !windows }, (t) => {
   const asset = `logstudio-win-${cpu === "ARM64" ? "arm64" : "x64"}.zip`;
   writeFileSync(join(f.downloads, asset), "corrupt");
   checksum(f, asset, "0".repeat(64));
-  const result = f.powershell();
+  const result = f.psCli();
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /checksum verification failed/);
   assert.equal(existsSync(f.install), false);
+});
+
+test("Windows installs and updates CLI and desktop together by default", { skip: !windows }, (t) => {
+  const f = fixture(t);
+  windowsArchive(f);
+  desktopArchive(f, windowsRid());
+  for (const args of [["-Version", "1.0.3-rc.1"], []]) {
+    const installed = f.powershell(...args);
+    assert.equal(installed.status, 0, installed.stdout + installed.stderr);
+    assert.equal(run(join(f.install, "bin", "logstudio.exe"), ["--help"]).status, 0);
+    assert.equal(run(join(f.install, "desktop-bin", "LogStudio.Desktop.exe"), ["--help"]).status, 0);
+    assert.equal(existsSync(shortcutPath(f)), true);
+  }
+  const requests = readFileSync(f.env.MOCK_LOG, "utf8").trim().split(/\r?\n/);
+  assert.equal(requests.length, 8);
+  assert.ok(requests.slice(0, 4).every((url) => url.includes("/releases/download/1.0.3-rc.1/")));
+  assert.equal(readdirSync(f.install).filter((name) => name.startsWith("release.")).length, 2);
+  assert.equal(readdirSync(f.install).filter((name) => name.startsWith("desktop-release.")).length, 2);
+});
+
+test("Windows combined checksum failure preserves both apps and the shortcut", { skip: !windows }, (t) => {
+  const f = fixture(t);
+  windowsArchive(f);
+  const asset = desktopArchive(f, windowsRid());
+  assert.equal(f.powershell().status, 0);
+  const previous = readFileSync(shortcutPath(f));
+  const directories = readdirSync(f.install).sort();
+  checksum(f, asset, "0".repeat(64));
+  const result = f.powershell();
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /checksum verification failed/);
+  assert.deepEqual(readFileSync(shortcutPath(f)), previous);
+  assert.deepEqual(readdirSync(f.install).sort(), directories);
+  assert.equal(run(join(f.install, "bin", "logstudio.exe"), ["--help"]).status, 0);
+  assert.equal(run(join(f.install, "desktop-bin", "LogStudio.Desktop.exe"), ["--help"]).status, 0);
+});
+
+test("Windows installs a local desktop publish without downloads or a Start Menu shortcut", { skip: !windows }, (t) => {
+  const f = fixture(t);
+  desktopArchive(f, windowsRid());
+  const result = run("pwsh", ["-NoProfile", "-File", powershellInstaller, "-Desktop", "-PublishDir", join(f.directory, `desktop-payload-${windowsRid()}`), "-InstallDir", f.install, "-NoLauncher"], f.env);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(run(join(f.install, "desktop-bin", "LogStudio.Desktop.exe"), ["--help"]).status, 0);
+  assert.equal(existsSync(f.env.MOCK_LOG), false);
+  assert.equal(existsSync(shortcutPath(f)), false);
 });
 
 for (const desktop of [false, true]) {
@@ -623,7 +877,7 @@ for (const desktop of [false, true]) {
     `], { MOCK_ARCHIVE: join(f.downloads, asset) });
     assert.equal(create.status, 0, create.stderr);
     checksum(f, asset);
-    const result = f.powershell(...(desktop ? ["-Desktop"] : []));
+    const result = f.powershell(desktop ? "-Desktop" : "-Cli");
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /unsafe paths/);
     assert.equal(existsSync(f.install), false);
@@ -646,6 +900,7 @@ test("Windows desktop waits for WinExe help, installs a Start Menu shortcut, and
     $expectedTarget = Join-Path $release "LogStudio.Desktop.exe"
     if ([IO.Path]::GetFullPath($shortcut.TargetPath) -ne [IO.Path]::GetFullPath($expectedTarget)) { throw "Wrong shortcut target: $($shortcut.TargetPath)" }
     if ([IO.Path]::GetFullPath($shortcut.WorkingDirectory) -ne $release) { throw "Wrong shortcut working directory: $($shortcut.WorkingDirectory)" }
+    if ($shortcut.IconLocation -ne ((Join-Path $release "logstudio.ico") + ",0")) { throw "Wrong shortcut icon: $($shortcut.IconLocation)" }
   `], { MOCK_SHORTCUT: shortcutPath(f), MOCK_INSTALL_DIR: f.install });
   const installedShortcut = inspect();
   assert.equal(installedShortcut.status, 0, installedShortcut.stdout + installedShortcut.stderr);
@@ -718,7 +973,7 @@ test("compiled archive installs and runs without an installed .NET runtime", { s
   const asset = `logstudio-${rid}${windows ? ".zip" : ".tar.gz"}`;
   cpSync(process.env.LOGSTUDIO_TEST_ARCHIVE, join(f.downloads, asset));
   checksum(f, asset);
-  const result = windows ? f.powershell() : f.bash();
+  const result = windows ? f.psCli() : f.cli();
   assert.equal(result.status, 0, result.stderr);
   const executable = windows
     ? join(f.install, readdirSync(f.install).find((name) => name.startsWith("release.")), "logstudio.exe")
@@ -726,7 +981,7 @@ test("compiled archive installs and runs without an installed .NET runtime", { s
   const help = run(executable, ["--help"], { DOTNET_ROOT: join(f.directory, "no-dotnet"), DOTNET_MULTILEVEL_LOOKUP: "0" });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /logstudio/i);
-  const update = windows ? f.powershell("-Version", "1.0.2") : f.bash("--version", "1.0.2");
+  const update = windows ? f.psCli("-Version", "1.0.2") : f.cli("--version", "1.0.2");
   assert.equal(update.status, 0, update.stderr);
   if (windows) {
     const bin = join(f.install, "bin");
@@ -755,5 +1010,31 @@ test("compiled desktop archive installs and verifies without a GUI or installed 
     const verified = run(executable, [option], { DOTNET_ROOT: join(f.directory, "no-dotnet"), DOTNET_MULTILEVEL_LOOKUP: "0" });
     assert.equal(verified.status, 0, verified.stderr);
     assert.match(verified.stdout, option === "--help" ? /logstudio/i : /\d+\.\d+\.\d+/);
+  }
+});
+
+test("compiled archives install together without an installed .NET runtime", {
+  skip: !process.env.LOGSTUDIO_TEST_ARCHIVE || !process.env.LOGSTUDIO_TEST_DESKTOP_ARCHIVE
+}, (t) => {
+  const f = fixture(t);
+  const rid = process.env.LOGSTUDIO_TEST_RID;
+  f.env.MOCK_OS = rid.startsWith("osx-") ? "Darwin" : "Linux";
+  f.env.MOCK_ARCH = rid.endsWith("-arm64") ? "arm64" : "x86_64";
+  for (const [application, archive] of [
+    ["logstudio", process.env.LOGSTUDIO_TEST_ARCHIVE], ["logstudio-desktop", process.env.LOGSTUDIO_TEST_DESKTOP_ARCHIVE]
+  ]) {
+    const asset = `${application}-${rid}${windows ? ".zip" : ".tar.gz"}`;
+    cpSync(archive, join(f.downloads, asset));
+    checksum(f, asset);
+  }
+  const result = windows ? f.powershell() : f.bash();
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const executables = windows
+    ? [join(f.install, "bin", "logstudio.exe"), join(f.install, "desktop-bin", "LogStudio.Desktop.exe")]
+    : [join(f.bin, "logstudio"), join(f.bin, "logstudio-desktop")];
+  for (const executable of executables) {
+    const verified = run(executable, ["--help"], { DOTNET_ROOT: join(f.directory, "no-dotnet"), DOTNET_MULTILEVEL_LOOKUP: "0" });
+    assert.equal(verified.status, 0, verified.stdout + verified.stderr);
+    assert.match(verified.stdout, /logstudio/i);
   }
 });

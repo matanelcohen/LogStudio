@@ -4,6 +4,7 @@ set -euo pipefail
 readonly ProjectRoot="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly Solution="$ProjectRoot/LogStudio.sln"
 readonly LibraryProject="$ProjectRoot/src/LogStudio/LogStudio.csproj"
+readonly DesktopProject="$ProjectRoot/src/LogStudio.Desktop/LogStudio.Desktop.csproj"
 readonly Frontend="$ProjectRoot/frontend"
 readonly Artifacts="$ProjectRoot/artifacts"
 readonly PackageId="LogStudio.Tool"
@@ -16,15 +17,20 @@ Scope="global"
 RestoreMode="cache-first"
 InstallCache=""
 NuGetSource=""
+Application="both"
+DesktopPublish=""
 
 usage() {
   printf '%s\n' \
     "Build, test, pack, and install Log Studio from local source." \
     "" \
-    "Usage: ./install.sh [--global | --local] [--offline | --online] [--nuget-source <source>]" \
+    "Usage: ./install.sh [--cli | --desktop] [--global | --local] [--offline | --online] [--nuget-source <source>]" \
     "" \
+    "Installs both the CLI and desktop app by default." \
+    "  --cli      Install only the CLI." \
+    "  --desktop  Install only the desktop app." \
     "  --global   Install for the current user; run logstudio from anywhere (default)." \
-    "  --local    Install into artifacts/tool without changing the global tool." \
+    "  --local    Install into artifacts/tool and artifacts/desktop without user application launchers." \
     "  --offline  Require cached dependencies; never try the network." \
     "  --online   Require the configured online restore and vulnerability lookup." \
     "  --nuget-source <source>  Use an explicit NuGet feed instead of NuGet.Config." \
@@ -45,6 +51,9 @@ cleanup() {
       *) printf 'Refusing to remove an unexpected installation cache: %s\n' "$InstallCache" >&2 ;;
     esac
   fi
+  if [[ -n "$DesktopPublish" && -d "$DesktopPublish" ]]; then
+    case "$DesktopPublish" in "$Artifacts"/.desktop-publish.*) rm -rf -- "$DesktopPublish" ;; esac
+  fi
 }
 trap cleanup EXIT
 
@@ -54,11 +63,30 @@ while [[ $# -gt 0 ]]; do
     --local) Scope="local" ;;
     --offline) RestoreMode="offline" ;;
     --online) RestoreMode="online" ;;
+    --cli | --desktop)
+      if [[ "$Application" != both ]]; then
+        printf 'Choose only one of --cli and --desktop.\n' >&2
+        exit 2
+      fi
+      Application="${1#--}"
+      ;;
     --nuget-source)
-      if [[ $# -lt 2 || -z "$2" ]]; then printf '%s\n' '--nuget-source requires a feed URL or directory.' >&2; exit 2; fi
-      NuGetSource="$2"; shift ;;
-    --help|-h) usage; exit 0 ;;
-    *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+      if [[ $# -lt 2 || -z "$2" ]]; then
+        printf '%s\n' '--nuget-source requires a feed URL or directory.' >&2
+        exit 2
+      fi
+      NuGetSource="$2"
+      shift
+      ;;
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'Unknown option: %s\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
   esac
   shift
 done
@@ -166,42 +194,65 @@ if [[ ! -f "$Artifacts/$PackageId.$Version.nupkg" ]]; then
   exit 1
 fi
 
-if [[ "$Scope" == "global" ]]; then
-  ToolScope=(--global)
-  ToolDirectory="$DotnetHome/.dotnet/tools"
-else
-  ToolDirectory="$Artifacts/tool"
-  ToolScope=(--tool-path "$ToolDirectory")
+if [[ "$Application" != cli ]]; then
+  printf '\nPublishing the desktop app...\n'
+  DesktopPublish="$(mktemp -d "$Artifacts/.desktop-publish.XXXXXX")"
+  dotnet publish "$DesktopProject" --configuration "$Configuration" --no-build --no-restore -p:PackAsTool=false --output "$DesktopPublish"
+  if [[ "$(uname -s)" == Darwin ]]; then
+    Bundle="$DesktopPublish.bundle"
+    mkdir -p "$Bundle/Log Studio.app/Contents"
+    mv "$DesktopPublish" "$Bundle/Log Studio.app/Contents/MacOS"
+    DesktopPublish="$Bundle"
+    sed "s/@VERSION@/${Version%%-*}/g" "$ProjectRoot/packaging/Info.plist" >"$DesktopPublish/Log Studio.app/Contents/Info.plist"
+  fi
 fi
 
-mkdir -p -- "$ToolDirectory"
-InstallCache="$(mktemp -d "$Artifacts/.install-cache.XXXXXX")"
-InstalledTools="$(dotnet tool list "${ToolScope[@]}")"
-if printf '%s\n' "$InstalledTools" | awk -v package="$PackageId" 'tolower($1) == tolower(package) { found = 1 } END { exit !found }'; then
-  printf '\nReplacing the existing %s installation with the freshly built package...\n' "$Scope"
-  dotnet tool uninstall "$PackageId" "${ToolScope[@]}"
+if [[ "$Application" != desktop ]]; then
+  if [[ "$Scope" == "global" ]]; then
+    ToolScope=(--global)
+    ToolDirectory="$DotnetHome/.dotnet/tools"
+  else
+    ToolDirectory="$Artifacts/tool"
+    ToolScope=(--tool-path "$ToolDirectory")
+  fi
+
+  mkdir -p -- "$ToolDirectory"
+  InstallCache="$(mktemp -d "$Artifacts/.install-cache.XXXXXX")"
+  InstalledTools="$(dotnet tool list "${ToolScope[@]}")"
+  if printf '%s\n' "$InstalledTools" | awk -v package="$PackageId" 'tolower($1) == tolower(package) { found = 1 } END { exit !found }'; then
+    printf '\nReplacing the existing %s installation with the freshly built package...\n' "$Scope"
+    dotnet tool uninstall "$PackageId" "${ToolScope[@]}"
+  fi
+
+  printf '\nInstalling %s (%s)...\n' "$PackageId" "$Scope"
+  NUGET_PACKAGES="$InstallCache" dotnet tool install "$PackageId" \
+    "${ToolScope[@]}" --version "$Version" --configfile "$ProjectRoot/NuGet.Local.Config"
+
+  if [[ ! -x "$ToolDirectory/$ToolCommand" ]]; then
+    printf 'Installation returned without the expected executable: %s\n' "$ToolDirectory/$ToolCommand" >&2
+    exit 1
+  fi
+  "$ToolDirectory/$ToolCommand" --help >/dev/null
+
+  printf '\nInstalled Log Studio %s at %s/%s\n' "$Version" "$ToolDirectory" "$ToolCommand"
+  if [[ "$Scope" == "global" ]]; then
+    case ":$PATH:" in
+      *":$ToolDirectory:"*) ;;
+      *)
+        printf 'Add the .NET tools directory to PATH (and to ~/.zshrc for future terminals):\n'
+        printf '  export PATH="%s:$PATH"\n' "$ToolDirectory"
+        ;;
+    esac
+    printf '\nRun from any directory:\n  logstudio --open -- dotnet run --project ./path/to/App.csproj\n'
+  else
+    printf '\nRun:\n  "%s/%s" --open -- dotnet run --project ./path/to/App.csproj\n' "$ToolDirectory" "$ToolCommand"
+  fi
 fi
 
-printf '\nInstalling %s (%s)...\n' "$PackageId" "$Scope"
-NUGET_PACKAGES="$InstallCache" dotnet tool install "$PackageId" \
-  "${ToolScope[@]}" --version "$Version" --configfile "$ProjectRoot/NuGet.Local.Config"
-
-if [[ ! -x "$ToolDirectory/$ToolCommand" ]]; then
-  printf 'Installation returned without the expected executable: %s\n' "$ToolDirectory/$ToolCommand" >&2
-  exit 1
-fi
-"$ToolDirectory/$ToolCommand" --help >/dev/null
-
-printf '\nInstalled Log Studio %s at %s/%s\n' "$Version" "$ToolDirectory" "$ToolCommand"
-if [[ "$Scope" == "global" ]]; then
-  case ":$PATH:" in
-    *":$ToolDirectory:"*) ;;
-    *)
-      printf 'Add the .NET tools directory to PATH (and to ~/.zshrc for future terminals):\n'
-      printf '  export PATH="%s:$PATH"\n' "$ToolDirectory"
-      ;;
-  esac
-  printf '\nRun from any directory:\n  logstudio --open -- dotnet run --project ./path/to/App.csproj\n'
-else
-  printf '\nRun:\n  "%s/%s" --open -- dotnet run --project ./path/to/App.csproj\n' "$ToolDirectory" "$ToolCommand"
+if [[ "$Application" != cli ]]; then
+  DesktopArguments=(--desktop --publish-dir "$DesktopPublish")
+  if [[ "$Scope" == local ]]; then
+    DesktopArguments+=(--install-dir "$Artifacts/desktop" --bin-dir "$Artifacts/tool" --no-launcher)
+  fi
+  bash "$ProjectRoot/install-release.sh" "${DesktopArguments[@]}"
 fi
