@@ -1,8 +1,10 @@
+import * as Oui from "@opensearch-project/oui";
 import { ChevronDown, ChevronRight, GitBranch, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { TelemetrySpan } from "./telemetry-api";
 import { displayText, MaximumDisplayedTraces, spanRelation, telemetrySourceColor, traceGroups, traceMatches, traceWaterfall } from "./telemetry-model";
 import { TelemetryTags } from "./TelemetryTags";
+import { SelectControl } from "./ui";
 
 const durationFormat = new Intl.NumberFormat(undefined, { maximumSignificantDigits: 4 });
 const startFormat = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -75,18 +77,16 @@ export function TraceExplorer({ spans }: { spans: TelemetrySpan[] }) {
   return <>
     <div className="telemetry-toolbar">
       <label className="telemetry-search"><Search size={16} aria-hidden="true" />
-        <input type="search" aria-label="Search traces" placeholder="Search trace ID, operation, source, status, or tags"
+        <Oui.Input type="search" aria-label="Search traces" placeholder="Search trace ID, operation, source, status, or tags"
           value={query} onChange={event => { setQuery(event.target.value); resetSelection(); }} /></label>
-      <label className="telemetry-filter"><span>Status</span><select aria-label="Trace status" value={statusFilter}
-        onChange={event => { setStatusFilter(event.target.value); resetSelection(); }}>
-        <option value="">All traces</option><option value="errors">With errors</option><option value="no-errors">No retained errors</option>
-      </select></label>
-      <label className="telemetry-filter"><span>Sort</span><select aria-label="Sort traces" value={sort} onChange={event => setSort(event.target.value)}>
-        <option value="recent">Newest first</option><option value="duration">Longest first</option>
-      </select></label>
-      {(query || statusFilter || sort !== "recent") && <button className="ghost-button" onClick={() => {
+      <label className="telemetry-filter"><span>Status</span><SelectControl label="Trace status" value={statusFilter}
+        onChange={value => { setStatusFilter(value); resetSelection(); }}
+        choices={[{ value: "", label: "All traces" }, { value: "errors", label: "With errors" }, { value: "no-errors", label: "No retained errors" }]} /></label>
+      <label className="telemetry-filter"><span>Sort</span><SelectControl label="Sort traces" value={sort} onChange={setSort}
+        choices={[{ value: "recent", label: "Newest first" }, { value: "duration", label: "Longest first" }]} /></label>
+      {(query || statusFilter || sort !== "recent") && <Oui.Button variant="ghost" size="sm" className="ghost-button" onClick={() => {
         setQuery(""); setStatusFilter(""); setSort("recent"); resetSelection();
-      }}><X size={14} aria-hidden="true" />Reset filters</button>}
+      }}><X size={14} aria-hidden="true" />Reset filters</Oui.Button>}
     </div>
     <div className="telemetry-results-heading"><h3>Trace explorer <span>{displayed.length}</span></h3>
       <span className="muted">Showing {displayed.length} of {matches.length} {query.trim() || statusFilter ? "matching " : "recent "}traces.</span></div>
@@ -101,14 +101,14 @@ export function TraceExplorer({ spans }: { spans: TelemetrySpan[] }) {
               const summary = traceWaterfall(entries);
               const root = summary.rows[0]!.span;
               const errors = entries.filter(span => span.status === "Error").length;
-              return <li key={traceId}><button className="trace-list-item" aria-pressed={active?.[0] === traceId}
+              return <li key={traceId}><Oui.Button variant="ghost" size="sm" className="trace-list-item" aria-pressed={active?.[0] === traceId}
                 onClick={() => { setSelectedTraceId(traceId); setSelectedId(null); setCollapsed(new Set()); }}>
                 <span className="trace-list-title"><strong>{displayText(root.name)}</strong><span>{duration(summary.duration)}</span></span>
                 <span className="trace-list-source"><i className="telemetry-color-key" aria-hidden="true" style={{ background: telemetrySourceColor(root.source) }} />{displayText(root.source)}</span>
                 <code>{displayText(traceId)}</code>
                 <span className="trace-list-footer"><span>{entries.length} spans · <time dateTime={root.startTime} title={root.startTime}>{startFormat.format(new Date(root.startTime))}</time></span>
                   <span className={`telemetry-status${errors ? " error" : ""}`}>{errors ? `${errors} errors` : "No retained errors"}</span></span>
-              </button></li>;
+              </Oui.Button></li>;
             })}</ul>
           </section>
           <section className="trace-waterfall" aria-label="Span waterfall">
@@ -120,7 +120,7 @@ export function TraceExplorer({ spans }: { spans: TelemetrySpan[] }) {
               {errors > 0 && <span className="trace-error-key">{errors} error spans</span>}</div>
             <p className="muted trace-window-note">Retained spans only · Parents may be outside the retained window.</p>
             {selectedId !== null && !spans.some(span => span.id === selectedId) &&
-              <p role="status" className="notice">The selected span has left the retained window.</p>}
+              <Oui.Alert variant="default" role="status" className="notice">The selected span has left the retained window.</Oui.Alert>}
             <div className="trace-waterfall-scroll">
               <div className="waterfall-scale"><span>Operation / source</span><div><span>0 ms</span>
                 <span>{duration(waterfall.duration / 2)}</span><span>{duration(waterfall.duration)}</span></div><span>Duration</span></div>
@@ -128,23 +128,23 @@ export function TraceExplorer({ spans }: { spans: TelemetrySpan[] }) {
                 className={`waterfall-row${selected?.id === row.span.id ? " selected" : ""}${row.span.status === "Error" ? " error" : ""}`}
                 style={{ "--telemetry-series-color": telemetrySourceColor(row.span.source) } as CSSProperties}>
                 <div className="waterfall-operation" style={{ paddingLeft: `${Math.min(row.depth, 12) * 12 + 8}px` }}>
-                  {row.hasChildren ? <button className="icon-button waterfall-toggle" aria-label={`${collapsed.has(row.span.id) ? "Expand" : "Collapse"} ${displayText(row.span.name)}`}
+                  {row.hasChildren ? <Oui.Button variant="ghost" size="icon" className="icon-button waterfall-toggle" aria-label={`${collapsed.has(row.span.id) ? "Expand" : "Collapse"} ${displayText(row.span.name)}`}
                     aria-expanded={!collapsed.has(row.span.id)} onClick={() => setCollapsed(previous => {
                       const next = new Set(previous);
                       if (next.has(row.span.id)) next.delete(row.span.id); else next.add(row.span.id);
                       return next;
-                    })}>{collapsed.has(row.span.id) ? <ChevronRight size={14} /> : <ChevronDown size={14} />}</button> : <span className="waterfall-leaf" />}
-                  <button className="waterfall-select" aria-pressed={selected?.id === row.span.id}
+                    })}>{collapsed.has(row.span.id) ? <ChevronRight size={14} /> : <ChevronDown size={14} />}</Oui.Button> : <span className="waterfall-leaf" />}
+                  <Oui.Button variant="ghost" size="sm" className="waterfall-select" aria-pressed={selected?.id === row.span.id}
                     aria-label={`${displayText(row.span.name)} · ${row.span.durationMilliseconds} ms · ${displayText(row.span.status)}`}
                     onClick={() => selectSpan(row.span.id)}>
                     <strong>{displayText(row.span.name)}</strong><span>{displayText(row.span.source)} · {displayText(row.span.status)}</span>
                     <small>{spanRelation(row.span, activeSpans)}</small>
-                  </button>
+                  </Oui.Button>
                 </div>
-                <button className="waterfall-track" aria-label={`Inspect span ${displayText(row.span.spanId)}`}
+                <Oui.Button variant="ghost" size="sm" className="waterfall-track" aria-label={`Inspect span ${displayText(row.span.spanId)}`}
                   title={`${row.span.startTime} · ${row.span.durationMilliseconds} ms`} onClick={() => selectSpan(row.span.id)}>
                   <span className="waterfall-bar" style={{ left: `${row.startPercent}%`, width: `${row.widthPercent}%` }} />
-                </button><span className="waterfall-duration">{duration(row.span.durationMilliseconds)}</span>
+                </Oui.Button><span className="waterfall-duration">{duration(row.span.durationMilliseconds)}</span>
               </li>)}</ul>
             </div>
           </section>

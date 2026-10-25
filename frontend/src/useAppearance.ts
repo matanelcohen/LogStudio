@@ -20,6 +20,7 @@ export function useAppearance(appearance: Appearance, setAppearance: (value: App
     const previousTheme = root.dataset.theme;
     const previousColorTheme = root.dataset.colorTheme;
     const previousContrast = root.dataset.themeContrast;
+    const previousDark = root.classList.contains("dark");
     const previousProperties = Object.entries(selected?.palette ?? {}).map(([key, value]) => {
       const property = `--theme-${key}`;
       const previous = root.style.getPropertyValue(property);
@@ -34,6 +35,7 @@ export function useAppearance(appearance: Appearance, setAppearance: (value: App
     function apply() {
       const theme = colorScheme(appearance, media.matches);
       root.dataset.theme = theme;
+      root.classList.toggle("dark", theme === "dark");
       setTheme(theme);
     }
     const url = new URL(location.href);
@@ -52,6 +54,7 @@ export function useAppearance(appearance: Appearance, setAppearance: (value: App
       }
       if (previousTheme === undefined) delete root.dataset.theme;
       else root.dataset.theme = previousTheme;
+      root.classList.toggle("dark", previousDark);
       if (previousColorTheme === undefined) delete root.dataset.colorTheme;
       else root.dataset.colorTheme = previousColorTheme;
       if (previousContrast === undefined) delete root.dataset.themeContrast;

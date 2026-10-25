@@ -1,4 +1,5 @@
-import * as Dialog from "@radix-ui/react-dialog";
+import * as Oui from "@opensearch-project/oui";
+
 import { ArrowRight, Filter, Plus, Regex, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
@@ -45,10 +46,9 @@ export function ConditionDialog({ open, conditions, includeMode, seed, onClose, 
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={open => { if (!open) onClose(); }}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content id="conditionsPanel" className="condition-dialog" onCloseAutoFocus={event => {
+    <Oui.Dialog open={open} onOpenChange={open => { if (!open) onClose(); }}>
+
+        <Oui.DialogContent showCloseButton={false} id="conditionsPanel" className="condition-dialog" onCloseAutoFocus={event => {
           if (!returnFocus) return;
           event.preventDefault();
           returnFocus();
@@ -56,10 +56,10 @@ export function ConditionDialog({ open, conditions, includeMode, seed, onClose, 
           <div className="dialog-titlebar">
             <div className="dialog-icon"><Filter size={20} /></div>
             <div>
-              <Dialog.Title>Build your query</Dialog.Title>
-              <Dialog.Description>Include the signals you need. Exclude the noise. Original history stays intact.</Dialog.Description>
+              <Oui.DialogTitle>Build your query</Oui.DialogTitle>
+              <Oui.DialogDescription>Include the signals you need. Exclude the noise. Original history stays intact.</Oui.DialogDescription>
             </div>
-            <Dialog.Close className="icon-button" aria-label="Close condition builder"><X size={18} /></Dialog.Close>
+            <Oui.DialogClose asChild><Oui.Button variant="ghost" size="sm" className="icon-button" aria-label="Close condition builder"><X size={18} /></Oui.Button></Oui.DialogClose>
           </div>
           <form id="conditionForm" onSubmit={event => {
             event.preventDefault();
@@ -88,29 +88,29 @@ export function ConditionDialog({ open, conditions, includeMode, seed, onClose, 
                   <SelectControl label={`Condition ${index + 1} operator`} value={condition.operator}
                     choices={ConditionOperators.map(value => ({ value, label: OperatorLabels[value] }))}
                     onChange={value => update(index, { ...condition, operator: readChoice(value, ConditionOperators) })} />
-                  <input aria-label={`Condition ${index + 1} value`} name="value" value={condition.value}
+                  <Oui.Input aria-label={`Condition ${index + 1} value`} name="value" value={condition.value}
                     maxLength={MaximumConditionValueLength} autoComplete="off" spellCheck={false}
                     placeholder={condition.operator === "regex" ? "^pattern.*$" : "Enter a value…"}
                     onChange={event => update(index, { ...condition, value: event.target.value })} />
-                  <button type="button" className="icon-button" aria-label={`Remove condition ${index + 1}`}
-                    onClick={() => setRows(rows => rows.filter(row => row.key !== key))}><Trash2 size={15} /></button>
+                  <Oui.Button variant="ghost" size="icon" type="button" className="icon-button" aria-label={`Remove condition ${index + 1}`}
+                    onClick={() => setRows(rows => rows.filter(row => row.key !== key))}><Trash2 size={15} /></Oui.Button>
                 </div>
               ))}
             </div>
             <div className="condition-add-row">
-              <button id="addCondition" type="button" className="ghost-button" disabled={rows.length >= MaximumConditions}
-                onClick={() => setRows(rows => [...rows, draft(EmptyCondition)])}><Plus size={15} /> Add condition</button>
+              <Oui.Button variant="ghost" size="sm" id="addCondition" type="button" className="ghost-button" disabled={rows.length >= MaximumConditions}
+                onClick={() => setRows(rows => [...rows, draft(EmptyCondition)])}><Plus size={15} /> Add condition</Oui.Button>
               <span className="muted">{rows.length} / {MaximumConditions} conditions</span>
             </div>
-            {error && <p id="conditionError" className="notice danger" role="alert">{error}</p>}
+            {error && <Oui.Alert variant="destructive" id="conditionError" className="notice danger" role="alert">{error}</Oui.Alert>}
             <div className="regex-guidance"><Regex size={16} /><span>Regex uses linear-time matching. Lookarounds and backreferences aren’t supported.</span></div>
             <div className="dialog-footer">
-              <button type="button" onClick={onClose}>Cancel</button>
-              <button id="applyConditions" className="primary" type="submit">Apply conditions <ArrowRight size={15} /></button>
+              <Oui.Button variant="outline" size="sm" type="button" onClick={onClose}>Cancel</Oui.Button>
+              <Oui.Button variant="default" size="sm" id="applyConditions" className="primary" type="submit">Apply conditions <ArrowRight size={15} /></Oui.Button>
             </div>
           </form>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+        </Oui.DialogContent>
+
+    </Oui.Dialog>
   );
 }

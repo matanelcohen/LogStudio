@@ -35,7 +35,8 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private const string LineEnding = "\n";
     private const string RootRoute = "";
     private const string ContentSecurityPolicy =
-        "default-src 'none'; script-src 'self' 'nonce-{0}'; style-src 'self' 'nonce-{0}'; connect-src 'self'; " +
+        // OUI's select emits a fixed stylesheet; React briefly clears it during updates.
+        "default-src 'none'; script-src 'self' 'nonce-{0}'; style-src 'self' 'nonce-{0}' 'sha256-441zG27rExd4/il+NvIqyL8zFx5XmyNQtE381kSkUJk=' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; connect-src 'self'; " +
         "img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; style-src-attr 'unsafe-inline'";
 
     private readonly HttpListener listener;

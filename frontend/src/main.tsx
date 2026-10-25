@@ -1,7 +1,9 @@
+import * as Oui from "@opensearch-project/oui";
 import { setNonce } from "get-nonce";
 import { Component, StrictMode, type ErrorInfo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import "@opensearch-project/oui/style.css";
 import "./styles.css";
 
 const nonceScript = document.querySelector("script[nonce]");
@@ -16,7 +18,7 @@ class FrontendErrorBoundary extends Component<{ children: ReactNode }, { error: 
     console.error("Log Studio frontend failed", error, info.componentStack);
   }
   render() {
-    if (this.state.error) return <div className="fatal-error" role="alert"><h1>Log Studio couldn’t render</h1><p>{this.state.error}</p><button onClick={() => location.reload()}>Reload viewer</button></div>;
+    if (this.state.error) return <div className="fatal-error" role="alert"><h1>Log Studio couldn’t render</h1><p>{this.state.error}</p><Oui.Button variant="outline" size="sm" onClick={() => location.reload()}>Reload viewer</Oui.Button></div>;
     return this.props.children;
   }
 }

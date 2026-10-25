@@ -1,5 +1,5 @@
-import * as Popover from "@radix-ui/react-popover";
-import * as Menu from "@radix-ui/react-dropdown-menu";
+import * as Oui from "@opensearch-project/oui";
+
 import { ChevronDown, CircleHelp, Download, FileArchive, Filter, RotateCcw, Search, SlidersHorizontal, X } from "lucide-react";
 import type { RefObject } from "react";
 import {
@@ -43,49 +43,50 @@ export function QueryBar({ query, page, loading, error, searchRef, maximumId, on
   const exportId = Math.min(maximumId ?? page?.status.lastId ?? 0, page?.status.lastId ?? 0);
 
   return (
-    <section className="query-bar" aria-label="Search and filter logs">
+    <Oui.Card className="query-bar" role="region" aria-label="Search and filter logs">
       <div className="search-row">
         <div className="search-box">
           <Search size={16} aria-hidden />
-          <input id="search" aria-label="Search logs" ref={searchRef} type="search" value={query.search}
+          <Oui.Input id="search" aria-label="Search logs" ref={searchRef} type="search" value={query.search}
             maxLength={1024} autoComplete="off" spellCheck={false} aria-invalid={!!error}
             placeholder='Search history: "exact phrases", -exclude, category:Name…'
             onChange={event => onChange({ ...query, search: event.target.value })} />
           <kbd>{shortcut}</kbd>
         </div>
-        <button id="conditionsButton" className="query-builder-button" onClick={() => onEdit()}>
+        <Oui.Button variant="outline" size="sm" id="conditionsButton" className="query-builder-button" onClick={() => onEdit()}>
           <SlidersHorizontal size={15} /> Add filter {query.conditions.length > 0 && <span className="button-count">{query.conditions.length}</span>}
-        </button>
-        <Popover.Root>
-          <Popover.Trigger asChild><button className="icon-button" aria-label="Search help"><CircleHelp size={17} /></button></Popover.Trigger>
-          <Popover.Portal>
-            <Popover.Content className="popover search-help" sideOffset={8} align="end">
+        </Oui.Button>
+        <Oui.Popover>
+          <Oui.PopoverTrigger asChild><Oui.Button variant="ghost" size="icon" className="icon-button" aria-label="Search help"><CircleHelp size={17} /></Oui.Button></Oui.PopoverTrigger>
+
+            <Oui.PopoverContent className="popover search-help" sideOffset={8} align="end">
               <h3>Query guide</h3>
               <p>Search terms are literal and AND-ed. Use quoted phrases and <code>-term</code> to exclude.</p>
               <p>Scope terms with <code>category:</code>, <code>level:</code>, <code>stream:</code>, <code>message:</code>, or exact <code>id:</code>.</p>
               <p>The condition builder adds field operators and opt-in regex. Includes support AND / OR; exclusions always win.</p>
               <p className="muted">Only the current page is loaded in memory. Queries and exports read the full disk history.</p>
-            </Popover.Content>
-          </Popover.Portal>
-        </Popover.Root>
+            </Oui.PopoverContent>
+
+        </Oui.Popover>
         <div className="export-actions">
-        <a id="download" className={`button primary ${!page?.matchCount || loading || error ? "disabled" : ""}`}
+        <a id="download" className={Oui.buttonVariants({ size: "sm", className: !page?.matchCount || loading || error ? "disabled" : "" })}
           aria-disabled={!page?.matchCount || loading || !!error}
+          tabIndex={!page?.matchCount || loading || error ? -1 : undefined}
           href={buildExportUrl(query, exportId)} download={`log-studio-${Date.now()}.jsonl`}
           onClick={event => {
             if (!page?.matchCount || loading || error) event.preventDefault();
             else onNotice(`Streaming export requested for ${NumberFormatter.format(page.matchCount)} matching entries.`);
           }}><Download size={14} /> Export</a>
-        <Menu.Root>
-          <Menu.Trigger asChild><button className="primary export-menu-button" aria-label="Export options"><ChevronDown size={13} /></button></Menu.Trigger>
-          <Menu.Portal><Menu.Content className="menu-content export-menu" sideOffset={6} align="end">
-            <Menu.Label className="menu-label">Export selected session</Menu.Label>
-            <Menu.Item className="menu-item" asChild><a href={buildSessionExportUrl(query.sessionId)} download><FileArchive size={16} /><div><strong>Portable session bundle (.zip)</strong><small>All retained entries and run parameters</small></div></a></Menu.Item>
-            <Menu.Item className="menu-item" asChild disabled={!page?.matchCount || loading || !!error}>
+        <Oui.DropdownMenu>
+          <Oui.DropdownMenuTrigger asChild><Oui.Button variant="default" size="sm" className="primary export-menu-button" aria-label="Export options"><ChevronDown size={13} /></Oui.Button></Oui.DropdownMenuTrigger>
+          <Oui.DropdownMenuContent className="menu-content export-menu" sideOffset={6} align="end">
+            <Oui.DropdownMenuLabel className="menu-label">Export selected session</Oui.DropdownMenuLabel>
+            <Oui.DropdownMenuItem className="menu-item" asChild><a href={buildSessionExportUrl(query.sessionId)} download><FileArchive size={16} /><div><strong>Portable session bundle (.zip)</strong><small>All retained entries and run parameters</small></div></a></Oui.DropdownMenuItem>
+            <Oui.DropdownMenuItem className="menu-item" asChild disabled={!page?.matchCount || loading || !!error}>
               <a href={buildExportUrl(query, exportId)} download><Download size={16} /><div><strong>Matching records (.jsonl)</strong><small>All entries matching your current filters</small></div></a>
-            </Menu.Item>
-          </Menu.Content></Menu.Portal>
-        </Menu.Root>
+            </Oui.DropdownMenuItem>
+          </Oui.DropdownMenuContent>
+        </Oui.DropdownMenu>
         </div>
       </div>
       <div className="filter-row">
@@ -99,9 +100,9 @@ export function QueryBar({ query, page, loading, error, searchRef, maximumId, on
         <SelectControl id="timeWindow" label="Time window" value={String(query.timeWindow)} choices={TimeChoices}
           onChange={value => onChange({ ...query, timeWindow: Number(value) })} />
         <span className="filter-separator" />
-        <label className="checkbox-label"><input id="caseSensitive" type="checkbox" checked={query.matchCase}
-          onChange={event => onChange({ ...query, matchCase: event.target.checked })} />Match case</label>
-        <button id="reset" className="ghost-button" onClick={onReset}><RotateCcw size={13} /> Reset</button>
+        <label className="checkbox-label"><Oui.Checkbox id="caseSensitive" checked={query.matchCase}
+          onCheckedChange={checked => onChange({ ...query, matchCase: checked === true })} />Match case</label>
+        <Oui.Button variant="ghost" size="sm" id="reset" className="ghost-button" onClick={onReset}><RotateCcw size={13} /> Reset</Oui.Button>
       </div>
       {query.conditions.length > 0 && (
         <div id="filterChips" className="filter-chips" aria-label="Active condition filters">
@@ -109,14 +110,14 @@ export function QueryBar({ query, page, loading, error, searchRef, maximumId, on
           {query.conditions.map((condition, index) => (
             <span className={`filter-chip ${condition.mode}`} key={`${index}-${condition.field}`}>
               <span title={condition.value}>{condition.mode === "include" ? "+" : "−"} {FieldLabels[condition.field]} {OperatorLabels[condition.operator]} <strong>{condition.value}</strong></span>
-              <button className="icon-button" aria-label={`Remove ${condition.mode} condition on ${condition.field}`}
-                onClick={() => onChange({ ...query, conditions: query.conditions.filter((_, current) => current !== index) })}><X size={12} /></button>
+              <Oui.Button variant="ghost" size="icon" className="icon-button" aria-label={`Remove ${condition.mode} condition on ${condition.field}`}
+                onClick={() => onChange({ ...query, conditions: query.conditions.filter((_, current) => current !== index) })}><X size={12} /></Oui.Button>
             </span>
           ))}
-          <button className="ghost-button small" onClick={() => onEdit()}>Edit rules</button>
+          <Oui.Button variant="ghost" size="sm" className="ghost-button small" onClick={() => onEdit()}>Edit rules</Oui.Button>
         </div>
       )}
-      {error && <div id="searchError" className="notice danger" role="alert"><span>{error}</span><button onClick={() => onEdit()}>Edit conditions</button></div>}
-    </section>
+      {error && <Oui.Alert variant="destructive" id="searchError" className="notice danger" role="alert"><span>{error}</span><Oui.Button variant="outline" size="sm" onClick={() => onEdit()}>Edit conditions</Oui.Button></Oui.Alert>}
+    </Oui.Card>
   );
 }

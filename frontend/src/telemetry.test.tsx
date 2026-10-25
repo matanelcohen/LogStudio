@@ -225,7 +225,8 @@ describe("telemetry workspace lifecycle", () => {
       expect(screen.getAllByRole("img")).toHaveLength(1);
       expect(screen.getByRole("heading", { name: "cache.duration" })).toBeDefined();
     }
-    fireEvent.change(screen.getByRole("combobox", { name: "Metric source" }), { target: { value: "sample" } });
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Metric source" }), { key: "Enter" });
+    fireEvent.keyDown(screen.getByRole("option", { name: "sample" }), { key: "Enter" });
     expect(screen.getByRole("status").textContent).toContain("No metrics match these filters");
     fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
     expect(screen.getAllByRole("img")).toHaveLength(12);
