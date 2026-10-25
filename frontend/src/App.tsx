@@ -260,6 +260,7 @@ export default function App() {
           {chatOpen && <CopilotChatPanel key={query.sessionId} status={status} sessionId={query.sessionId}
             onClose={() => setChatOpen(false)} returnFocus={() => chatOpener.current?.focus()} />}
           <div className="workspace" data-inspector={inspector} data-fields={fields}>
+          <div className="workspace-layout">
           {fields && <DiscoverSidebar page={activePage} onFilter={openEditor} />}
           <LogTable page={activePage} loading={history.loading} error={history.error} selected={visibleSelection}
             matchCase={query.matchCase} follow={follow} wrap={wrap} pageSize={query.pageSize} typography={typography.settings}
@@ -277,6 +278,7 @@ export default function App() {
             onRetry={history.refresh} onInspector={() => setInspector(value => !value)} />
           {inspector && <Inspector entry={visibleSelection} status={status} onClose={() => setInspector(false)}
             onCondition={addCondition} onDraft={openEditor} onNotice={setNotice} />}
+          </div>
           </div>
         </main>
         {!archived && !live.status?.listenAll && live.status?.canWriteInput && !live.status.isCompleted && <TerminalInput />}

@@ -48,6 +48,13 @@ The sidebar collapses to icons on smaller screens. System typography, keyboard n
 resize/reorder grips, and per-query filter chips remain available. All visual materials
 are rendered locally with CSS, without external fonts, images, or downloads.
 
+The desktop window starts centered, using up to 90% of the screen's working area, capped at
+1280 x 800. It can be resized or maximized (minimum 640 x 400, reduced for smaller displays).
+Toolbars wrap to the available width; the field browser and inspector stack when the
+results pane becomes narrow, including beside Copilot.
+Short windows scroll without hiding controls or collapsing the log results. Wide log tables
+scroll inside their results pane; dialogs and menus stay within the window with their own scrolling.
+
 Open **Settings** (the gear in the header) to choose the UI font and base size (12–18 px),
 plus an independent monospace font, size (10–24 px), and line spacing for log messages.
 Both sizes default to **14 px**. UI text, including controls, menus, dialogs, and helper text,

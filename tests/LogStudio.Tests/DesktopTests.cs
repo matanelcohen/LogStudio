@@ -1,4 +1,5 @@
 using System;
+using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Net;
@@ -15,6 +16,32 @@ namespace LogStudio.Tests;
 
 public sealed class DesktopTests
 {
+    [Theory]
+    [InlineData(800, 600, 720, 520)]
+    [InlineData(1024, 768, 922, 688)]
+    [InlineData(1920, 1080, 1280, 800)]
+    [InlineData(3840, 2160, 1280, 800)]
+    [InlineData(640, 480, 576, 400)]
+    [InlineData(640, 360, 576, 280)]
+    public void InitialWindowFitsTheScreenWorkArea(int width, int height, int expectedWidth, int expectedHeight)
+    {
+        Size size = DesktopProgram.GetInitialWindowSize(new Size(width, height));
+        Assert.Equal(new Size(expectedWidth, expectedHeight), size);
+        Assert.True(size.Width < width);
+        Assert.True(size.Height < height);
+        Assert.True(height - size.Height >= 80);
+    }
+
+    [Theory]
+    [InlineData(0, 600)]
+    [InlineData(800, 0)]
+    [InlineData(-1, 600)]
+    [InlineData(800, -1)]
+    public void InitialWindowRejectsInvalidScreenDimensions(int width, int height)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => DesktopProgram.GetInitialWindowSize(new Size(width, height)));
+    }
+
     [Fact]
     public void DesktopDefaultsToListenAllWithoutChangingCliDefaults()
     {
