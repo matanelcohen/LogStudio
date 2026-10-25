@@ -4,12 +4,15 @@ import { SelectControl } from "./ui";
 import { AppearanceChoices, AppearanceOptions, type Appearance } from "./themes";
 import { readChoice } from "./model";
 import { LogFonts, LogLineHeights, UiFonts, type TypographySettings } from "./useTypography";
+import { AppUpdates } from "./AppUpdates";
+import type { useAppUpdate } from "./useAppUpdate";
 
-export function SettingsDialog({ open, settings, saved, appearance, onAppearance, onChange, onReset, onClose, returnFocus }: {
+export function SettingsDialog({ open, settings, saved, appearance, updates, onAppearance, onChange, onReset, onClose, returnFocus }: {
   open: boolean;
   settings: TypographySettings;
   saved: boolean;
   appearance: Appearance;
+  updates: ReturnType<typeof useAppUpdate>;
   onAppearance(value: Appearance): void;
   onChange(changes: Partial<TypographySettings>): void;
   onReset(): void;
@@ -68,6 +71,7 @@ export function SettingsDialog({ open, settings, saved, appearance, onAppearance
             </fieldset>
             <p className="muted">Fonts use local fallbacks; nothing is downloaded. Typography is saved for this browser and server address (including its port).</p>
             {!saved && <p className="notice warning" role="status">Browser storage is unavailable. Typography changes work in this tab but may not survive a reload.</p>}
+            <AppUpdates updates={updates} />
             <div className="dialog-footer">
               <button onClick={onReset}><RotateCcw size={14} /> Reset typography</button>
               <Dialog.Close className="primary">Done</Dialog.Close>

@@ -65,6 +65,7 @@ public sealed class ConsoleLogViewerOptions
 
     internal IRunningApplications? RunningApplications { get; set; }
     internal ProcessInput? Input { get; set; }
+    internal ReleaseUpdater? Updater { get; set; }
 
     internal ViewerSettings Validate()
     {
@@ -108,7 +109,7 @@ public sealed class ConsoleLogViewerOptions
         ArgumentNullException.ThrowIfNull(this.RunArguments);
         return new ViewerSettings(this.Port, this.Capacity, this.FlushEveryEntries, this.MaxLineLength, this.CaptureConsole, this.OpenBrowser, name,
             this.SaveSession, sessions, this.RunCommand, (string[])this.RunArguments.Clone(), this.RunWorkingDirectory ?? Environment.CurrentDirectory,
-            this.CaptureTelemetry, this.MeterSources, this.ActivitySources, this.TelemetryIntervalMilliseconds, this.TelemetryCapacity, this.RunningApplications, this.Input);
+            this.CaptureTelemetry, this.MeterSources, this.ActivitySources, this.TelemetryIntervalMilliseconds, this.TelemetryCapacity, this.RunningApplications, this.Input, this.Updater);
     }
 }
 
@@ -131,4 +132,5 @@ internal sealed record ViewerSettings(
     int TelemetryIntervalMilliseconds,
     int TelemetryCapacity,
     IRunningApplications? RunningApplications = null,
-    ProcessInput? Input = null);
+    ProcessInput? Input = null,
+    ReleaseUpdater? Updater = null);

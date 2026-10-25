@@ -497,6 +497,14 @@ pre, code, kbd { font-family: Consolas, "Courier New", Courier, monospace; }
 }
 .query-region { min-width: 0; padding: 24px 24px 16px; }
 .query-region > .notice { margin-top: 12px; }
+.app-updates { min-width: 0; }
+.app-updates > p, .app-updates > h3, .update-install { margin-top: 12px; }
+.app-updates .settings-row { flex-wrap: wrap; gap: 8px; }
+.update-notes { max-height: 260px; overflow: auto; overflow-wrap: anywhere; margin: 10px 0; padding: 12px; border: 1px solid var(--cp-material-border); border-radius: 8px; }
+.update-notes p, .update-notes ul, .update-notes ol, .update-notes pre { margin: 8px 0; }
+.update-notes ul, .update-notes ol { padding-left: 24px; }
+.update-notes pre { overflow: auto; }
+.update-notes table { display: block; overflow: auto; }
 .application-picker { margin-bottom: 16px; font-size: var(--ui-font-size, 14px); }
 .application-picker-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
 .application-picker-controls > label { color: var(--cp-secondary-text); }

@@ -20,6 +20,10 @@ beforeEach(() => {
   vi.spyOn(api, "fetchSessions").mockResolvedValue([]);
   vi.spyOn(api, "saveSessionFilters").mockResolvedValue();
   vi.spyOn(api, "fetchCopilotHistory").mockResolvedValue([]);
+  vi.spyOn(api, "appUpdate").mockResolvedValue({
+    currentVersion: "1.8.1", automaticCheck: false, release: null, updateAvailable: false,
+    installationUnavailableReason: null, installedVersion: null
+  });
 });
 afterEach(() => localStorage.removeItem(TypographyStorageKey));
 
@@ -85,6 +89,18 @@ describe("log-first workspace", () => {
       expect(highContrast.getPropertyValue("--cp-window-shadow")).toBe("none");
       expect(styles).toMatch(/html\[data-theme-contrast="high"\] \*\s*\{[^}]*backdrop-filter:\s*none;/);
     });
+  });
+
+  it("opens release notes from the update notification without installing", async () => {
+    vi.mocked(api.appUpdate).mockResolvedValue({
+      currentVersion: "1.8.1", automaticCheck: true, updateAvailable: true, installationUnavailableReason: null, installedVersion: null,
+      release: { version: "1.9.0", name: "Log Studio 1.9.0", notes: "Improved capture reliability.",
+        url: "https://github.com/matanelcohen/LogStudio/releases/tag/1.9.0", publishedAt: "2026-10-24T10:00:00Z" }
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Update available" }));
+    expect(screen.getByLabelText("Release notes").textContent).toContain("Improved capture reliability.");
+    expect(api.appUpdate).toHaveBeenCalledTimes(1);
   });
 
   describe("wrapped program input", () => {

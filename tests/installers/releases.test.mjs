@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -620,6 +620,34 @@ test("Bash downloads stable releases using the exact unprefixed version", { skip
   }
 });
 
+test("Bash writes update receipts with custom paths and launcher preferences", { skip: windows }, (t) => {
+  const f = fixture(t);
+  unixArchive(f);
+  desktopArchive(f);
+  for (const [flag, component, executable] of [
+    ["--cli", "cli", "logstudio"], ["--desktop", "desktop", "logstudio-desktop"]
+  ]) {
+    const result = f.bash(flag, "--no-launcher");
+    assert.equal(result.status, 0, result.stderr);
+    const payload = join(readlinkSync(join(f.bin, executable)), "..");
+    assert.deepEqual(readFileSync(join(payload, "logstudio-install.txt"), "utf8").trimEnd().split("\n"),
+      ["1", component, f.install, f.bin, "false"]);
+  }
+});
+
+test("Windows writes update receipts beside each executable", { skip: !windows }, (t) => {
+  const f = fixture(t);
+  windowsArchive(f);
+  desktopArchive(f, windowsRid());
+  const result = f.powershell();
+  assert.equal(result.status, 0, result.stderr);
+  for (const [component, bin] of [["cli", "bin"], ["desktop", "desktop-bin"]]) {
+    const receipt = readFileSync(join(f.install, bin, "logstudio-install.txt"), "utf8").trimEnd().split(/\r?\n/);
+    receipt[2] = realpathSync.native(receipt[2]);
+    assert.deepEqual(receipt, ["1", component, realpathSync.native(f.install), "", "true"]);
+  }
+});
+
 test("Bash checksum failure leaves an existing installation untouched", { skip: windows }, (t) => {
   const f = fixture(t);
   const asset = unixArchive(f);
@@ -670,6 +698,8 @@ for (const [os, arch, rid] of [
     const installed = f.bash("--desktop", "--version", "1.0.3-rc.1");
     assert.equal(installed.status, 0, installed.stderr);
     const executable = readlinkSync(join(f.bin, "logstudio-desktop"));
+    assert.deepEqual(readFileSync(join(executable, "..", "logstudio-install.txt"), "utf8").trimEnd().split("\n"),
+      ["1", "desktop", f.install, f.bin, "true"]);
     assert.equal(run(executable, ["--help"]).status, 0);
     const launcher = os === "Darwin"
       ? join(f.home, "Applications", "Log Studio.app")

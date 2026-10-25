@@ -4,7 +4,7 @@ using System.Globalization;
 
 namespace LogStudio.Tool;
 
-internal sealed record ToolOptions(int Port, int Capacity, int FlushEveryEntries, string? Name, bool OpenBrowser, bool WaitAfterExit, bool Help, bool Version, string Command, string[] Arguments, bool ListenAll = false)
+internal sealed record ToolOptions(int Port, int Capacity, int FlushEveryEntries, string? Name, bool OpenBrowser, bool WaitAfterExit, bool Help, bool Version, string Command, string[] Arguments, bool ListenAll = false, bool CheckUpdates = false, bool Update = false)
 {
     internal const int DefaultPort = 5177;
     internal const string CommandName = "logstudio";
@@ -42,6 +42,12 @@ internal sealed record ToolOptions(int Port, int Capacity, int FlushEveryEntries
                     return new ToolOptions(port, capacity, flushEvery, name, open, wait, true, false, string.Empty, Array.Empty<string>());
                 case VersionSwitch:
                     return new ToolOptions(port, capacity, flushEvery, name, open, wait, false, true, string.Empty, Array.Empty<string>());
+                case "--check-updates":
+                case "--update":
+                    if (index != args.Length)
+                        throw new ArgumentException($"{option} does not accept a child command or additional options.");
+                    return new ToolOptions(port, capacity, flushEvery, name, open, wait, false, false, string.Empty, Array.Empty<string>(),
+                        CheckUpdates: true, Update: option == "--update");
                 case OpenSwitch:
                     open = true;
                     break;

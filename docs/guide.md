@@ -116,6 +116,7 @@ the desktop app without changing the CLI. CLI-only installation does not need de
 Both support `--version X.Y.Z` / `-Version X.Y.Z` for pinned releases and custom install directories.
 Rerun the same installer to update both apps. Both archives are verified before either existing
 installation is switched; failed verification leaves both apps unchanged.
+You can also [check and install updates from the viewer](#updates).
 Desktop assets are named `logstudio-desktop-<rid>.tar.gz`
 (Unix) or `.zip` (Windows); CLI archives and NuGet tool packages remain unchanged.
 
@@ -167,6 +168,53 @@ For development, build the frontend first, then run
 `dotnet run --project src/LogStudio.Desktop`. Desktop options include `--port`, `--capacity`,
 `--flush-every`, and `--name`; `--help` and `--version` work without a graphical session.
 Command wrapping, `--open`, and `--no-wait` belong to the CLI, not the desktop launcher.
+
+### Updates
+
+The standalone desktop and CLI viewer check GitHub for the latest **stable** release when the
+viewer first opens. A successful check is shared across tabs for that running server;
+repeated manual checks are cached for one minute. The embedded NuGet/startup-hook viewer
+does not check automatically. All viewers offer **Settings → Updates → Check for updates**.
+Checks send only a request for public release metadata, never logs, session names, or application
+details. An unavailable network or GitHub rate limit is reported without blocking capture;
+the viewer's embedded assets continue working offline.
+
+**Update available** in the header opens Settings, including the release notes and a link to
+the GitHub release. Choose **Install update...**, then **Download and install** to confirm.
+Nothing is installed automatically. Only newer stable versions are offered; checking never
+downgrades a newer development or prerelease build.
+
+In-app installation is available for copies managed by `install-release.sh` or
+`install-release.ps1` with an installation receipt (`logstudio-install.txt` beside the executable).
+It runs the installer embedded in your current application, pins the reviewed release version,
+downloads the platform archive and SHA-256 checksum over HTTPS, verifies them, and switches to
+a fresh release directory. Custom installation/bin paths and the no-launcher preference are
+preserved. Checksums detect corruption; they are not independent signatures.
+The current payload, saved sessions, preferences, and active captures are not replaced or stopped.
+Close and relaunch Log Studio when convenient to use the new version; no wrapped command is
+automatically rerun. The UI reports completion only after the installer succeeds.
+Installer diagnostics are saved to `update.log` in that app's installation directory.
+
+The action updates **only the app hosting the viewer**: desktop updates leave the CLI unchanged,
+and CLI updates leave the desktop unchanged. Rerun the normal combined installer to update both.
+Older installs without a receipt, moved/extracted archives, global .NET tools, and source builds
+still show release notes but explain how to update manually. Rerun the release installer once
+to register an older managed install, use `dotnet tool update --global LogStudio.Tool` for a
+NuGet tool, or rebuild a source checkout. No administrator access or OS-dependency installation
+is attempted. macOS signing/Gatekeeper and the desktop's existing platform prerequisites still apply.
+
+For a terminal-only check, without opening a viewer or consuming redirected stdin:
+
+```bash
+logstudio --check-updates  # Show the latest stable version and release notes.
+logstudio --update         # Explicitly download, verify, and install the CLI update.
+```
+
+The desktop executable also accepts `--check-updates` and `--update` without starting its window.
+For browser integrations, `GET api/app-update` reads cached local state without network access.
+`POST api/app-update` with `X-Log-Studio-Action: check-update` performs a check;
+`POST api/app-update?version=X.Y.Z` with `X-Log-Studio-Action: install-update` installs only the
+previously checked version. Both actions use the normal loopback and same-origin protections.
 
 ### Choose a running .NET app
 
@@ -243,7 +291,7 @@ PATH, use the command printed by the installer. No sudo or shell-profile edits a
 ```bash
 # Pin a release or choose user-writable directories:
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.sh \
-  | bash -s -- --version 1.8.2 --install-dir "$HOME/.local/share/logstudio" --bin-dir "$HOME/.local/bin"
+  | bash -s -- --version 1.9.1 --install-dir "$HOME/.local/share/logstudio" --bin-dir "$HOME/.local/bin"
 logstudio --open -- dotnet run --project ./path/to/App.csproj
 ```
 
@@ -256,7 +304,7 @@ Invoke-WebRequest -UseBasicParsing https://github.com/matanelcohen/LogStudio/rel
 logstudio --open -- dotnet run --project .\path\to\App.csproj
 ```
 
-Use `& $installer -Version 1.8.2 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
+Use `& $installer -Version 1.9.1 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
 version or choose a directory. If execution policy blocks the script, use the process-only
 override described below; when launching a separate PowerShell process, add the printed
 `bin` and `desktop-bin` directories to PATH in your current terminal yourself. The installer otherwise updates
@@ -374,7 +422,7 @@ does not verify Windows-specific execution.
 ### Publishing compiled releases
 
 Set and commit the package version in `Directory.Build.props`, then push a matching tag
-on that commit, such as `1.8.2` (or `1.8.2-rc.1` for a prerelease). Versions and tags
+on that commit, such as `1.9.1` (or `1.9.1-rc.1` for a prerelease). Versions and tags
 must not have a `v` prefix. The
 [compiled-release workflow](../.github/workflows/release.yml) validates the tag, restores,
 builds, tests the frontend/backend and installer contracts, and verifies a source install.

@@ -11,6 +11,50 @@ export class ApiError extends Error {
   }
 }
 
+export interface AppRelease {
+  version: string;
+  name: string;
+  notes: string;
+  url: string;
+  publishedAt: string;
+}
+
+export interface AppUpdateState {
+  currentVersion: string;
+  automaticCheck: boolean;
+  release: AppRelease | null;
+  updateAvailable: boolean;
+  installationUnavailableReason: string | null;
+  installedVersion: string | null;
+}
+
+export async function appUpdate(action?: "check-update" | "install-update", version?: string): Promise<AppUpdateState> {
+  const query = version ? `?${new URLSearchParams({ version })}` : "";
+  const response = await fetch(`api/app-update${query}`, action
+    ? { method: "POST", headers: { [ClearActionHeader]: action } }
+    : undefined);
+  const data = object(await response.json());
+  if (!response.ok) throw new ApiError(text(data.error, "update error"), response.status);
+  let release: AppRelease | null = null;
+  if (data.release !== null) {
+    const value = object(data.release);
+    const version = text(value.version, "release version");
+    const url = text(value.url, "release URL");
+    const notes = text(value.notes, "release notes");
+    if (!/^\d+\.\d+\.\d+$/.test(version) || url !== `https://github.com/matanelcohen/LogStudio/releases/tag/${version}` || notes.length > 65536)
+      throw new Error("The server returned invalid release metadata.");
+    release = { version, url, notes, name: text(value.name, "release name"), publishedAt: timestamp(value.publishedAt, "release date") };
+  }
+  return {
+    currentVersion: text(data.currentVersion, "current version"),
+    automaticCheck: boolean(data.automaticCheck, "automatic update check"),
+    release,
+    updateAvailable: boolean(data.updateAvailable, "update availability"),
+    installationUnavailableReason: nullableText(data.installationUnavailableReason, "installation availability"),
+    installedVersion: nullableText(data.installedVersion, "installed update")
+  };
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
