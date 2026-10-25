@@ -1,7 +1,8 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import type uPlot from "uplot";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MetricChart } from "./MetricChart";
+import { useAppearance } from "./useAppearance";
 import type { MetricMeasurement } from "./telemetry-api";
 
 const { instances, constructor } = vi.hoisted(() => {
@@ -94,5 +95,22 @@ describe("metric chart lifecycle and interaction", () => {
     unmount();
     expect(disconnect).toHaveBeenCalled();
     delete document.documentElement.dataset.theme;
+  });
+  it("refreshes colors and preserves zoom when switching between two dark palettes", async () => {
+    const appearance = renderHook(useAppearance);
+    act(() => appearance.result.current.setAppearance("dark-modern"));
+    const { unmount } = render(<MetricChart metrics={[metric]} />);
+    const chart = instances[0]!;
+    chart.select.width = 50;
+    chart.scales.x = { min: 100, max: 200 };
+    act(() => chart.options.hooks!.setSelect![0]!(chart as unknown as uPlot));
+    await act(async () => appearance.result.current.setAppearance("monokai"));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(chart.destroy).toHaveBeenCalledTimes(1);
+    expect(constructor).toHaveBeenCalledTimes(2);
+    expect(instances[1]!.setScale).toHaveBeenCalledWith("x", { min: 100, max: 200 });
+    unmount();
+    appearance.unmount();
+    history.replaceState(null, "", "/");
   });
 });

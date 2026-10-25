@@ -42,8 +42,14 @@ category, and message; sequence ID and stream remain available in **Columns**.
 **Explorer options** holds Wrap long lines, Follow newest entries, Clear view, and Refresh.
 
 The macOS-inspired workspace uses a frosted sidebar, translucent window chrome, rounded
-controls, and layered glass panels over a soft local gradient. Light and Dark Mode use
-coordinated blue accents; log rows stay mostly opaque for readable monospace text.
+controls, and layered glass panels over a soft local gradient. The original Light and Dark Mode
+use coordinated blue accents; log rows stay mostly opaque for readable monospace text.
+The **Appearance** button and **Settings > Color theme** also offer the built-in VS Code
+color themes: Light 2026, Dark 2026, Light Modern, Dark Modern, Light+, Dark+,
+Light (Visual Studio), Dark (Visual Studio), Light High Contrast, Dark High Contrast,
+Abyss, Kimbie Dark, Monokai, Monokai Dimmed, Quiet Light, Red, Solarized Light,
+Solarized Dark, and Tomorrow Night Blue. These palettes use opaque editor-style surfaces;
+the high-contrast options also remove blur and shadows and strengthen borders.
 The sidebar collapses to icons on smaller screens. System typography, keyboard navigation,
 resize/reorder grips, and per-query filter chips remain available. All visual materials
 are rendered locally with CSS, without external fonts, images, or downloads.
@@ -69,8 +75,12 @@ reloads. A run on a different port has separate settings. If storage is blocked,
 still apply to the current tab and Settings shows a warning.
 
 Without a `clawpilotTheme` URL override, appearance follows system changes automatically.
-The mode button selects a manual light / dark override; reload without that query parameter to
-return to automatic appearance. Increased-contrast and reduced-transparency preferences remove
+Choosing a color theme updates that query parameter, so it survives reloads and can be bookmarked
+(for example, `?clawpilotTheme=monokai` or `?clawpilotTheme=dark-modern`). Existing `light`
+and `dark` URLs keep their original appearance. Choose **System preference** in either picker,
+or reload without the parameter, to return to automatic appearance.
+All palettes are bundled locally; VS Code or an internet connection is not required.
+Increased-contrast and reduced-transparency preferences remove
 blur and use opaque, stronger-bordered surfaces. Reduced-motion disables control transitions.
 Browsers without backdrop-filter support use opaque surfaces.
 
@@ -937,7 +947,8 @@ remove the reported folder if necessary. Download JSONL before closing if you wa
   to drop (Escape cancels). Column-header menus remain an alternative for moving left/right.
   Resize separators are independent of reorder grips and support Left/Right keys.
   Reset columns restores order, visibility and widths. The Message column remains available.
-- **Appearance** offers Light, Dark, or automatic system appearance.
+- **Appearance** offers the built-in VS Code color themes, the original Light/Dark modes,
+  and automatic system appearance; the same choices are available in **Settings > Color theme**.
 - **Fields**, **Timeline**, and the inspector icon toggle their panels. Inline error/warning
   counts are shortcuts to severity filters. The timeline is visible-page-only.
 - Alternating row shades help track each entry across the table. Red edge markers identify errors

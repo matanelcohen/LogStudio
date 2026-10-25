@@ -4,6 +4,10 @@ import { dirname, resolve } from "node:path";
 const root = resolve(import.meta.dirname, "..");
 const lock = JSON.parse(await readFile(resolve(root, "package-lock.json"), "utf8"));
 const notices = ["Log Studio frontend: third-party licenses", "Dependencies are bundled locally. No external resources are loaded at runtime.", ""];
+notices.push("Visual Studio Code built-in color palettes (MIT)",
+  "Source: https://github.com/microsoft/vscode/tree/main/extensions",
+  await readFile(resolve(root, "licenses/vscode.txt"), "utf8"),
+  "------------------------------------------------------------", "");
 const upstreamLicenses = new Map([
   ["git+https://github.com/radix-ui/primitives.git", ["licenses/radix-ui.txt", "https://github.com/radix-ui/primitives/blob/main/LICENSE"]],
   ["https://github.com/theKashey/react-remove-scroll-bar", ["licenses/react-remove-scroll-bar.txt", "https://github.com/theKashey/react-remove-scroll-bar/blob/master/LICENSE"]]
