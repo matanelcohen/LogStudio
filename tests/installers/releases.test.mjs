@@ -641,8 +641,11 @@ test("Windows desktop waits for WinExe help, installs a Start Menu shortcut, and
   assert.equal(existsSync(shortcutPath(f)), true);
   const inspect = () => run("pwsh", ["-NoProfile", "-Command", `
     $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($env:MOCK_SHORTCUT)
-    if ($shortcut.TargetPath -ne (Join-Path (Join-Path $env:MOCK_INSTALL_DIR "desktop-bin") "LogStudio.Desktop.exe")) { throw "Wrong shortcut target" }
-    if ($shortcut.WorkingDirectory -ne (Join-Path $env:MOCK_INSTALL_DIR "desktop-bin")) { throw "Wrong shortcut working directory" }
+    $bin = Join-Path $env:MOCK_INSTALL_DIR "desktop-bin"
+    $release = [IO.Path]::GetFullPath(@((Get-Item -LiteralPath $bin -Force).Target)[0])
+    $expectedTarget = Join-Path $release "LogStudio.Desktop.exe"
+    if ([IO.Path]::GetFullPath($shortcut.TargetPath) -ne [IO.Path]::GetFullPath($expectedTarget)) { throw "Wrong shortcut target: $($shortcut.TargetPath)" }
+    if ([IO.Path]::GetFullPath($shortcut.WorkingDirectory) -ne $release) { throw "Wrong shortcut working directory: $($shortcut.WorkingDirectory)" }
   `], { MOCK_SHORTCUT: shortcutPath(f), MOCK_INSTALL_DIR: f.install });
   const installedShortcut = inspect();
   assert.equal(installedShortcut.status, 0, installedShortcut.stdout + installedShortcut.stderr);

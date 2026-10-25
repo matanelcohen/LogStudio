@@ -95,9 +95,21 @@ try {
     & $Executable --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Installed tool verification failed." }
     $BinDir = Join-Path $InstallDir $(if ($Desktop) { "desktop-bin" } else { "bin" })
+    $ExistingBin = Get-Item -LiteralPath $BinDir -Force -ErrorAction SilentlyContinue
+    $CurrentRelease = $null
+    if ($ExistingBin) {
+        if ($ExistingBin.LinkType -ne "Junction") {
+            throw "Refusing to replace an unrelated directory or file: $BinDir"
+        }
+        $CurrentRelease = [IO.Path]::GetFullPath(@($ExistingBin.Target)[0])
+        $TargetParent = Split-Path -Parent $CurrentRelease
+        if ($TargetParent.TrimEnd("\") -ne $InstallDir.TrimEnd("\") -or (Split-Path -Leaf $CurrentRelease) -notlike "$ReleasePrefix.*") {
+            throw "Refusing to replace an unrelated junction: $BinDir"
+        }
+    }
     if ($Desktop) {
         $ShortcutPath = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Log Studio.lnk"
-        $ShortcutTarget = Join-Path $BinDir $ExecutableName
+        $ShortcutTarget = $Executable
         $ShortcutDescription = "Log Studio desktop (installed by install-release.ps1)"
         $Shell = New-Object -ComObject WScript.Shell
         if (Test-Path -LiteralPath $ShortcutPath) {
@@ -106,7 +118,11 @@ try {
                 throw "Refusing to replace an unrelated shortcut or directory: $ShortcutPath"
             }
             $Shortcut = $Shell.CreateShortcut($ShortcutPath)
-            if ($Shortcut.TargetPath -ne $ShortcutTarget -or $Shortcut.Description -ne $ShortcutDescription) {
+            $ManagedShortcutTargets = @((Join-Path $BinDir $ExecutableName))
+            if ($CurrentRelease) { $ManagedShortcutTargets += Join-Path $CurrentRelease $ExecutableName }
+            if (-not ($ManagedShortcutTargets | Where-Object {
+                [string]::Equals([IO.Path]::GetFullPath($Shortcut.TargetPath), [IO.Path]::GetFullPath($_), [StringComparison]::OrdinalIgnoreCase)
+            }) -or $Shortcut.Description -ne $ShortcutDescription) {
                 throw "Refusing to replace an unrelated shortcut: $ShortcutPath"
             }
         }
@@ -114,20 +130,9 @@ try {
         $PendingShortcut = Join-Path (Split-Path -Parent $ShortcutPath) (".logstudio.pending." + [Guid]::NewGuid().ToString("N") + ".lnk")
         $Shortcut = $Shell.CreateShortcut($PendingShortcut)
         $Shortcut.TargetPath = $ShortcutTarget
-        $Shortcut.WorkingDirectory = $BinDir
+        $Shortcut.WorkingDirectory = $ReleaseDir
         $Shortcut.Description = $ShortcutDescription
         $Shortcut.Save()
-    }
-    $ExistingBin = Get-Item -LiteralPath $BinDir -Force -ErrorAction SilentlyContinue
-    if ($ExistingBin) {
-        if ($ExistingBin.LinkType -ne "Junction") {
-            throw "Refusing to replace an unrelated directory or file: $BinDir"
-        }
-        $Target = [IO.Path]::GetFullPath(@($ExistingBin.Target)[0])
-        $TargetParent = Split-Path -Parent $Target
-        if ($TargetParent.TrimEnd("\") -ne $InstallDir.TrimEnd("\") -or (Split-Path -Leaf $Target) -notlike "$ReleasePrefix.*") {
-            throw "Refusing to replace an unrelated junction: $BinDir"
-        }
     }
     $PendingBin = Join-Path $InstallDir (".bin.pending." + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Junction -Path $PendingBin -Target $ReleaseDir | Out-Null
