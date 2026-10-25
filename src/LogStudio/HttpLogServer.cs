@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Reflection;
@@ -44,6 +45,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private readonly TelemetrySettings initialTelemetrySettings;
     private readonly IRunningApplications? runningApplications;
     private readonly ProcessInput? input;
+    private readonly ReleaseUpdater updater;
     private readonly string authority;
     private readonly string contentSecurityPolicy;
     private readonly Dictionary<string, Asset> assets;
@@ -69,6 +71,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
         this.telemetry = telemetry;
         this.runningApplications = settings.RunningApplications;
         this.input = settings.Input;
+        this.updater = settings.Updater ?? new ReleaseUpdater(null);
         this.initialTelemetrySettings = new(settings.MeterSources, settings.ActivitySources, false);
         this.copilot = copilot ?? new CopilotCliClient();
         this.copilotTimeout = copilotTimeout ?? TimeSpan.FromMinutes(2);
@@ -227,6 +230,11 @@ internal sealed class HttpLogServer : IAsyncDisposable
             }
 
             string route = request.Url.AbsolutePath[1..];
+            if (route == ReleaseUpdater.Route)
+            {
+                await this.AppUpdateAsync(context, cancellationToken).ConfigureAwait(false);
+                return;
+            }
             if (route == "api/input")
             {
                 await this.InputAsync(context, session, cancellationToken).ConfigureAwait(false);
@@ -494,6 +502,43 @@ internal sealed class HttpLogServer : IAsyncDisposable
         finally
         {
             response.Close();
+        }
+    }
+
+    private async Task AppUpdateAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        HttpListenerRequest request = context.Request;
+        AppUpdateState state;
+        try
+        {
+            if (request.HttpMethod == ViewerConstants.GetMethod)
+            {
+                state = this.updater.State;
+            }
+            else if (request.HttpMethod == ViewerConstants.PostMethod)
+            {
+                string? action = request.Headers[ViewerConstants.ClearRequestHeader];
+                if (action is not ("check-update" or "install-update"))
+                {
+                    await WriteErrorAsync(context.Response, HttpStatusCode.Forbidden, "An explicit check-update or install-update action is required.", cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                state = action == "check-update"
+                    ? await this.updater.CheckAsync(cancellationToken).ConfigureAwait(false)
+                    : await this.updater.InstallAsync(request.QueryString["version"] ?? string.Empty).ConfigureAwait(false);
+            }
+            else
+            {
+                await WriteErrorAsync(context.Response, HttpStatusCode.MethodNotAllowed, "Use GET for update status or POST for an explicit update action.", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            await WriteBytesAsync(context.Response, JsonSerializer.SerializeToUtf8Bytes(state, ViewerConstants.JsonOptions),
+                ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or HttpRequestException or IOException or UnauthorizedAccessException)
+        {
+            this.diagnostics.WriteLine($"Log Studio update failed: {exception}");
+            await WriteErrorAsync(context.Response, HttpStatusCode.Conflict, $"Update failed: {exception.Message}", cancellationToken).ConfigureAwait(false);
         }
     }
 
