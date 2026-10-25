@@ -7,6 +7,7 @@ import App from "./App";
 import { Entry, fixturePage, Status } from "./test-fixtures";
 import { useLiveStatus, useLogPage } from "./useLogExplorer";
 import { DefaultTypography, TypographyStorageKey } from "./useTypography";
+import { AppearanceOptions, ColorThemes } from "./themes";
 import * as api from "./api";
 import { defaultQuery, sessionFilters, type ChatResponse, type LogEntry, type RunningApplicationsState } from "./model";
 
@@ -38,6 +39,58 @@ vi.mock("./useLogExplorer", async () => {
 });
 
 describe("log-first workspace", () => {
+  describe("color theme pickers", () => {
+    beforeEach(() => history.replaceState(null, "", "/"));
+    afterEach(() => history.replaceState(null, "", "/"));
+
+    it("offers the same themes in the header and Settings and applies changes immediately", async () => {
+      render(<App />);
+      fireEvent.keyDown(screen.getByRole("button", { name: "Appearance" }), { key: "Enter" });
+      const choices = await screen.findAllByRole("menuitemradio");
+      expect(choices.map(choice => choice.textContent)).toEqual(AppearanceOptions.map(option => option.label));
+      fireEvent.click(screen.getByRole("menuitemradio", { name: "Monokai" }));
+      expect(document.documentElement.dataset.colorTheme).toBe("monokai");
+      expect(document.documentElement.dataset.theme).toBe("dark");
+      fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+      const appearance = screen.getByRole("combobox", { name: "Appearance mode" });
+      expect(appearance.textContent).toBe("Monokai");
+      fireEvent.keyDown(appearance, { key: "Enter" });
+      expect((await screen.findAllByRole("option")).map(option => option.textContent))
+        .toEqual(AppearanceOptions.map(option => option.label));
+      fireEvent.keyDown(screen.getByRole("option", { name: "Light High Contrast" }), { key: "Enter" });
+      expect(document.documentElement.dataset.colorTheme).toBe("light-high-contrast");
+      expect(document.documentElement.dataset.theme).toBe("light");
+      expect(document.documentElement.dataset.themeContrast).toBe("high");
+      expect(new URLSearchParams(location.search).get("clawpilotTheme")).toBe("light-high-contrast");
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      fireEvent.keyDown(screen.getByRole("button", { name: "Appearance" }), { key: "Enter" });
+      expect(screen.getByRole("menuitemradio", { name: "Light High Contrast" }).getAttribute("aria-checked")).toBe("true");
+      fireEvent.click(screen.getByRole("menuitemradio", { name: "System preference" }));
+      expect(document.documentElement.dataset.colorTheme).toBeUndefined();
+      expect(document.documentElement.dataset.themeContrast).toBeUndefined();
+      expect(location.search).toBe("");
+    });
+
+    it("maps each palette token to the workspace and keeps high-contrast surfaces opaque", () => {
+      const { container } = render(<style>{styles}</style>);
+      const rules = Array.from(container.querySelector("style")!.sheet!.cssRules)
+        .filter((rule): rule is CSSStyleRule => rule.type === CSSRule.STYLE_RULE);
+      const palette = rules.find(rule => rule.selectorText === "html[data-color-theme]")!.style;
+      for (const key of Object.keys(ColorThemes[0].palette)) {
+        expect(palette.cssText).toContain(`var(--theme-${key})`);
+      }
+      for (const property of ["--cp-surface", "--cp-shell-material", "--cp-content-material", "--cp-panel-strong"]) {
+        expect(palette.getPropertyValue(property)).not.toContain("transparent");
+      }
+      expect(palette.getPropertyValue("--cp-native-accent")).toBe("var(--theme-link)");
+      expect(palette.getPropertyValue("--cp-button-accent")).toBe("var(--theme-accent)");
+      expect(palette.getPropertyValue("--cp-wallpaper")).toBe("none");
+      const highContrast = rules.find(rule => rule.selectorText === 'html[data-theme-contrast="high"]')!.style;
+      expect(highContrast.getPropertyValue("--cp-window-shadow")).toBe("none");
+      expect(styles).toMatch(/html\[data-theme-contrast="high"\] \*\s*\{[^}]*backdrop-filter:\s*none;/);
+    });
+  });
+
   it("opens release notes from the update notification without installing", async () => {
     vi.mocked(api.appUpdate).mockResolvedValue({
       currentVersion: "1.8.1", automaticCheck: true, updateAvailable: true, installationUnavailableReason: null, installedVersion: null,

@@ -22,7 +22,8 @@ import {
 } from "./model";
 import { QueryBar } from "./QueryBar";
 import { Hint } from "./ui";
-import { AppearanceChoices, useAppearance } from "./useAppearance";
+import { AppearanceChoices, AppearanceOptions } from "./themes";
+import { useAppearance } from "./useAppearance";
 import { useTypography } from "./useTypography";
 import { useLiveStatus, useLogPage } from "./useLogExplorer";
 import { useSessionFilters } from "./useSessionFilters";
@@ -228,14 +229,11 @@ export default function App() {
             <Menu.Root>
               <Menu.Trigger asChild><button id="theme" className="icon-button ghost-button" aria-label="Appearance">{appearance.theme === "dark" ? <Moon size={15} /> : <Sun size={15} />}</button></Menu.Trigger>
               <Menu.Portal><Menu.Content className="menu-content" sideOffset={7} align="end">
-                <Menu.Label className="menu-label">Appearance</Menu.Label>
+                <Menu.Label className="menu-label">Color theme</Menu.Label>
                 <Menu.RadioGroup value={appearance.appearance} onValueChange={value => appearance.setAppearance(readChoice(value, AppearanceChoices))}>
-                  {[
-                    { value: "system", label: "System preference", icon: <Monitor size={14} /> },
-                    { value: "light", label: "Light Mode", icon: <Sun size={14} /> },
-                    { value: "dark", label: "Dark Mode", icon: <Moon size={14} /> }
-                  ].map(option => <Menu.RadioItem value={option.value} className="menu-item" key={option.value}>
-                    {option.icon}{option.label}<Menu.ItemIndicator><Check size={13} /></Menu.ItemIndicator>
+                  {AppearanceOptions.map(option => <Menu.RadioItem value={option.value} className="menu-item" key={option.value}>
+                    {option.scheme === "system" ? <Monitor size={14} /> : option.scheme === "light" ? <Sun size={14} /> : <Moon size={14} />}
+                    {option.label}<Menu.ItemIndicator><Check size={13} /></Menu.ItemIndicator>
                   </Menu.RadioItem>)}
                 </Menu.RadioGroup>
               </Menu.Content></Menu.Portal>

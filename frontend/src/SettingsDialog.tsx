@@ -1,7 +1,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { RotateCcw, Settings, X } from "lucide-react";
 import { SelectControl } from "./ui";
-import { AppearanceChoices, type Appearance } from "./useAppearance";
+import { AppearanceChoices, AppearanceOptions, type Appearance } from "./themes";
 import { readChoice } from "./model";
 import { LogFonts, LogLineHeights, UiFonts, type TypographySettings } from "./useTypography";
 import { AppUpdates } from "./AppUpdates";
@@ -33,9 +33,9 @@ export function SettingsDialog({ open, settings, saved, appearance, updates, onA
             <Dialog.Close className="icon-button" aria-label="Close settings"><X size={18} /></Dialog.Close>
           </div>
           <div className="settings-content">
-            <label className="settings-row" htmlFor="settingsAppearance"><span>Appearance</span>
+            <label className="settings-row" htmlFor="settingsAppearance"><span>Color theme</span>
               <SelectControl id="settingsAppearance" label="Appearance mode" value={appearance}
-                choices={[{ value: "system", label: "System preference" }, { value: "light", label: "Light Mode" }, { value: "dark", label: "Dark Mode" }]}
+                choices={AppearanceOptions}
                 onChange={value => onAppearance(readChoice(value, AppearanceChoices))} />
             </label>
             <fieldset className="settings-group">
