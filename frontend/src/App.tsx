@@ -28,6 +28,8 @@ import { useTypography } from "./useTypography";
 import { useLiveStatus, useLogPage } from "./useLogExplorer";
 import { useSessionFilters } from "./useSessionFilters";
 import { useAppUpdate } from "./useAppUpdate";
+import { usePreferences } from "./usePreferences";
+import { DefaultTypography, type ExplorerPreferences } from "./preferences";
 
 interface PauseSnapshot { maximumId: number; status: ViewerStatus | null; }
 
@@ -36,10 +38,7 @@ export default function App() {
   const [cursor, setCursor] = useState<PageCursor>({ before: null, after: null });
   const [pause, setPause] = useState<PauseSnapshot | null>(null);
   const [follow, setFollow] = useState(true);
-  const [wrap, setWrap] = useState(true);
   const [selected, setSelected] = useState<LogEntry | null>(null);
-  const [inspector, setInspector] = useState(false);
-  const [fields, setFields] = useState(false);
   const [editor, setEditor] = useState<{ open: boolean; seed: LogCondition | null }>({ open: false, seed: null });
   const [notice, setNotice] = useState<Notice | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
@@ -64,8 +63,13 @@ export default function App() {
   const settingsOpener = useRef<HTMLButtonElement>(null);
   const seenClear = useRef(0);
   const seenHistory = useRef<string | null>(null);
-  const appearance = useAppearance();
-  const typography = useTypography();
+  const preferences = usePreferences();
+  const { typography, explorer } = preferences.settings;
+  const { wrap, inspector, fields } = explorer;
+  const updateExplorer = (changes: Partial<ExplorerPreferences>) => preferences.update({ explorer: changes });
+  const setInspector = (value: boolean) => updateExplorer({ inspector: value });
+  const appearance = useAppearance(preferences.settings.appearance, appearance => preferences.update({ appearance }));
+  useTypography(typography);
   const updates = useAppUpdate();
   const live = useLiveStatus(pause !== null);
   const archived = !!query.sessionId;
@@ -77,6 +81,9 @@ export default function App() {
     live.status ?? history.page?.status ?? null;
   const visibleSelection = selected && selected.id > (status?.clearedThroughId ?? 0) ? selected : null;
 
+  useEffect(() => {
+    setQuery(query => query.pageSize === explorer.pageSize ? query : { ...query, pageSize: explorer.pageSize });
+  }, [explorer.pageSize]);
   useEffect(() => {
     if (!status || status.isCompleted) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -129,6 +136,7 @@ export default function App() {
 
   function changeQuery(query: QueryState, forceFilters = false) {
     setQuery(query);
+    if (query.pageSize !== explorer.pageSize) updateExplorer({ pageSize: query.pageSize });
     filters.save(query, forceFilters);
     setCursor({ before: follow ? null : (status?.lastId ?? 0) + 1, after: null });
   }
@@ -254,6 +262,10 @@ export default function App() {
             maximumId={pause?.maximumId ?? null} onChange={changeQuery} onEdit={condition => openEditor(condition ?? null)}
             onReset={() => { changeQuery({ ...defaultQuery(), pageSize: query.pageSize, sessionId: query.sessionId }, true); setNotice(null); }}
             onNotice={message => setNotice({ message, tone: "info" })} />
+          {preferences.error && <div className="notice warning" role="alert">
+            <AlertCircle size={15} /><span>{preferences.error} Changes still apply in this tab.</span>
+            <button onClick={preferences.retry}>Retry settings</button>
+          </div>}
           {(live.error || notice) && <div id="notice" className={`notice ${live.error ? "danger" : notice?.tone}`} role={live.error || notice?.tone === "danger" ? "alert" : "status"}>
             <AlertCircle size={15} /><span>{live.error ?? notice?.message}</span>
             {live.error ? <button onClick={live.reconnect}>Reconnect</button> : <button className="icon-button" aria-label="Dismiss notification" onClick={() => setNotice(null)}><X size={14} /></button>}
@@ -266,8 +278,9 @@ export default function App() {
           <div className="workspace-layout">
           {fields && <DiscoverSidebar page={activePage} onFilter={openEditor} />}
           <LogTable page={activePage} loading={history.loading} error={history.error} selected={visibleSelection}
-            matchCase={query.matchCase} follow={follow} wrap={wrap} pageSize={query.pageSize} typography={typography.settings}
-            fields={fields} inspector={inspector} onFields={() => setFields(value => !value)}
+            matchCase={query.matchCase} follow={follow} wrap={wrap} pageSize={query.pageSize} typography={typography}
+            preferences={explorer} onPreferences={updateExplorer}
+            fields={fields} inspector={inspector} onFields={() => updateExplorer({ fields: !fields })}
             onSeverity={levels => changeQuery({ ...query, levels, severity: "all" })}
             onPageSize={pageSize => changeQuery({ ...query, pageSize })}
             onClearSession={() => { setClearError(null); setClearOpen(true); }} clearing={clearing} clearButtonRef={clearOpener}
@@ -276,9 +289,9 @@ export default function App() {
             onNewer={() => { const last = activePage?.entries.at(-1); if (last) { setFollow(false); setCursor({ before: null, after: last.id }); } }}
             onLive={() => { setFollow(true); setCursor({ before: null, after: null }); }}
             onFollow={value => { setFollow(value); setCursor({ before: value ? null : (status?.lastId ?? 0) + 1, after: null }); }}
-            onWrap={setWrap}
+            onWrap={wrap => updateExplorer({ wrap })}
             onClear={() => { changeQuery({ ...query, dismissedThrough: status?.lastId ?? 0 }); setSelected(null); setNotice({ tone: "info", message: "Existing entries are hidden in this tab only. Reset restores disk history." }); }}
-            onRetry={history.refresh} onInspector={() => setInspector(value => !value)} />
+            onRetry={history.refresh} onInspector={() => setInspector(!inspector)} />
           {inspector && <Inspector entry={visibleSelection} status={status} onClose={() => setInspector(false)}
             onCondition={addCondition} onDraft={openEditor} onNotice={setNotice} />}
           </div>
@@ -316,9 +329,10 @@ export default function App() {
           returnFocus={() => sessionsOpener.current?.focus()} onSelect={selectSession} />
         <SessionImportDialog open={importOpen} onClose={() => setImportOpen(false)} onImported={selectSession}
           returnFocus={() => importOpener.current?.focus()} />
-        <SettingsDialog open={settingsOpen} settings={typography.settings} saved={typography.saved} updates={updates}
+        <SettingsDialog open={settingsOpen} settings={typography} saved={preferences.saved} error={preferences.error} updates={updates}
           appearance={appearance.appearance} onAppearance={appearance.setAppearance}
-          onChange={typography.update} onReset={typography.reset} onClose={() => setSettingsOpen(false)}
+          onChange={changes => preferences.update({ typography: changes })}
+          onReset={() => preferences.update({ typography: { ...DefaultTypography } })} onClose={() => setSettingsOpen(false)}
           returnFocus={() => settingsOpener.current?.focus()} />
       </div>
       </div>

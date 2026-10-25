@@ -17,6 +17,17 @@ namespace LogStudio.Tests;
 public sealed class DesktopTests
 {
     [Theory]
+    [InlineData(1920, 1080, 1500, 900, 1500, 900)]
+    [InlineData(1024, 768, 1500, 900, 1024, 688)]
+    [InlineData(640, 360, 1280, 800, 640, 280)]
+    [InlineData(1920, 1080, 100, 100, 640, 400)]
+    public void SavedWindowSizeIsRestoredWithinTheCurrentScreen(int width, int height, int savedWidth, int savedHeight, int expectedWidth, int expectedHeight)
+    {
+        Size size = DesktopProgram.GetInitialWindowSize(new Size(width, height), new(savedWidth, savedHeight, false));
+        Assert.Equal(new Size(expectedWidth, expectedHeight), size);
+    }
+
+    [Theory]
     [InlineData(800, 600, 720, 520)]
     [InlineData(1024, 768, 922, 688)]
     [InlineData(1920, 1080, 1280, 800)]

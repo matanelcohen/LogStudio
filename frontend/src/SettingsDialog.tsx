@@ -7,10 +7,11 @@ import { LogFonts, LogLineHeights, UiFonts, type TypographySettings } from "./us
 import { AppUpdates } from "./AppUpdates";
 import type { useAppUpdate } from "./useAppUpdate";
 
-export function SettingsDialog({ open, settings, saved, appearance, updates, onAppearance, onChange, onReset, onClose, returnFocus }: {
+export function SettingsDialog({ open, settings, saved, error, appearance, updates, onAppearance, onChange, onReset, onClose, returnFocus }: {
   open: boolean;
   settings: TypographySettings;
   saved: boolean;
+  error: string | null;
   appearance: Appearance;
   updates: ReturnType<typeof useAppUpdate>;
   onAppearance(value: Appearance): void;
@@ -28,7 +29,7 @@ export function SettingsDialog({ open, settings, saved, appearance, updates, onA
             <div className="dialog-icon"><Settings size={20} /></div>
             <div>
               <Dialog.Title>Settings</Dialog.Title>
-              <Dialog.Description>Customize the interface and log text. Changes apply immediately.</Dialog.Description>
+              <Dialog.Description>Customize the interface and log text. Changes apply immediately and save automatically.</Dialog.Description>
             </div>
             <Dialog.Close className="icon-button" aria-label="Close settings"><X size={18} /></Dialog.Close>
           </div>
@@ -69,8 +70,10 @@ export function SettingsDialog({ open, settings, saved, appearance, updates, onA
               </label>
               <pre className="settings-log-preview" aria-label="Log font preview">{"12:34:56  INFO  Application started\n12:34:57  WARN  Retrying request…"}</pre>
             </fieldset>
-            <p className="muted">Fonts use local fallbacks; nothing is downloaded. Typography is saved for this browser and server address (including its port).</p>
-            {!saved && <p className="notice warning" role="status">Browser storage is unavailable. Typography changes work in this tab but may not survive a reload.</p>}
+            <p className="muted">Fonts use local fallbacks; nothing is downloaded. Preferences are saved inside Log Studio on this device, across restarts and server ports. Desktop window size is saved automatically too.</p>
+            <p className={error ? "notice warning" : "muted"} role="status">{error
+              ? `${error} Changes work in this tab but have not been saved.`
+              : saved ? "All settings saved." : "Loading or saving settings..."}</p>
             <AppUpdates updates={updates} />
             <div className="dialog-footer">
               <button onClick={onReset}><RotateCcw size={14} /> Reset typography</button>

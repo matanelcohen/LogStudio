@@ -97,14 +97,13 @@ describe("metric chart lifecycle and interaction", () => {
     delete document.documentElement.dataset.theme;
   });
   it("refreshes colors and preserves zoom when switching between two dark palettes", async () => {
-    const appearance = renderHook(useAppearance);
-    act(() => appearance.result.current.setAppearance("dark-modern"));
+    const appearance = renderHook(value => useAppearance(value, vi.fn()), { initialProps: "dark-modern" as "dark-modern" | "monokai" });
     const { unmount } = render(<MetricChart metrics={[metric]} />);
     const chart = instances[0]!;
     chart.select.width = 50;
     chart.scales.x = { min: 100, max: 200 };
     act(() => chart.options.hooks!.setSelect![0]!(chart as unknown as uPlot));
-    await act(async () => appearance.result.current.setAppearance("monokai"));
+    await act(async () => appearance.rerender("monokai"));
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(chart.destroy).toHaveBeenCalledTimes(1);
     expect(constructor).toHaveBeenCalledTimes(2);
