@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -643,7 +643,8 @@ test("Windows writes update receipts beside each executable", { skip: !windows }
   assert.equal(result.status, 0, result.stderr);
   for (const [component, bin] of [["cli", "bin"], ["desktop", "desktop-bin"]]) {
     const receipt = readFileSync(join(f.install, bin, "logstudio-install.txt"), "utf8").trimEnd().split(/\r?\n/);
-    assert.deepEqual(receipt, ["1", component, f.install, "", "true"]);
+    receipt[2] = realpathSync.native(receipt[2]);
+    assert.deepEqual(receipt, ["1", component, realpathSync.native(f.install), "", "true"]);
   }
 });
 
