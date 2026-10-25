@@ -12,6 +12,8 @@
     <EmbeddedResource Include="../../frontend/dist/styles.css" LogicalName="LogStudio.Web.styles.css" />
     <EmbeddedResource Include="../../frontend/dist/viewer.js" LogicalName="LogStudio.Web.viewer.js" />
     <EmbeddedResource Include="../../frontend/dist/third-party-notices.txt" LogicalName="LogStudio.Web.third-party-notices.txt" />
+    <EmbeddedResource Include="../../install-release.sh" LogicalName="LogStudio.Update.install-release.sh" />
+    <EmbeddedResource Include="../../install-release.ps1" LogicalName="LogStudio.Update.install-release.ps1" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />
     <None Include="../../frontend/dist/third-party-notices.txt" Pack="true" PackagePath="/" />
     <InternalsVisibleTo Include="LogStudio.Tests" />

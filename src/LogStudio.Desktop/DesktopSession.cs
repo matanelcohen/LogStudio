@@ -35,6 +35,7 @@ internal sealed class DesktopSession : IAsyncDisposable
                 OpenBrowser = false,
                 SaveSession = true,
                 SessionsDirectory = sessionsDirectory ?? Environment.GetEnvironmentVariable(ToolOptions.SessionsDirectoryEnvironmentVariable),
+                Updater = new ReleaseUpdater(UpdateApplication.Desktop),
             }, CancellationToken.None, _ => Task.FromResult(true)).ConfigureAwait(false);
             collector.Viewer = viewer;
             return new DesktopSession(collector, viewer!);

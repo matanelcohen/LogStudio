@@ -24,6 +24,7 @@ import { AppearanceChoices, useAppearance } from "./useAppearance";
 import { useTypography } from "./useTypography";
 import { useLiveStatus, useLogPage } from "./useLogExplorer";
 import { useSessionFilters } from "./useSessionFilters";
+import { useAppUpdate } from "./useAppUpdate";
 
 interface PauseSnapshot { maximumId: number; status: ViewerStatus | null; }
 
@@ -62,6 +63,7 @@ export default function App() {
   const seenHistory = useRef<string | null>(null);
   const appearance = useAppearance();
   const typography = useTypography();
+  const updates = useAppUpdate();
   const live = useLiveStatus(pause !== null);
   const archived = !!query.sessionId;
   const historyDirectory = live.status?.listenAll ? live.status.historyDirectory : "";
@@ -197,6 +199,8 @@ export default function App() {
             </span>
           </div>
           <div className="header-actions">
+            {(updates.state?.updateAvailable || updates.state?.installedVersion || updates.error) && <button className="ghost-button"
+              onClick={() => setSettingsOpen(true)}>{updates.state?.installedVersion ? "Restart required" : updates.error ? "Update check failed" : "Update available"}</button>}
             <span id="connection" className={`connection ${live.connection}`} role="status">{archived ? "Saved session" : connectionLabel}</span>
             <button id="importLogs" ref={importOpener} className="ghost-button" onClick={() => setImportOpen(true)}><FileUp size={14} /> Import</button>
             <button ref={chatOpener} className="ghost-button" aria-pressed={chatOpen} disabled={!status}
@@ -313,7 +317,7 @@ export default function App() {
           returnFocus={() => sessionsOpener.current?.focus()} onSelect={selectSession} />
         <SessionImportDialog open={importOpen} onClose={() => setImportOpen(false)} onImported={selectSession}
           returnFocus={() => importOpener.current?.focus()} />
-        <SettingsDialog open={settingsOpen} settings={typography.settings} saved={typography.saved}
+        <SettingsDialog open={settingsOpen} settings={typography.settings} saved={typography.saved} updates={updates}
           appearance={appearance.appearance} onAppearance={appearance.setAppearance}
           onChange={typography.update} onReset={typography.reset} onClose={() => setSettingsOpen(false)}
           returnFocus={() => settingsOpener.current?.focus()} />

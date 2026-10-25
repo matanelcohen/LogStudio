@@ -148,7 +148,7 @@ for Application in "${Applications[@]}"; do
   if [[ -z "$PublishDir" ]]; then
     printf 'Downloading %s (%s)...\n' "$Asset" "$Version"
     for File in "$Asset" "$Asset.sha256"; do
-      curl --proto '=https' --tlsv1.2 --fail --show-error --location --retry 3 \
+      curl --proto '=https' --tlsv1.2 --fail --show-error --location --retry 3 --connect-timeout 15 --max-time 600 \
         "$DownloadUrl/$File" --output "$TemporaryDir/$File"
     done
     ExpectedHash="$(awk -v asset="$Asset" 'length($1) == 64 && $1 ~ /^[a-f0-9]+$/ && ($2 == asset || $2 == "*" asset) { print $1 }' "$TemporaryDir/$Asset.sha256")"
@@ -167,6 +167,11 @@ for Application in "${Applications[@]}"; do
   mkdir -p -- "$InstallDir" "$BinDir"
   InstallDir="$(cd "$InstallDir" && pwd)"
   BinDir="$(cd "$BinDir" && pwd)"
+  case "$InstallDir$BinDir" in *$'\n'* | *$'\r'*)
+    printf 'Installation paths must not contain line breaks.\n' >&2
+    exit 2
+    ;;
+  esac
   if [[ -e "$BinDir/$Application" && ! -L "$BinDir/$Application" || -d "$BinDir/$Application" ]]; then
     printf 'Refusing to replace an existing file or directory: %s/%s\nChoose another --bin-dir.\n' "$BinDir" "$Application" >&2
     exit 1
@@ -230,6 +235,9 @@ for Application in "${Applications[@]}"; do
       cp "$PayloadDir/logstudio.icns" "$Resources/logstudio.icns"
     fi
   fi
+  Component="cli"
+  if [[ "$Desktop" == true ]]; then Component="desktop"; fi
+  printf '1\n%s\n%s\n%s\n%s\n' "$Component" "$InstallDir" "$BinDir" "$CreateLauncher" >"$PayloadDir/logstudio-install.txt"
   chmod +x "$Executable"
   "$Executable" --help >/dev/null
   if [[ -n "$LauncherPath" ]]; then

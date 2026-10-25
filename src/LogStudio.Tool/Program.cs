@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -51,6 +52,8 @@ internal static class Program
             Console.WriteLine(version?.Split('+')[0] ?? typeof(Program).Assembly.GetName().Version?.ToString());
             return 0;
         }
+        if (options.CheckUpdates)
+            return await UpdateAsync(UpdateApplication.Cli, options.Update).ConfigureAwait(false);
 
         using CancellationTokenSource cancellation = new();
         ConsoleCancelEventHandler handler = (_, eventArgs) =>
@@ -124,6 +127,7 @@ internal static class Program
             OpenBrowser = options.OpenBrowser,
             SaveSession = true,
             SessionsDirectory = Environment.GetEnvironmentVariable(ToolOptions.SessionsDirectoryEnvironmentVariable),
+            Updater = new ReleaseUpdater(UpdateApplication.Cli),
         }, cancellationToken).ConfigureAwait(false);
         if (viewer is null) return 0;
         try
@@ -162,6 +166,7 @@ internal static class Program
             RunArguments = options.Arguments,
             RunWorkingDirectory = Environment.CurrentDirectory,
             Input = processInput,
+            Updater = new ReleaseUpdater(UpdateApplication.Cli),
         }, cancellationToken).ConfigureAwait(false);
         if (viewer is null) return 0;
         using TextWriter stdout = viewer.CreateCaptureWriter(Console.Out, LogStream.Stdout);
@@ -333,6 +338,38 @@ internal static class Program
         }
     }
 
+    internal static async Task<int> UpdateAsync(UpdateApplication application, bool install)
+    {
+        try
+        {
+            ReleaseUpdater updater = new(application);
+            AppUpdateState state = await updater.CheckAsync(CancellationToken.None).ConfigureAwait(false);
+            Console.WriteLine($"Installed: {state.CurrentVersion}. Latest stable: {state.Release!.Version}");
+            Console.WriteLine(state.Release.Url);
+            Console.WriteLine(state.Release.Notes);
+            if (!state.UpdateAvailable)
+            {
+                Console.WriteLine("No newer stable version is available.");
+                return 0;
+            }
+            if (state.InstallationUnavailableReason is not null)
+                Console.WriteLine(state.InstallationUnavailableReason);
+            if (!install)
+            {
+                Console.WriteLine("Use --update to download, verify and install this application's update.");
+                return 0;
+            }
+            await updater.InstallAsync(state.Release.Version).ConfigureAwait(false);
+            Console.WriteLine("Update installed. Close and relaunch Log Studio to use the new version. Other running sessions are unchanged.");
+            return 0;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or HttpRequestException or IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"Update failed: {exception.Message}");
+            return ToolFailureExitCode;
+        }
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine(
@@ -342,6 +379,8 @@ internal static class Program
             Usage:
               logstudio [options] -- <command> [arguments]
               logstudio --listen-all [options]
+              logstudio --check-updates
+              logstudio --update
 
             Options:
               --open             Open the browser automatically.
@@ -353,6 +392,8 @@ internal static class Program
               --listen-all       Choose a running .NET application in the viewer.
               --help, -h         Show this help.
               --version          Show the installed Log Studio version.
+              --check-updates    Check the latest stable release and display its notes.
+              --update           Download, verify and install an update to this CLI.
 
             Examples:
               logstudio --open -- dotnet run --project path/to/ConsoleApp.csproj

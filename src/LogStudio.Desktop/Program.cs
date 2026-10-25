@@ -35,6 +35,8 @@ internal static class Program
                   --name <name>         Initial session name.
                   --help, -h            Show help without opening a window.
                   --version             Show version without opening a window.
+                  --check-updates       Show the latest stable release and its notes.
+                  --update              Download, verify and install a desktop update.
                 Closing the window disconnects capture; selected applications keep running.
                 For command wrapping or browser-only use, run logstudio --help.
                 """);
@@ -47,6 +49,8 @@ internal static class Program
                 .InformationalVersion.Split('+')[0]);
             return 0;
         }
+        if (options.CheckUpdates)
+            return Tool.Program.UpdateAsync(UpdateApplication.Desktop, options.Update).GetAwaiter().GetResult();
 
         try
         {

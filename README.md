@@ -11,6 +11,9 @@ One install includes both the **Photino.NET desktop app** and the **`logstudio` 
 Launch **Log Studio** from your applications menu—no terminal required.
 The desktop starts in `--listen-all` mode: choose **Running app** to capture new `ILogger` events.
 Closing the window disconnects capture without stopping your application.
+The desktop and CLI viewer check for new stable releases and show **Update available**.
+Open **Settings → Updates** to read release notes and explicitly download and install an update.
+Relaunch when ready; updates do not interrupt current capture. See [updating](docs/guide.md#updates).
 
 ![Log Studio running in a native Photino.NET desktop window, listening to a selected .NET demo application](appscreenshot/desktop-listen-all.png)
 

@@ -61,12 +61,13 @@ try {
             Join-Path $env:LOCALAPPDATA $(if ($Desktop) { "LogStudioDesktop" } else { "LogStudio" })
         }
         $InstallDir = [IO.Path]::GetFullPath($InstallDir)
+        if ($InstallDir.Contains("`n") -or $InstallDir.Contains("`r")) { throw "Installation paths must not contain line breaks." }
         $ReleasePrefix = if ($Desktop) { "desktop-release" } else { "release" }
         $Asset = "$Application-win-$Architecture.zip"
         if (-not $PublishDir) {
             Write-Host "Downloading $Asset ($Version)..."
             foreach ($File in @($Asset, "$Asset.sha256")) {
-                Invoke-WebRequest -UseBasicParsing -Uri "$DownloadUrl/$File" -OutFile (Join-Path $TemporaryDir $File)
+                Invoke-WebRequest -UseBasicParsing -TimeoutSec 600 -Uri "$DownloadUrl/$File" -OutFile (Join-Path $TemporaryDir $File)
             }
             $Archive = Join-Path $TemporaryDir $Asset
             $Checksum = (Get-Content -LiteralPath (Join-Path $TemporaryDir "$Asset.sha256") -Raw).Trim()
@@ -115,6 +116,10 @@ try {
                 throw "The desktop archive is missing a nonempty Photino.Native.dll."
             }
         }
+        $Component = if ($Desktop) { "desktop" } else { "cli" }
+        $Launcher = if ($NoLauncher) { "false" } else { "true" }
+        [IO.File]::WriteAllLines((Join-Path $ReleaseDir "logstudio-install.txt"),
+            @("1", $Component, $InstallDir, "", $Launcher), [Text.UTF8Encoding]::new($false))
         & $Executable --help | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Installed tool verification failed." }
         $BinDir = Join-Path $InstallDir $(if ($Desktop) { "desktop-bin" } else { "bin" })
