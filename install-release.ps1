@@ -120,7 +120,7 @@ try {
             $Shortcut = $Shell.CreateShortcut($ShortcutPath)
             $ManagedShortcutTargets = @((Join-Path $BinDir $ExecutableName))
             if ($CurrentRelease) { $ManagedShortcutTargets += Join-Path $CurrentRelease $ExecutableName }
-            if (-not ($ManagedShortcutTargets | Where-Object {
+            if ([string]::IsNullOrWhiteSpace($Shortcut.TargetPath) -or -not ($ManagedShortcutTargets | Where-Object {
                 [string]::Equals([IO.Path]::GetFullPath($Shortcut.TargetPath), [IO.Path]::GetFullPath($_), [StringComparison]::OrdinalIgnoreCase)
             }) -or $Shortcut.Description -ne $ShortcutDescription) {
                 throw "Refusing to replace an unrelated shortcut: $ShortcutPath"
