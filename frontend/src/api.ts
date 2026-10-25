@@ -3,6 +3,16 @@ import {
   InputActionValue, MaximumInputLength, SelectApplicationActionValue, type RunningApplication, type RunningApplicationProcess, type RunningApplicationsState,
   type ChatMessage, type ChatOptions, type ChatResponse, type CopilotConnection, type ClearResult, type LogEntry, type LogPage, type SessionFilters, type SessionInfo, type ViewerStatus
 } from "./model";
+import { readPreferences, type PreferencesChanges } from "./preferences";
+
+export async function appSettings(changes?: PreferencesChanges, signal?: AbortSignal) {
+  const response = await fetch("api/settings", changes
+    ? { method: "POST", headers: { [ClearActionHeader]: "save-settings", "Content-Type": "application/json" }, body: JSON.stringify(changes), keepalive: true }
+    : { signal });
+  const data = object(await response.json());
+  if (!response.ok) throw new ApiError(text(data.error, "settings error"), response.status);
+  return { preferences: readPreferences(data.preferences), hasPreferences: boolean(data.hasPreferences, "saved settings state") };
+}
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) {

@@ -100,21 +100,31 @@ internal static class Program
         }
     }
 
-    internal static Size GetInitialWindowSize(Size workArea)
+    internal static Size GetInitialWindowSize(Size workArea, DesktopWindowSettings? saved = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workArea.Width, nameof(workArea));
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workArea.Height, nameof(workArea));
         // Keep space for native title bars even on short displays.
-        return new Size(
+        Size defaultSize = new(
             Math.Min(1280, workArea.Width - workArea.Width / 10),
             Math.Min(800, Math.Max(1, workArea.Height - Math.Max(80, workArea.Height / 10))));
+        if (saved is null) return defaultSize;
+        return new Size(
+            Math.Clamp(saved.Width, Math.Min(640, defaultSize.Width), workArea.Width),
+            Math.Clamp(saved.Height, Math.Min(400, defaultSize.Height), Math.Max(1, workArea.Height - 80)));
     }
 
     private static void ShowWindow(Uri url, Action shutdown)
     {
-        string profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LogStudio", "WebView");
+        string profile = Path.Combine(AppSettingsStore.DefaultDirectory, "WebView");
         Directory.CreateDirectory(profile);
-        using IDisposable? termination = OperatingSystem.IsMacOS() ? new MacApplicationLifetime(shutdown) : null;
+        using DesktopWindowPreferences preferences = new(new AppSettingsStore(), Console.Error);
+        void Close()
+        {
+            preferences.Flush();
+            shutdown();
+        }
+        using IDisposable? termination = OperatingSystem.IsMacOS() ? new MacApplicationLifetime(Close) : null;
         PhotinoWindow window = new PhotinoWindow()
             .SetTitle("Log Studio")
             .SetIconFile(Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "logstudio.ico" : "logstudio.png"))
@@ -134,16 +144,22 @@ internal static class Program
             .RegisterWindowCreatedHandler((_, _) =>
             {
                 Rectangle workArea = window.MainMonitor.WorkArea;
-                Size size = GetInitialWindowSize(workArea.Size);
+                bool maximized = preferences.Saved?.Maximized ?? false;
+                Size size = GetInitialWindowSize(workArea.Size, preferences.Saved);
                 // Native resizing can be asynchronous; center using the requested size.
                 window.SetMinSize(Math.Min(640, size.Width), Math.Min(400, size.Height))
                     .SetSize(size)
                     .MoveTo(workArea.Left + (workArea.Width - size.Width) / 2,
                         workArea.Top + (workArea.Height - size.Height) / 2, allowOutsideWorkArea: true);
+                preferences.Initialize(size);
+                if (maximized) window.SetMaximized(true);
             })
+            .RegisterSizeChangedHandler((_, size) => preferences.Update(size, window.Maximized, window.Minimized))
+            .RegisterMaximizedHandler((_, _) => preferences.Update(window.Size, maximized: true, minimized: false))
+            .RegisterRestoredHandler((_, _) => preferences.Update(window.Size, window.Maximized, window.Minimized))
             .RegisterWindowClosingHandler((_, _) =>
             {
-                shutdown();
+                Close();
                 return false;
             })
             .Load(url)

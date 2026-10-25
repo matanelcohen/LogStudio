@@ -10,11 +10,18 @@ import { DefaultTypography, TypographyStorageKey } from "./useTypography";
 import { AppearanceOptions, ColorThemes } from "./themes";
 import * as api from "./api";
 import { defaultQuery, sessionFilters, type ChatResponse, type LogEntry, type RunningApplicationsState } from "./model";
+import { DefaultPreferences, mergePreferences } from "./preferences";
 
 const reconnect = vi.hoisted(() => vi.fn());
 const styles = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "styles.css"), "utf8");
+let savedPreferences = structuredClone(DefaultPreferences);
 
 beforeEach(() => {
+  savedPreferences = structuredClone(DefaultPreferences);
+  vi.spyOn(api, "appSettings").mockImplementation(async changes => {
+    if (changes) savedPreferences = mergePreferences(savedPreferences, changes);
+    return { preferences: savedPreferences, hasPreferences: true };
+  });
   localStorage.removeItem(TypographyStorageKey);
   sessionStorage.clear();
   vi.spyOn(api, "fetchSessions").mockResolvedValue([]);
@@ -39,6 +46,37 @@ vi.mock("./useLogExplorer", async () => {
 });
 
 describe("log-first workspace", () => {
+  it("restores saved fonts, theme, page size and explorer layout in a fresh viewer", async () => {
+    history.replaceState(null, "", "/");
+    savedPreferences = mergePreferences(DefaultPreferences, {
+      appearance: "monokai", typography: { uiFontSize: 16, logFontSize: 20 },
+      explorer: {
+        wrap: false, fields: true, inspector: true, timeline: true, pageSize: 500,
+        columnOrder: [...DefaultPreferences.explorer.columnOrder].reverse(),
+        columnVisibility: { severity: false, id: false, stream: false }, columnSizing: { category: 240 }
+      }
+    });
+    const first = render(<App />);
+    await waitFor(() => expect(document.documentElement.style.getPropertyValue("--log-font-size")).toBe("20px"));
+    expect(document.documentElement.style.getPropertyValue("--ui-font-size")).toBe("16px");
+    expect(document.documentElement.dataset.colorTheme).toBe("monokai");
+    expect(screen.getByRole("button", { name: "Available fields" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Toggle timeline" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Toggle inspector" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getAllByRole("columnheader")[0]!.textContent).toContain("Message");
+    expect(screen.queryByRole("columnheader", { name: /Level/ })).toBeNull();
+    await waitFor(() => expect(vi.mocked(useLogPage).mock.calls.at(-1)?.[0].pageSize).toBe(500));
+    fireEvent.click(screen.getByRole("button", { name: "Available fields" }));
+    await waitFor(() => expect(savedPreferences.explorer.fields).toBe(false));
+    first.unmount();
+    history.replaceState(null, "", "/");
+    render(<App />);
+    await waitFor(() => expect(document.documentElement.dataset.colorTheme).toBe("monokai"));
+    expect(screen.getByRole("button", { name: "Available fields" }).getAttribute("aria-pressed")).toBe("false");
+    expect(document.documentElement.style.getPropertyValue("--log-font-size")).toBe("20px");
+    history.replaceState(null, "", "/");
+  });
+
   describe("color theme pickers", () => {
     beforeEach(() => history.replaceState(null, "", "/"));
     afterEach(() => history.replaceState(null, "", "/"));
@@ -941,14 +979,14 @@ describe("log-first workspace", () => {
     expect(document.documentElement.style.getPropertyValue("--log-font-size")).toBe("24px");
     expect(document.documentElement.style.getPropertyValue("--log-line-height")).toBe("2");
     expect(scroll.scrollTop).toBe(500);
-    expect(JSON.parse(localStorage.getItem(TypographyStorageKey)!)).toEqual({
+    await waitFor(() => expect(savedPreferences.typography).toEqual({
       uiFont: "verdana", uiFontSize: 18, logFont: "courier", logFontSize: 24, logLineHeight: 2
-    });
+    }));
     expect(search.value).toBe("Hello");
     expect(vi.mocked(useLogPage).mock.calls.at(-1)?.[0].search).toBe("Hello");
 
     fireEvent.click(screen.getByRole("button", { name: "Reset typography" }));
-    expect(JSON.parse(localStorage.getItem(TypographyStorageKey)!)).toEqual(DefaultTypography);
+    await waitFor(() => expect(savedPreferences.typography).toEqual(DefaultTypography));
     expect(document.documentElement.style.getPropertyValue("--ui-font-size")).toBe("14px");
     expect(document.documentElement.style.getPropertyValue("--log-font-size")).toBe("14px");
     expect(search.value).toBe("Hello");
@@ -957,11 +995,13 @@ describe("log-first workspace", () => {
     await waitFor(() => expect(document.activeElement).toBe(opener));
   });
 
-  it("shows a storage warning without disabling settings", () => {
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("Storage blocked"); });
+  it("shows an app autosave warning without disabling settings", async () => {
     render(<App />);
+    await waitFor(() => expect(api.appSettings).toHaveBeenCalled());
+    vi.mocked(api.appSettings).mockRejectedValue(new Error("Disk is full"));
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    expect(screen.getByText(/Browser storage is unavailable/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Reset typography" }));
+    expect(await screen.findByText(/Changes work in this tab but have not been saved/)).toBeDefined();
     expect(screen.getByRole("button", { name: "Reset typography" })).toBeDefined();
   });
 });

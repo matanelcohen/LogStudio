@@ -1,8 +1,14 @@
-import { StrictMode } from "react";
+import { StrictMode, useState } from "react";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppearanceOptions, ColorThemes } from "./themes";
-import { useAppearance } from "./useAppearance";
+import { useAppearance as useControlledAppearance } from "./useAppearance";
+import { urlAppearance } from "./preferences";
+
+function useAppearance() {
+  const [appearance, setAppearance] = useState(() => urlAppearance() ?? "system");
+  return useControlledAppearance(appearance, setAppearance);
+}
 
 beforeEach(() => history.replaceState(null, "", "/"));
 afterEach(() => history.replaceState(null, "", "/"));

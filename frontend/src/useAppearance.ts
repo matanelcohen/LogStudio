@@ -1,21 +1,15 @@
 import { useEffect, useState } from "react";
-import { AppearanceChoices, ColorThemes, type Appearance } from "./themes";
+import { ColorThemes, type Appearance } from "./themes";
 
 const ThemeParameter = "clawpilotTheme";
 const ColorSchemeQuery = "(prefers-color-scheme: dark)";
-
-function initialAppearance(): Appearance {
-  const value = new URLSearchParams(location.search).get(ThemeParameter);
-  return AppearanceChoices.find(choice => choice === value) ?? "system";
-}
 
 function colorScheme(appearance: Appearance, prefersDark: boolean): "light" | "dark" {
   if (appearance === "system") return prefersDark ? "dark" : "light";
   return ColorThemes.find(theme => theme.value === appearance)?.scheme ?? (appearance === "dark" ? "dark" : "light");
 }
 
-export function useAppearance() {
-  const [appearance, setAppearance] = useState<Appearance>(initialAppearance);
+export function useAppearance(appearance: Appearance, setAppearance: (value: Appearance) => void) {
   const [theme, setTheme] = useState<"light" | "dark">(() =>
     colorScheme(appearance, matchMedia(ColorSchemeQuery).matches));
 

@@ -46,6 +46,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private readonly IRunningApplications? runningApplications;
     private readonly ProcessInput? input;
     private readonly ReleaseUpdater updater;
+    private readonly AppSettingsStore appSettings;
     private readonly string authority;
     private readonly string contentSecurityPolicy;
     private readonly Dictionary<string, Asset> assets;
@@ -72,6 +73,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
         this.runningApplications = settings.RunningApplications;
         this.input = settings.Input;
         this.updater = settings.Updater ?? new ReleaseUpdater(null);
+        this.appSettings = settings.AppSettings ?? new AppSettingsStore();
         this.initialTelemetrySettings = new(settings.MeterSources, settings.ActivitySources, false);
         this.copilot = copilot ?? new CopilotCliClient();
         this.copilotTimeout = copilotTimeout ?? TimeSpan.FromMinutes(2);
@@ -230,6 +232,11 @@ internal sealed class HttpLogServer : IAsyncDisposable
             }
 
             string route = request.Url.AbsolutePath[1..];
+            if (route == "api/settings")
+            {
+                await this.AppSettingsAsync(context, cancellationToken).ConfigureAwait(false);
+                return;
+            }
             if (route == ReleaseUpdater.Route)
             {
                 await this.AppUpdateAsync(context, cancellationToken).ConfigureAwait(false);
@@ -502,6 +509,51 @@ internal sealed class HttpLogServer : IAsyncDisposable
         finally
         {
             response.Close();
+        }
+    }
+
+    private async Task AppSettingsAsync(HttpListenerContext context, CancellationToken cancellationToken)
+    {
+        HttpListenerRequest request = context.Request;
+        HttpListenerResponse response = context.Response;
+        try
+        {
+            AppPreferences? preferences;
+            if (request.HttpMethod == ViewerConstants.GetMethod)
+            {
+                preferences = this.appSettings.Read().Preferences;
+            }
+            else if (request.HttpMethod == ViewerConstants.PostMethod)
+            {
+                if (request.Headers[ViewerConstants.ClearRequestHeader] != "save-settings")
+                {
+                    await WriteErrorAsync(response, HttpStatusCode.Forbidden, "An explicit save-settings action header is required.", cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                if (!MediaTypeHeaderValue.TryParse(request.ContentType, out MediaTypeHeaderValue? contentType) ||
+                    !string.Equals(contentType.MediaType, "application/json", StringComparison.OrdinalIgnoreCase))
+                {
+                    await WriteErrorAsync(response, HttpStatusCode.UnsupportedMediaType, "Settings require application/json.", cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                using JsonDocument body = await ReadSessionActionAsync(request, AppSettingsStore.MaximumBytes, cancellationToken).ConfigureAwait(false);
+                preferences = this.appSettings.SavePreferences(body.RootElement);
+            }
+            else
+            {
+                await WriteErrorAsync(response, HttpStatusCode.MethodNotAllowed, "Use GET to read settings or POST to save them.", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(
+                new { preferences = preferences ?? new AppPreferences(), hasPreferences = preferences is not null }, ViewerConstants.JsonOptions),
+                ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            this.diagnostics.WriteLine($"Log Studio settings could not be read or saved: {exception}");
+            await WriteErrorAsync(response, HttpStatusCode.InternalServerError,
+                "Could not read or save app settings. Check LogStudio/settings.json in local application data, disk space and permissions.",
+                cancellationToken).ConfigureAwait(false);
         }
     }
 

@@ -54,8 +54,11 @@ The sidebar collapses to icons on smaller screens. System typography, keyboard n
 resize/reorder grips, and per-query filter chips remain available. All visual materials
 are rendered locally with CSS, without external fonts, images, or downloads.
 
-The desktop window starts centered, using up to 90% of the screen's working area, capped at
-1280 x 800. It can be resized or maximized (minimum 640 x 400, reduced for smaller displays).
+The desktop window starts centered. On first launch it uses up to 90% of the screen's working
+area, capped at 1280 x 800. Later launches restore the saved window size and maximized state,
+fitting the normal size to the current display if necessary. Resizing autosaves after a short
+pause and on close; minimizing never replaces the saved normal size.
+It can be resized or maximized (minimum 640 x 400, reduced for smaller displays).
 Toolbars wrap to the available width; the field browser and inspector stack when the
 results pane becomes narrow, including beside Copilot.
 Short windows scroll without hiding controls or collapsing the log results. Wide log tables
@@ -69,16 +72,35 @@ to every table-row field (including category, timestamp, and level) and inspecto
 not just messages. The log font and line spacing apply to messages in the table and inspector.
 Changes apply immediately with previews; **Reset typography** restores the original fonts
 and sizes without changing your query, session, or theme.
-Fonts use installed local fallbacks and do not require downloads. Typography preferences
-are saved in browser storage for the current server origin, including its port, and survive
-reloads. A run on a different port has separate settings. If storage is blocked, changes
-still apply to the current tab and Settings shows a warning.
+Fonts use installed local fallbacks and do not require downloads.
 
-Without a `clawpilotTheme` URL override, appearance follows system changes automatically.
+### Settings persistence
+
+Theme, UI and log fonts, sizes and line spacing, page size, line wrapping, optional panels,
+and column visibility, widths and order autosave to the app's per-user `LogStudio/settings.json`
+file. Browser and desktop viewers on the same device and OS user share these preferences,
+independently of the localhost port or browser storage. New viewers load the latest saved
+preferences; already-open viewers keep their current choices. Session filters remain attached
+to their sessions; pause, selected entries and live-follow state are not global preferences.
+
+The settings file lives under the OS user's local application-data directory:
+`%LOCALAPPDATA%\LogStudio\settings.json` on Windows, and
+`$XDG_DATA_HOME/LogStudio/settings.json` (normally `~/.local/share/LogStudio/settings.json`)
+on Linux. macOS uses the local application-data directory provided by .NET.
+It is separate from the executable,
+so upgrades do not replace preferences. Desktop window size and maximized state use the same
+file; Log Studio does not resize or reposition an external browser window.
+Existing browser-local typography migrates when no app preferences have been saved yet.
+If restoring or saving fails, the viewer displays a warning with **Retry settings**;
+changes still apply in the current tab. Disk/permission failures are also written to server
+diagnostics. Invalid settings files are reported and left intact rather than silently overwritten.
+
+Appearance defaults to following system changes until a choice has been saved.
+A valid `clawpilotTheme` URL override takes precedence over the saved theme and is also saved.
 Choosing a color theme updates that query parameter, so it survives reloads and can be bookmarked
 (for example, `?clawpilotTheme=monokai` or `?clawpilotTheme=dark-modern`). Existing `light`
 and `dark` URLs keep their original appearance. Choose **System preference** in either picker,
-or reload without the parameter, to return to automatic appearance.
+or use `?clawpilotTheme=system`, to save a return to automatic appearance.
 All palettes are bundled locally; VS Code or an internet connection is not required.
 Increased-contrast and reduced-transparency preferences remove
 blur and use opaque, stronger-bordered surfaces. Reduced-motion disables control transitions.
@@ -1260,6 +1282,12 @@ startup-hook viewer ends with its host process; inspect telemetry while that pro
   IDs from another app, or legacy numeric-only cursors, replay the selected app's
   retained history from the beginning rather than skipping unrelated entries.
 - GET `<session-url>api/updates` sends metadata-only SSE updates for the browser.
+- GET `<session-url>api/settings` returns `{ preferences, hasPreferences }` for the current OS
+  user. POST to the same route with `Content-Type: application/json` and
+  `X-Log-Studio-Action: save-settings` autosaves a patch containing `appearance`, `typography`
+  and/or `explorer`. Unchanged properties are preserved, including desktop window state;
+  invalid or oversized requests are rejected. It uses the same loopback, Origin and Fetch
+  Metadata checks as other APIs. Settings are independent of the selected log session.
 - GET `<session-url>api/sessions` lists the current run and saved named/date-stamped runs with
   redacted command details. `sessionId=<id>` selects saved history for search/export/clear;
   missing or path-like IDs are rejected.

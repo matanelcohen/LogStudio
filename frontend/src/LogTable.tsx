@@ -12,9 +12,10 @@ import { ColumnHeader } from "./ColumnHeader";
 import { PageSizeControl } from "./PageSizeControl";
 import { VisiblePageChart } from "./VisiblePageChart";
 import type { TypographySettings } from "./useTypography";
+import { DefaultColumnOrder, DefaultColumnVisibility, type ExplorerPreferences } from "./preferences";
 
-const DefaultOrder = ["id", "timestamp", "severity", "stream", "category", "message"];
-const DefaultVisibility: VisibilityState = { id: false, stream: false };
+const DefaultOrder = DefaultColumnOrder;
+const DefaultVisibility = DefaultColumnVisibility;
 const MinimumMessageWidth = 240;
 const DefaultColumnSizes: Readonly<Record<string, number>> = { id: 60, timestamp: 110, severity: 90, stream: 80, category: 180, message: 600 };
 const InitialTableWidth = Object.values(DefaultColumnSizes).reduce((sum, width) => sum + width, 0);
@@ -35,7 +36,7 @@ export function Highlight({ message, terms, matchCase }: { message: string; term
   return <>{fragments}</>;
 }
 
-export function LogTable({ page, loading, error, selected, matchCase, follow, wrap, pageSize, typography, fields, inspector, onFields, onSeverity, onPageSize, onClearSession, clearing, clearButtonRef, onSelect, onOlder, onNewer, onLive, onFollow, onWrap, onClear, onRetry, onInspector }: {
+export function LogTable({ page, loading, error, selected, matchCase, follow, wrap, pageSize, typography, preferences, onPreferences, fields, inspector, onFields, onSeverity, onPageSize, onClearSession, clearing, clearButtonRef, onSelect, onOlder, onNewer, onLive, onFollow, onWrap, onClear, onRetry, onInspector }: {
   page: LogPage | null;
   loading: boolean;
   error: string | null;
@@ -45,6 +46,8 @@ export function LogTable({ page, loading, error, selected, matchCase, follow, wr
   wrap: boolean;
   pageSize: number;
   typography: TypographySettings;
+  preferences: ExplorerPreferences;
+  onPreferences(changes: Partial<ExplorerPreferences>): void;
   fields: boolean;
   inspector: boolean;
   clearing: boolean;
@@ -63,11 +66,14 @@ export function LogTable({ page, loading, error, selected, matchCase, follow, wr
   onRetry(): void;
   onInspector(): void;
 }) {
-  const [visibility, setVisibility] = useState<VisibilityState>(DefaultVisibility);
-  const [sizing, setSizing] = useState<ColumnSizingState>({});
-  const [order, setOrder] = useState<string[]>(DefaultOrder);
+  const { columnVisibility: visibility, columnSizing: sizing, columnOrder: order, timeline } = preferences;
+  const setVisibility = (value: VisibilityState | ((current: VisibilityState) => VisibilityState)) =>
+    onPreferences({ columnVisibility: typeof value === "function" ? value(visibility) : value });
+  const setSizing = (value: ColumnSizingState | ((current: ColumnSizingState) => ColumnSizingState)) =>
+    onPreferences({ columnSizing: typeof value === "function" ? value(sizing) : value });
+  const setOrder = (value: string[] | ((current: string[]) => string[])) =>
+    onPreferences({ columnOrder: typeof value === "function" ? value(order) : value });
   const [paneWidth, setPaneWidth] = useState(InitialTableWidth);
-  const [timeline, setTimeline] = useState(false);
   const scroll = useRef<HTMLDivElement>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -105,6 +111,7 @@ export function LogTable({ page, loading, error, selected, matchCase, follow, wr
 
   const table = useReactTable({
     data: entries, columns, getCoreRowModel: getCoreRowModel(),
+    defaultColumn: { maxSize: 4000 },
     getRowId: row => String(row.id),
     manualPagination: true, rowCount: page?.matchCount ?? 0,
     columnResizeMode: "onChange",
@@ -161,7 +168,7 @@ export function LogTable({ page, loading, error, selected, matchCase, follow, wr
         </div>
         <div className="table-tools">
           <button className="view-toggle small" aria-label="Available fields" aria-pressed={fields} onClick={onFields}><ListFilter size={14} />Fields</button>
-          <button className="view-toggle small" aria-label="Toggle timeline" aria-pressed={timeline} onClick={() => setTimeline(value => !value)}><ChartNoAxesColumn size={14} />Timeline</button>
+          <button className="view-toggle small" aria-label="Toggle timeline" aria-pressed={timeline} onClick={() => onPreferences({ timeline: !timeline })}><ChartNoAxesColumn size={14} />Timeline</button>
           <Menu.Root>
             <Menu.Trigger asChild><button className="small"><Columns3 size={14} /> Columns <ChevronDown size={11} /></button></Menu.Trigger>
             <Menu.Portal><Menu.Content className="menu-content" sideOffset={6} align="end">
@@ -173,7 +180,7 @@ export function LogTable({ page, loading, error, selected, matchCase, follow, wr
                 </Menu.CheckboxItem>
               ))}
               <Menu.Separator className="menu-separator" />
-              <Menu.Item className="menu-item" onSelect={() => { setSizing({}); setVisibility(DefaultVisibility); setOrder(DefaultOrder); }}><RotateCcw size={13} /> Reset columns</Menu.Item>
+              <Menu.Item className="menu-item" onSelect={() => onPreferences({ columnSizing: {}, columnVisibility: DefaultVisibility, columnOrder: DefaultOrder })}><RotateCcw size={13} /> Reset columns</Menu.Item>
             </Menu.Content></Menu.Portal>
           </Menu.Root>
           <button className="view-toggle icon-button" aria-label="Toggle inspector" aria-pressed={inspector} onClick={onInspector}><PanelRight size={15} /></button>
