@@ -20,11 +20,10 @@ chrome, a session switcher, query/filter bar, document results, and optional fie
 timeline, and inspector. The distribution is explicitly **visible-page-only**, not a fabricated full-history
 histogram. It uses the compatible React 19 stack, not a copied OpenSearch Dashboards server.
 `@opensearch-project/opensearch` is a Node client, not UI components, and is not required.
-The published OUI library requires an older React/TypeScript toolchain; it is not forced into
-this application with ignored peer dependencies.
-
-The frontend uses **React + TypeScript**, **Radix UI** accessible controls, **TanStack Table**,
-and **Lucide** icons. **dnd-kit** provides pointer, touch and keyboard column dragging.
+The frontend uses **React + TypeScript** and the **OpenSearch UI Framework (OUI)** for
+buttons, fields, checkboxes, selects, menus, dialogs, popovers, tooltips, cards, alerts,
+progress indicators, and table primitives. **TanStack Table** retains server-paged table state,
+**Lucide** supplies locally bundled icons, and **dnd-kit** provides pointer, touch and keyboard column dragging.
 Menus, popovers, and the condition dialog support keyboard navigation and
 focus management. Columns can be resized, hidden, moved, and reset without changing server paging.
 There is no runtime CDN, Node server, or accumulating client-side query cache.
@@ -41,15 +40,15 @@ closed. Selecting a row opens its inspector. The initial columns focus on captur
 category, and message; sequence ID and stream remain available in **Columns**.
 **Explorer options** holds Wrap long lines, Follow newest entries, Clear view, and Refresh.
 
-The macOS-inspired workspace uses a frosted sidebar, translucent window chrome, rounded
-controls, and layered glass panels over a soft local gradient. The original Light and Dark Mode
-use coordinated blue accents; log rows stay mostly opaque for readable monospace text.
+The workspace uses OUI's solid surfaces, compact controls, blue accents, and coordinated light
+and dark themes. Application-specific layouts and log visualizations inherit OUI's design tokens
+rather than maintaining a separate component skin.
 The **Appearance** button and **Settings > Color theme** also offer the built-in VS Code
 color themes: Light 2026, Dark 2026, Light Modern, Dark Modern, Light+, Dark+,
 Light (Visual Studio), Dark (Visual Studio), Light High Contrast, Dark High Contrast,
 Abyss, Kimbie Dark, Monokai, Monokai Dimmed, Quiet Light, Red, Solarized Light,
-Solarized Dark, and Tomorrow Night Blue. These palettes use opaque editor-style surfaces;
-the high-contrast options also remove blur and shadows and strengthen borders.
+Solarized Dark, and Tomorrow Night Blue. These palettes also override OUI's tokens, including portalled controls, so menus and dialogs
+match the selected editor palette. High-contrast options remove shadows and strengthen borders.
 The sidebar collapses to icons on smaller screens. System typography, keyboard navigation,
 resize/reorder grips, and per-query filter chips remain available. All visual materials
 are rendered locally with CSS, without external fonts, images, or downloads.
@@ -1342,6 +1341,23 @@ Both NuGets include the component licenses. Dependencies were downloaded through
 public package mirror where the primary npm registry was unavailable; the lockfile retains those
 resolved download URLs and integrity hashes.
 
+OUI is pinned to **`@opensearch-project/oui@2.0.0-alpha.2`**, the published 2.x prerelease
+that declares React 19 support. The stable 1.x package declares React 16 / TypeScript 4 peers;
+installing it with ignored peer checks or downgrading the application is intentionally avoided.
+OUI 2 exports modern component names (`Button`, `Dialog`, `Select`, etc.), not the 1.x `Oui*` API.
+See the [upstream framework](https://github.com/opensearch-project/oui) and
+[package metadata](https://www.npmjs.com/package/@opensearch-project/oui/v/2.0.0-alpha.2).
+The scoped `react-hook-form` override aligns OUI's older internal pin with its resolver's peer
+requirement and React 19. No legacy-peer-deps setting is needed.
+The packaged `style.css` is imported before application layout styles. The resolved scheme
+sets OUI's document-level `dark` class, and saved editor palettes override `--oui-*` tokens,
+including portalled menus and dialogs. Only system/local font fallbacks are used.
+OUI CSS, icons, and component code are bundled into the existing embedded assets; no CDN,
+external stylesheet, font download, extra server, or runtime chunk request is introduced.
+Vite records the dependency packages that contribute code to the bundle. The license generator
+uses that manifest and the lockfile, so unused OUI components and build-tool binaries are not
+mistaken for browser dependencies; a missing license for shipped code still fails the build.
+
 The frontend keeps one validated server page (at most the user-selected size)
 and one selected entry.
 Live notifications are coalesced, and only one search request is in flight for a given query.
@@ -1354,3 +1370,6 @@ viewer must use the embedded build and its real disk APIs for end-to-end verific
 The Content Security Policy retains script nonces and same-origin loading. Dynamic component
 positioning / column widths use inline style attributes; generated scroll-lock styles use the
 session's nonce rather than allowing arbitrary inline style blocks.
+OUI's select viewport does not expose the nonce option, so its fixed scrollbar stylesheet is
+allowlisted by exact SHA-256 CSP hashes for that stylesheet and its empty update state;
+arbitrary inline stylesheets remain blocked.

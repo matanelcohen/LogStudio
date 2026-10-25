@@ -141,6 +141,15 @@ describe("log-first workspace", () => {
     expect(api.appUpdate).toHaveBeenCalledTimes(1);
   });
 
+  it("uses a non-destructive OUI notice for clearing only the current view", async () => {
+    render(<App />);
+    fireEvent.keyDown(screen.getByRole("button", { name: "Explorer options" }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Clear view (this tab)" }));
+    const notice = screen.getByText("Existing entries are hidden in this tab only. Reset restores disk history.").closest("[data-slot='alert']");
+    expect(notice?.getAttribute("role")).toBe("status");
+    expect(notice?.classList.contains("oui:text-destructive")).toBe(false);
+  });
+
   describe("wrapped program input", () => {
     const running = { ...Status, isCompleted: false, completedAt: null, exitCode: null, canWriteInput: true };
     function liveStatus(status = running) {
@@ -805,7 +814,7 @@ describe("log-first workspace", () => {
     expect(screen.queryByRole("button", { name: "Connect local Copilot" })).toBeNull();
     const panel = screen.getByRole("complementary", { name: "Ask Copilot about logs" });
     expect(panel.parentElement).toBe(screen.getByRole("main", { name: "Log exploration workspace" }));
-    expect(panel.nextElementSibling?.className).toBe("workspace");
+    expect(panel.nextElementSibling?.classList.contains("workspace")).toBe(true);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByLabelText("Search logs").hasAttribute("disabled")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Close Copilot chat" }));
@@ -880,7 +889,7 @@ describe("log-first workspace", () => {
     render(<App />);
     const search = screen.getByLabelText("Search logs") as HTMLInputElement;
     await waitFor(() => expect(search.value).toBe("Current search"));
-    expect((screen.getByLabelText("Match case") as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByLabelText("Match case").getAttribute("aria-checked")).toBe("true");
     expect(api.saveSessionFilters).not.toHaveBeenCalled();
     fireEvent.change(search, { target: { value: "Edited current" } });
     await waitFor(() => expect(api.saveSessionFilters).toHaveBeenCalledWith("", { ...current.filters, search: "Edited current" }));
@@ -898,7 +907,7 @@ describe("log-first workspace", () => {
     await waitFor(() => expect(api.saveSessionFilters).toHaveBeenLastCalledWith("", { ...current.filters, search: "" }));
   });
 
-  it("keeps glass on chrome and provides opaque accessibility and unsupported-browser fallbacks", () => {
+  it("uses OUI surface tokens and preserves opaque accessibility fallbacks", () => {
     const { container } = render(<><style>{styles}</style><App /></>);
     const rules = Array.from(container.querySelector("style")!.sheet!.cssRules);
     function declaration(rules: CSSRule[], selector: string, property: string) {
@@ -907,8 +916,12 @@ describe("log-first workspace", () => {
         .map(rule => rule.style.getPropertyValue(property)).filter(Boolean).at(-1);
     }
     expect(declaration(rules, ".discover-shell", "background")).toBe("var(--cp-shell-material)");
-    expect(declaration(rules, ".discover-shell", "border-radius")).toBe("20px");
-    expect(declaration(rules, ".query-bar", "background")).toBe("var(--cp-card-material)");
+    expect(declaration(rules, ":root", "--cp-surface")).toBe("var(--oui-card)");
+    expect(declaration(rules, ":root", "--cp-native-accent")).toBe("var(--cp-accent)");
+    expect(declaration(rules, ":root", "--cp-accent")).toBe("var(--oui-primary)");
+    expect(declaration(rules, ":root", "--cp-wallpaper")).toBe("none");
+    expect(declaration(rules, "html[data-color-theme]", "--oui-primary")).toBe("var(--theme-accent)");
+    expect(screen.getByRole("region", { name: "Search and filter logs" }).getAttribute("data-slot")).toBe("card");
     expect(declaration(rules, ".logs-scroll", "background")).toBe("var(--cp-content-material)");
     expect(declaration(rules, "tr[data-log-id]", "background")).toBe("var(--cp-surface)");
 
@@ -937,9 +950,10 @@ describe("log-first workspace", () => {
       return rules.filter(rule => rule.selectorText.split(",").map(value => value.trim()).includes(selector))
         .map(rule => rule.style.getPropertyValue("font-size")).filter(Boolean).at(-1);
     }
-    for (const selector of ["button", ".select-trigger", ".menu-item", ".tooltip", ".field-row", ".muted", ".copilot-copy", ".telemetry-status"]) {
+    for (const selector of [".select-trigger", ".field-row", ".muted", ".copilot-copy", ".telemetry-status"]) {
       expect(fontSize(selector), selector).toBe("var(--ui-font-size, 14px)");
     }
+    expect(rules.find(rule => rule.selectorText === ":root")?.style.getPropertyValue("--oui-text-sm")).toBe("var(--ui-font-size, 14px)");
     for (const selector of [".logs-scroll tbody", ".logs-scroll .severity-badge", ".message-lines", ".message", "#detailMessage", ".selected-details .metadata", ".selected-details .severity-badge"]) {
       expect(fontSize(selector), selector).toBe("var(--log-font-size, 14px)");
     }
@@ -962,6 +976,7 @@ describe("log-first workspace", () => {
     expect(screen.getByRole("combobox", { name: "UI font size" }).textContent).toContain("14 px");
     expect(screen.getByRole("combobox", { name: "Log font size" }).textContent).toContain("14 px");
     expect(screen.getByLabelText("Log font preview").textContent).toContain("Application started");
+    expect((await screen.findByText("All settings saved.")).tagName).toBe("P");
 
     async function choose(label: string, option: string) {
       fireEvent.keyDown(screen.getByRole("combobox", { name: label }), { key: "Enter" });

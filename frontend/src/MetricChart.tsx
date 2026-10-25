@@ -1,3 +1,4 @@
+import * as Oui from "@opensearch-project/oui";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
@@ -135,10 +136,10 @@ export function MetricChart({ metrics }: { metrics: MetricMeasurement[] }) {
     </div>
     <div className="metric-legend">
       <span><i className="telemetry-color-key" />{displayText(latest.name)}{latest.unit && ` (${displayText(latest.unit)})`}</span>
-      <button className="ghost-button" onClick={() => {
+      <Oui.Button variant="ghost" size="sm" className="ghost-button" onClick={() => {
         zoomed.current = false;
         plot.current?.setData(current.current.data);
-      }}>Reset zoom</button>
+      }}>Reset zoom</Oui.Button>
     </div>
     <p className="metric-hover">{hovered ? `${hovered.timestamp} · ${hovered.value} ${displayText(latest.unit ?? "")}` : "Hover a point to inspect its raw value"}</p>
     <p id={helpId} className="muted metric-help">Drag to zoom · Arrow keys inspect points · Exact values in the table below</p>

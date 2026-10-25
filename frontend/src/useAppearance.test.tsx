@@ -38,6 +38,7 @@ describe("color themes", () => {
     expect(result.current.appearance).toBe(option.value);
     expect(result.current.theme).toBe(option.scheme === "system" ? "light" : option.scheme);
     expect(document.documentElement.dataset.theme).toBe(result.current.theme);
+    expect(document.documentElement.classList.contains("dark")).toBe(result.current.theme === "dark");
     expect(location.search).toContain("keep=value");
     expect(location.hash).toBe("#logs");
     const selected = ColorThemes.find(theme => theme.value === option.value);
@@ -59,6 +60,7 @@ describe("color themes", () => {
       expect(location.search).toBe("");
       act(() => { media.matches = false; media.dispatchEvent(new Event("change")); });
       expect(result.current.theme).toBe("light");
+      expect(document.documentElement.classList.contains("dark")).toBe(false);
       act(() => { media.matches = true; document.dispatchEvent(new Event("visibilitychange")); });
       expect(result.current.theme).toBe("dark");
       unmount();
@@ -109,6 +111,7 @@ describe("color themes", () => {
   it("restores pre-existing document colors and attributes on unmount", () => {
     const root = document.documentElement;
     root.dataset.theme = "light";
+    root.classList.add("dark");
     root.dataset.colorTheme = "existing";
     root.dataset.themeContrast = "existing";
     root.style.setProperty("--theme-background", "#123456", "important");
@@ -117,6 +120,7 @@ describe("color themes", () => {
     expect(root.dataset.colorTheme).toBe("abyss");
     unmount();
     expect(root.dataset.theme).toBe("light");
+    expect(root.classList.contains("dark")).toBe(true);
     expect(root.dataset.colorTheme).toBe("existing");
     expect(root.dataset.themeContrast).toBe("existing");
     expect(root.style.getPropertyValue("--theme-background")).toBe("#123456");
@@ -125,6 +129,7 @@ describe("color themes", () => {
     delete root.dataset.colorTheme;
     delete root.dataset.themeContrast;
     root.style.removeProperty("--theme-background");
+    root.classList.remove("dark");
   });
 
   it.each(ColorThemes.filter(theme => "highContrast" in theme))(

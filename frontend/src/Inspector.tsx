@@ -1,3 +1,4 @@
+import * as Oui from "@opensearch-project/oui";
 import { Copy, Filter, MinusCircle, PlusCircle, X } from "lucide-react";
 import { Fragment } from "react";
 import {
@@ -40,12 +41,12 @@ export function Inspector({ entry, status, onClose, onCondition, onDraft, onNoti
   return (
     <aside className="details-panel" aria-label="Entry inspector">
       <div className="panel-header"><h2>Inspector</h2><div className="inspector-header-actions">
-        <button id="copyEntry" className="small" disabled={!entry} onClick={copy}><Copy size={13} /> JSON</button>
-        <button className="icon-button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button>
+        <Oui.Button variant="outline" size="sm" id="copyEntry" className="small" disabled={!entry} onClick={copy}><Copy size={13} /> JSON</Oui.Button>
+        <Oui.Button variant="ghost" size="icon" className="icon-button" aria-label="Close inspector" onClick={onClose}><X size={16} /></Oui.Button>
       </div></div>
       {!entry ? <div id="noSelection" className="details-placeholder"><Filter size={25} /><h3>Select an entry</h3><p>Inspect full text and metadata, then include or exclude its fields directly.</p><p className="muted">Use Enter on a focused log row. Arrow keys move between entries.</p></div> : (
         <div id="selectedDetails" className="selected-details">
-          <div className="entry-title"><span className={`severity-badge ${entry.severity}`}>{SeverityLabels[entry.severity]}</span><span>Entry #{entry.id}</span></div>
+          <div className="entry-title"><Oui.Badge variant="outline" className={`severity-badge ${entry.severity}`}>{SeverityLabels[entry.severity]}</Oui.Badge><span>Entry #{entry.id}</span></div>
           <dl className="metadata">
             <dt>Sequence</dt><dd id="detailId">{entry.id}</dd>
             <dt>Captured (UTC)</dt><dd id="detailTime">{entry.timestamp.replace("T", "\n").replace(/(?:\+00:00|Z)$/, " UTC")}</dd>
@@ -54,17 +55,17 @@ export function Inspector({ entry, status, onClose, onCondition, onDraft, onNoti
             <dt>Category</dt><dd id="detailCategory">{(entry.category ?? "Uncategorized").split(".").map((part, index) => <Fragment key={index}>{index > 0 && <><span>.</span><wbr /></>}{part}</Fragment>)}</dd>
             <dt>Line type</dt><dd id="detailPartial">{entry.isPartial ? "Partial / continued chunk" : "Complete line"}</dd>
           </dl>
-          {status && entry.id < status.firstId && <p className="notice warning">This entry expired under the retention limit. Its selected details remain here.</p>}
+          {status && entry.id < status.firstId && <Oui.Alert variant="default" role="status" className="notice warning">This entry expired under the retention limit. Its selected details remain here.</Oui.Alert>}
           <h3>Message</h3>
           <pre id="detailMessage">{entry.message}</pre>
           <h3>Quick filters</h3>
           <div className="entry-filter-actions">
-            <button id="includeMessage" onClick={() => filter("include", "message")}><PlusCircle size={13} /> Include text…</button>
-            <button id="excludeMessage" onClick={() => filter("exclude", "message")}><MinusCircle size={13} /> Exclude pattern…</button>
-            <button id="includeCategory" aria-label="Include category" disabled={!entry.category} onClick={() => filter("include", "category")}><PlusCircle size={13} /> Category</button>
-            <button id="excludeCategory" aria-label="Exclude category" disabled={!entry.category} onClick={() => filter("exclude", "category")}><MinusCircle size={13} /> Category</button>
-            <button id="includeLevel" aria-label="Include level" onClick={() => filter("include", "level")}><PlusCircle size={13} /> Level</button>
-            <button id="excludeLevel" aria-label="Exclude level" onClick={() => filter("exclude", "level")}><MinusCircle size={13} /> Level</button>
+            <Oui.Button variant="outline" size="sm" id="includeMessage" onClick={() => filter("include", "message")}><PlusCircle size={13} /> Include text…</Oui.Button>
+            <Oui.Button variant="outline" size="sm" id="excludeMessage" onClick={() => filter("exclude", "message")}><MinusCircle size={13} /> Exclude pattern…</Oui.Button>
+            <Oui.Button variant="outline" size="sm" id="includeCategory" aria-label="Include category" disabled={!entry.category} onClick={() => filter("include", "category")}><PlusCircle size={13} /> Category</Oui.Button>
+            <Oui.Button variant="outline" size="sm" id="excludeCategory" aria-label="Exclude category" disabled={!entry.category} onClick={() => filter("exclude", "category")}><MinusCircle size={13} /> Category</Oui.Button>
+            <Oui.Button variant="outline" size="sm" id="includeLevel" aria-label="Include level" onClick={() => filter("include", "level")}><PlusCircle size={13} /> Level</Oui.Button>
+            <Oui.Button variant="outline" size="sm" id="excludeLevel" aria-label="Exclude level" onClick={() => filter("exclude", "level")}><MinusCircle size={13} /> Level</Oui.Button>
           </div>
           <p className="muted inspector-note">Full history stays on disk. Applying a filter never deletes a log.</p>
         </div>

@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const lock = JSON.parse(await readFile(resolve(root, "package-lock.json"), "utf8"));
+const bundled = JSON.parse(await readFile(resolve(root, "dist/bundled-dependencies.json"), "utf8"));
 const notices = ["Log Studio frontend: third-party licenses", "Dependencies are bundled locally. No external resources are loaded at runtime.", ""];
 notices.push("Visual Studio Code built-in color palettes (MIT)",
   "Source: https://github.com/microsoft/vscode/tree/main/extensions",
@@ -13,8 +14,8 @@ const upstreamLicenses = new Map([
   ["https://github.com/theKashey/react-remove-scroll-bar", ["licenses/react-remove-scroll-bar.txt", "https://github.com/theKashey/react-remove-scroll-bar/blob/master/LICENSE"]]
 ]);
 
-for (const [path, entry] of Object.entries(lock.packages)) {
-  if (!path || entry.dev || !path.includes("node_modules/")) continue;
+for (const path of bundled) {
+  if (!lock.packages[path]) throw new Error(`Bundled dependency ${path} is missing from the lockfile.`);
   const directory = resolve(root, path);
   const metadata = JSON.parse(await readFile(resolve(directory, "package.json"), "utf8"));
   notices.push(`${metadata.name} ${metadata.version} (${metadata.license ?? "see license below"})`);

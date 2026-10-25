@@ -1,4 +1,5 @@
-import * as Dialog from "@radix-ui/react-dialog";
+import * as Oui from "@opensearch-project/oui";
+
 import { ArrowDown, ArrowUp, Check, Copy, LoaderCircle, Maximize2, MessageSquare, Minimize2, RotateCcw, Sparkles, SquarePen, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
@@ -173,26 +174,26 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
     <header className="copilot-header">
       <MessageSquare size={19} aria-hidden="true" />
       <div className="copilot-heading">
-        <Dialog.Title>Ask Copilot about logs</Dialog.Title>
+        <Oui.DialogTitle>Ask Copilot about logs</Oui.DialogTitle>
         <p title={status?.applicationName}>{status?.applicationName ?? "Selected session"}</p>
       </div>
-      <button className="icon-button ghost-button" disabled={busy || !historyLoaded || (!messages.length && !question && !error)} aria-label="New chat" title="New chat"
+      <Oui.Button variant="ghost" size="icon" className="icon-button ghost-button" disabled={busy || !historyLoaded || (!messages.length && !question && !error)} aria-label="New chat" title="New chat"
         onClick={() => { void newChat(); }}>
         <SquarePen size={17} />
-      </button>
-      <button ref={expandButton} className="icon-button ghost-button" aria-label={expanded ? "Restore Copilot chat" : "Expand Copilot chat"}
+      </Oui.Button>
+      <Oui.Button variant="ghost" size="icon" ref={expandButton} className="icon-button ghost-button" aria-label={expanded ? "Restore Copilot chat" : "Expand Copilot chat"}
         title={expanded ? "Restore chat" : "Expand chat"} onClick={() => setExpanded(value => !value)}>
         {expanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
-      </button>
-      <button className="icon-button ghost-button" disabled={busy} aria-label="Close Copilot chat" title="Close chat" onClick={close}><X size={17} /></button>
+      </Oui.Button>
+      <Oui.Button variant="ghost" size="icon" className="icon-button ghost-button" disabled={busy} aria-label="Close Copilot chat" title="Close chat" onClick={close}><X size={17} /></Oui.Button>
     </header>
     <div className="copilot-content">
       {!messages.length && <div className="copilot-empty">
         <Sparkles size={26} aria-hidden="true" />
         <h3>Find the story in your logs</h3>
         <div className="copilot-starters">
-          {["What caused the errors?", "Summarize this session"].map(prompt => <button type="button" key={prompt} disabled={busy || !historyLoaded || !entryCount}
-            onClick={() => { setQuestion(prompt); questionInput.current?.focus(); }}>{prompt}<ArrowUp size={13} aria-hidden="true" /></button>)}
+          {["What caused the errors?", "Summarize this session"].map(prompt => <Oui.Button variant="outline" size="sm" type="button" key={prompt} disabled={busy || !historyLoaded || !entryCount}
+            onClick={() => { setQuestion(prompt); questionInput.current?.focus(); }}>{prompt}<ArrowUp size={13} aria-hidden="true" /></Oui.Button>)}
         </div>
       </div>}
       <div ref={attachConversation} className="copilot-messages" role="log" aria-label="Copilot conversation" aria-live="polite"
@@ -215,8 +216,8 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
           {message.role === "user" ? <p>{message.content}</p> : <>
             <div className="copilot-markdown"><Markdown remarkPlugins={MarkdownPlugins} rehypePlugins={HighlightPlugins}
               components={{ img: ({ alt }) => <span>{alt || "Image omitted"}</span>, a: ({ children, href }) => <a href={href} target="_blank" rel="noreferrer noopener">{children}</a> }}>{message.content}</Markdown></div>
-            <button className="ghost-button copilot-copy" type="button" aria-label={copied === index ? "Answer copied" : "Copy answer"}
-              onClick={() => { void copyAnswer(message.content, index); }}>{copied === index ? <Check size={13} /> : <Copy size={13} />}{copied === index ? "Copied" : "Copy"}</button>
+            <Oui.Button variant="ghost" size="sm" className="ghost-button copilot-copy" type="button" aria-label={copied === index ? "Answer copied" : "Copy answer"}
+              onClick={() => { void copyAnswer(message.content, index); }}>{copied === index ? <Check size={13} /> : <Copy size={13} />}{copied === index ? "Copied" : "Copy"}</Oui.Button>
           </>}
         </div>)}
         {busy && <div className="copilot-message assistant">
@@ -225,18 +226,18 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
           <div className="copilot-thinking" role="status"><LoaderCircle size={14} aria-hidden="true" />{streamedAnswer ? "Writing…" : "Thinking…"}</div>
         </div>}
       </div>
-      {!following && messages.length > 0 && <button type="button" className="copilot-jump" onClick={() => {
+      {!following && messages.length > 0 && <Oui.Button variant="outline" size="sm" type="button" className="copilot-jump" onClick={() => {
         followMessages.current = true; setFollowing(true);
         if (conversation.current) conversation.current.scrollTop = conversation.current.scrollHeight;
-      }}><ArrowDown size={13} />Latest message</button>}
-      {error && <div className="notice danger" role="alert"><span>{error}</span>{!connection && !preparing &&
-        <button type="button" aria-label="Retry Copilot setup" onClick={() => { setupRequest.current = null; setSetupAttempt(value => value + 1); }}><RotateCcw size={14} />Retry</button>}</div>}
-      {copyError && <p className="notice danger" role="alert">{copyError}</p>}
-      {historyError && <div className="notice danger" role="alert"><span>{historyError}</span>
-        <button type="button" aria-label="Retry chat history" onClick={() => setHistoryAttempt(value => value + 1)}><RotateCcw size={14} />Retry</button></div>}
+      }}><ArrowDown size={13} />Latest message</Oui.Button>}
+      {error && <Oui.Alert variant="destructive" className="notice danger" role="alert"><span>{error}</span>{!connection && !preparing &&
+        <Oui.Button variant="outline" size="sm" type="button" aria-label="Retry Copilot setup" onClick={() => { setupRequest.current = null; setSetupAttempt(value => value + 1); }}><RotateCcw size={14} />Retry</Oui.Button>}</Oui.Alert>}
+      {copyError && <Oui.Alert variant="destructive" className="notice danger" role="alert">{copyError}</Oui.Alert>}
+      {historyError && <Oui.Alert variant="destructive" className="notice danger" role="alert"><span>{historyError}</span>
+        <Oui.Button variant="outline" size="sm" type="button" aria-label="Retry chat history" onClick={() => setHistoryAttempt(value => value + 1)}><RotateCcw size={14} />Retry</Oui.Button></Oui.Alert>}
       <form className="copilot-composer" onSubmit={event => { event.preventDefault(); void submit(); }}>
         <label className="visually-hidden" htmlFor="copilotQuestion">Message Copilot</label>
-        <textarea ref={resizeQuestion} id="copilotQuestion" value={question} maxLength={MaximumChatQuestionLength} disabled={busy}
+        <Oui.Textarea ref={resizeQuestion} id="copilotQuestion" value={question} maxLength={MaximumChatQuestionLength} disabled={busy}
           rows={2} placeholder="Ask about this session…" onChange={event => setQuestion(event.target.value)}
           onKeyDown={event => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
@@ -253,8 +254,8 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
               choices={[{ value: "", label: "Default reasoning" }, ...selectedModel.reasoningEfforts.map(value => ({ value, label: value.charAt(0).toUpperCase() + value.slice(1) }))]}
               onChange={setReasoningEffort} />}
           </div>
-          <button type="submit" className="icon-button primary" aria-label="Send message" title="Send message"
-            disabled={busy || !historyLoaded || !connection || !question.trim() || !entryCount}><ArrowUp size={18} /></button>
+          <Oui.Button variant="default" size="icon" type="submit" className="icon-button primary" aria-label="Send message" title="Send message"
+            disabled={busy || !historyLoaded || !connection || !question.trim() || !entryCount}><ArrowUp size={18} /></Oui.Button>
         </div>
       </form>
       <div className="copilot-footer" aria-live="polite">{!historyLoaded ? historyError ? "Chat history is unavailable. Retry to continue." : "Loading chat history…" :
@@ -263,14 +264,14 @@ export function CopilotChatPanel({ status, sessionId, hidden = false, onClose, r
     </div>
   </aside>;
 
-  return <Dialog.Root open={expanded && !hidden} onOpenChange={setExpanded}>
-    {expanded && !hidden ? <Dialog.Portal>
-      <Dialog.Overlay className="dialog-overlay" />
-      <Dialog.Content asChild aria-modal="true" aria-describedby={undefined}
+  return <Oui.Dialog open={expanded && !hidden} onOpenChange={setExpanded}>
+    {expanded && !hidden ?
+
+      <Oui.DialogContent className="copilot-modal" showCloseButton={false} aria-modal="true" aria-describedby={undefined}
         onOpenAutoFocus={event => { event.preventDefault(); (busy ? expandButton.current : questionInput.current)?.focus(); }}
         onCloseAutoFocus={event => { event.preventDefault(); if (panel.current) expandButton.current?.focus(); else returnFocus(); }}>
         {chatPanel}
-      </Dialog.Content>
-    </Dialog.Portal> : chatPanel}
-  </Dialog.Root>;
+      </Oui.DialogContent>
+     : chatPanel}
+  </Oui.Dialog>;
 }

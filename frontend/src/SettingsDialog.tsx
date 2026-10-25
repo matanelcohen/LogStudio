@@ -1,4 +1,5 @@
-import * as Dialog from "@radix-ui/react-dialog";
+import * as Oui from "@opensearch-project/oui";
+
 import { RotateCcw, Settings, X } from "lucide-react";
 import { SelectControl } from "./ui";
 import { AppearanceChoices, AppearanceOptions, type Appearance } from "./themes";
@@ -21,17 +22,16 @@ export function SettingsDialog({ open, settings, saved, error, appearance, updat
   returnFocus(): void;
 }) {
   return (
-    <Dialog.Root open={open} onOpenChange={open => { if (!open) onClose(); }}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="settings-dialog" onCloseAutoFocus={event => { event.preventDefault(); returnFocus(); }}>
+    <Oui.Dialog open={open} onOpenChange={open => { if (!open) onClose(); }}>
+
+        <Oui.DialogContent showCloseButton={false} className="settings-dialog" onCloseAutoFocus={event => { event.preventDefault(); returnFocus(); }}>
           <div className="dialog-titlebar">
             <div className="dialog-icon"><Settings size={20} /></div>
             <div>
-              <Dialog.Title>Settings</Dialog.Title>
-              <Dialog.Description>Customize the interface and log text. Changes apply immediately and save automatically.</Dialog.Description>
+              <Oui.DialogTitle>Settings</Oui.DialogTitle>
+              <Oui.DialogDescription>Customize the interface and log text. Changes apply immediately and save automatically.</Oui.DialogDescription>
             </div>
-            <Dialog.Close className="icon-button" aria-label="Close settings"><X size={18} /></Dialog.Close>
+            <Oui.DialogClose asChild><Oui.Button variant="ghost" size="sm" className="icon-button" aria-label="Close settings"><X size={18} /></Oui.Button></Oui.DialogClose>
           </div>
           <div className="settings-content">
             <label className="settings-row" htmlFor="settingsAppearance"><span>Color theme</span>
@@ -71,17 +71,17 @@ export function SettingsDialog({ open, settings, saved, error, appearance, updat
               <pre className="settings-log-preview" aria-label="Log font preview">{"12:34:56  INFO  Application started\n12:34:57  WARN  Retrying request…"}</pre>
             </fieldset>
             <p className="muted">Fonts use local fallbacks; nothing is downloaded. Preferences are saved inside Log Studio on this device, across restarts and server ports. Desktop window size is saved automatically too.</p>
-            <p className={error ? "notice warning" : "muted"} role="status">{error
-              ? `${error} Changes work in this tab but have not been saved.`
-              : saved ? "All settings saved." : "Loading or saving settings..."}</p>
+            {error ? <Oui.Alert className="notice warning" role="status">
+              <Oui.AlertDescription>{error} Changes work in this tab but have not been saved.</Oui.AlertDescription>
+            </Oui.Alert> : <p className="muted" role="status">{saved ? "All settings saved." : "Loading or saving settings..."}</p>}
             <AppUpdates updates={updates} />
             <div className="dialog-footer">
-              <button onClick={onReset}><RotateCcw size={14} /> Reset typography</button>
-              <Dialog.Close className="primary">Done</Dialog.Close>
+              <Oui.Button variant="outline" size="sm" onClick={onReset}><RotateCcw size={14} /> Reset typography</Oui.Button>
+              <Oui.DialogClose asChild><Oui.Button variant="default" size="sm">Done</Oui.Button></Oui.DialogClose>
             </div>
           </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+        </Oui.DialogContent>
+
+    </Oui.Dialog>
   );
 }
