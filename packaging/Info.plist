@@ -10,6 +10,8 @@
   <string>Log Studio</string>
   <key>CFBundleExecutable</key>
   <string>LogStudio.Desktop</string>
+  <key>CFBundleIconFile</key>
+  <string>logstudio.icns</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>

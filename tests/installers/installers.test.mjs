@@ -24,6 +24,9 @@ test("PowerShell help runs without installing anything", () => {
   assert.match(result.stdout, /-Local/);
   assert.match(result.stdout, /-Offline/);
   assert.match(result.stdout, /-NuGetSource/);
+  assert.match(result.stdout, /both the CLI and desktop/);
+  assert.match(result.stdout, /-Cli/);
+  assert.match(result.stdout, /-Desktop/);
 });
 
 test("PowerShell rejects contradictory restore modes before invoking tools", () => {
@@ -44,6 +47,9 @@ test("Bash help runs without installing anything", { skip: windows }, () => {
   assert.match(result.stdout, /--local/);
   assert.match(result.stdout, /--offline/);
   assert.match(result.stdout, /--nuget-source/);
+  assert.match(result.stdout, /both the CLI and desktop/);
+  assert.match(result.stdout, /--cli/);
+  assert.match(result.stdout, /--desktop/);
 });
 
 test("Bash rejects a missing feed argument without invoking tools", { skip: windows }, () => {
@@ -56,4 +62,15 @@ test("Bash rejects unknown options without invoking tools", { skip: windows }, (
   const result = run("bash", [bashInstaller, "--not-an-installer-option"]);
   assert.equal(result.status, 2);
   assert.match(result.stderr, /Unknown option/);
+});
+
+test("source installers reject contradictory application selections before invoking tools", () => {
+  const ps = run("pwsh", ["-NoProfile", "-File", powershellInstaller, "-Cli", "-Desktop"]);
+  assert.notEqual(ps.status, 0);
+  assert.match(ps.stderr, /Choose only one of -Cli and -Desktop/);
+  if (!windows) {
+    const bash = run("bash", [bashInstaller, "--cli", "--desktop"]);
+    assert.equal(bash.status, 2);
+    assert.match(bash.stderr, /Choose only one of --cli and --desktop/);
+  }
 });

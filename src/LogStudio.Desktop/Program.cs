@@ -102,6 +102,7 @@ internal static class Program
         using IDisposable? termination = OperatingSystem.IsMacOS() ? new MacApplicationLifetime(shutdown) : null;
         new PhotinoWindow()
             .SetTitle("Log Studio")
+            .SetIconFile(Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "logstudio.ico" : "logstudio.png"))
             .SetUseOsDefaultSize(false)
             .SetSize(1280, 800)
             .SetMinSize(800, 500)

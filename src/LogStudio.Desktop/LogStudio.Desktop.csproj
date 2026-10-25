@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <ApplicationIcon>../../packaging/logstudio.ico</ApplicationIcon>
     <OutputType Condition="$(RuntimeIdentifier.StartsWith('win-')) or ('$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Windows')))">WinExe</OutputType>
   </PropertyGroup>
   <ItemGroup>
@@ -8,6 +9,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="../../packaging/logstudio.png" Link="logstudio.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../packaging/logstudio.ico" Link="logstudio.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../packaging/logstudio.icns" Link="logstudio.icns" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <PackageReference Include="Photino.NET" Version="4.0.16" />
     <InternalsVisibleTo Include="LogStudio.Tests" />
     <None Update="dependency-notices.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
