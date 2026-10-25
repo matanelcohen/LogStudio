@@ -379,6 +379,17 @@ verification on a Mac. Publication requires all six platform/architecture archiv
 Each target has separate CLI and desktop archives, and the default installer downloads both.
 Prereleases do not replace GitHub's latest stable release used by the default installer.
 
+To update all version references and publish the branch and matching tag together, run
+`./bump-version.sh --push <version>` (macOS / Linux) or
+`.\bump-version.ps1 -Version <version> -Push` (PowerShell), substituting the new version.
+The script commits only the versioned files with the message `Bump version to <version>`,
+pushes the current branch to its upstream remote (or `origin` if no upstream is configured),
+then creates and pushes the exact, unprefixed version tag on that commit.
+Existing staged changes or edits to versioned files must be committed or stashed first.
+Push mode stops on Git errors and never overwrites an existing tag.
+Without the push option, the script only updates files; `--tag` / `-Tag` additionally
+creates or updates a local tag on the existing `HEAD`, without committing or pushing.
+
 Desktop icon assets live in `packaging/logstudio.svg` (editable source), `.png`, `.ico`, and
 `.icns`. To regenerate the committed native formats after editing the SVG, install the
 developer tool `rsvg-convert` (librsvg), then run `node packaging/generate-icons.mjs`.

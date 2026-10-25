@@ -4,19 +4,22 @@ param(
   [Parameter(Position = 0)]
   [string]$Version,
   [switch]$Tag,
+  [switch]$Push,
   [switch]$Help
 )
 
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
 
 function Show-Usage {
   @"
 Align the version across Directory.Build.props, frontend, samples, and documentation.
 
-Usage: .\bump-version.ps1 [-Version] <version> [-Tag]
+Usage: .\bump-version.ps1 [-Version] <version> [-Tag] [-Push]
 
   -Version <version> The new version (e.g. 1.0.2; no v prefix).
   -Tag               Create or update the git tag (e.g. 1.0.2) pointing to HEAD.
+  -Push              Commit the version bump, push the branch, then create and push the tag.
   -Help              Show this help.
 
 This script updates:
@@ -55,6 +58,13 @@ $ReadmeFile = Join-Path $ProjectRoot "README.md"
 $GuideFile = Join-Path $ProjectRoot "docs/guide.md"
 $LibraryProject = Join-Path $ProjectRoot "src/LogStudio/LogStudio.csproj"
 
+function Invoke-Git([string[]]$Arguments) {
+  & git -C $ProjectRoot @Arguments
+  if ($LASTEXITCODE -ne 0) {
+    throw "Git failed with exit code ${LASTEXITCODE}: git $($Arguments -join ' ')"
+  }
+}
+
 if (-not (Test-Path $PropsFile)) {
   [Console]::Error.WriteLine("Directory.Build.props not found at $PropsFile")
   exit 1
@@ -66,6 +76,29 @@ if ($propsContent -match '<Version>([^<]+)</Version>') {
 } else {
   [Console]::Error.WriteLine("Could not determine current version from $PropsFile")
   exit 1
+}
+
+$VersionFiles = @(
+  "Directory.Build.props", "frontend/package.json", "frontend/package-lock.json",
+  "samples/PackageConsumer/PackageConsumer.csproj", "README.md", "docs/guide.md"
+) | Where-Object { Test-Path (Join-Path $ProjectRoot $_) }
+
+if ($Push) {
+  $Branch = Invoke-Git @("symbolic-ref", "--quiet", "--short", "HEAD")
+  if (Invoke-Git @("diff", "--cached", "--name-only")) {
+    throw "Commit or unstage existing staged changes before using -Push."
+  }
+  if (Invoke-Git (@("status", "--porcelain", "--") + $VersionFiles)) {
+    throw "Commit or stash changes to versioned files before using -Push."
+  }
+  if (Invoke-Git @("tag", "--list", $Version)) {
+    throw "Git tag $Version already exists; -Push will not overwrite it."
+  }
+  $PushRemote = Invoke-Git @("for-each-ref", "--format=%(upstream:remotename)", "refs/heads/$Branch")
+  if (-not $PushRemote) {
+    $PushRemote = "origin"
+  }
+  Invoke-Git @("remote", "get-url", $PushRemote) | Out-Null
 }
 
 Write-Host "Updating version from $CurrentVersion to $Version..."
@@ -113,15 +146,17 @@ foreach ($DocumentationFile in @($ReadmeFile, $GuideFile)) {
   }
 }
 
-# 6. Optional git tag
-if ($Tag) {
-  & git tag -f $Version
-  if ($LASTEXITCODE -eq 0) {
-    $shortSha = (& git rev-parse --short HEAD).Trim()
-    Write-Host "Updated git tag $Version -> $shortSha"
-  } else {
-    Write-Warning "Could not update git tag $Version"
-  }
+# 6. Optional commit, push, and git tag
+if ($Push) {
+  Invoke-Git (@("add", "--") + $VersionFiles)
+  Invoke-Git @("commit", "-m", "Bump version to $Version")
+  Invoke-Git @("push", "--set-upstream", $PushRemote, $Branch)
+  Invoke-Git @("tag", $Version)
+  Invoke-Git @("push", $PushRemote, "refs/tags/$Version")
+} elseif ($Tag) {
+  Invoke-Git @("tag", "-f", $Version)
+  $shortSha = (Invoke-Git @("rev-parse", "--short", "HEAD")).Trim()
+  Write-Host "Updated git tag $Version -> $shortSha"
 }
 
 Write-Host "`nSuccessfully bumped version to $Version"
@@ -132,6 +167,6 @@ Write-Host "  - frontend/package-lock.json"
 Write-Host "  - samples/PackageConsumer/PackageConsumer.csproj"
 Write-Host "  - README.md"
 Write-Host "  - docs/guide.md"
-if ($Tag) {
+if ($Tag -or $Push) {
   Write-Host "  - git tag $Version"
 }

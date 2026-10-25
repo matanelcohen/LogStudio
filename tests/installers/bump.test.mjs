@@ -10,6 +10,10 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 const bashBump = fileURLToPath(new URL("../../bump-version.sh", import.meta.url));
 const powershellBump = fileURLToPath(new URL("../../bump-version.ps1", import.meta.url));
 const windows = process.platform === "win32";
+const versionFiles = [
+  "Directory.Build.props", "frontend/package.json", "frontend/package-lock.json",
+  "samples/PackageConsumer/PackageConsumer.csproj", "README.md", "docs/guide.md"
+];
 
 function run(command, args, cwd) {
   const result = spawnSync(command, args, {
@@ -47,11 +51,35 @@ function fixture(t, source) {
   return { dir, localBump, propsPath, pkgPath, lockPath, consumerPath, readmePath, guidePath };
 }
 
+function git(cwd, ...args) {
+  const result = run("git", args, cwd);
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
+}
+
+function gitFixture(t, source) {
+  const f = fixture(t, source);
+  const remote = mkdtempSync(join(tmpdir(), "bump-remote-"));
+  t.after(() => rmSync(remote, { recursive: true, force: true }));
+  git(remote, "init", "--bare", "--quiet");
+  git(f.dir, "init", "--quiet", "--initial-branch=release-test");
+  git(f.dir, "config", "user.name", "Contract Test");
+  git(f.dir, "config", "user.email", "contract@example.invalid");
+  git(f.dir, "config", "commit.gpgsign", "false");
+  git(f.dir, "config", "tag.gpgsign", "false");
+  writeFileSync(join(f.dir, "unrelated.txt"), "original\n");
+  git(f.dir, "add", ".");
+  git(f.dir, "commit", "--quiet", "-m", "fixture");
+  git(f.dir, "remote", "add", "origin", remote);
+  return { ...f, remote, initialHead: git(f.dir, "rev-parse", "HEAD") };
+}
+
 test("bump-version.sh help runs and displays usage", { skip: windows }, () => {
   const result = run("bash", [bashBump, "--help"]);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Usage: \.\/bump-version\.sh/);
   assert.match(result.stdout, /--tag/);
+  assert.match(result.stdout, /--push/);
 });
 
 test("bump-version.sh rejects missing version argument", { skip: windows }, () => {
@@ -77,6 +105,7 @@ test("bump-version.ps1 help runs and displays usage", () => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Usage: \.\\bump-version\.ps1/);
   assert.match(result.stdout, /-Tag/);
+  assert.match(result.stdout, /-Push/);
 });
 
 test("bump-version.ps1 rejects missing version argument", () => {
@@ -133,9 +162,9 @@ test("bump-version.ps1 updates version across repository files", (t) => {
   }
 });
 
-for (const [source, command, options, tagOption] of [
-  [bashBump, "bash", [], "--tag"],
-  [powershellBump, "pwsh", ["-NoProfile", "-File"], "-Tag"]
+for (const [source, command, options, tagOption, pushOption] of [
+  [bashBump, "bash", [], "--tag", "--push"],
+  [powershellBump, "pwsh", ["-NoProfile", "-File"], "-Tag", "-Push"]
 ]) {
   const skip = command === "bash" && windows;
 
@@ -168,6 +197,114 @@ for (const [source, command, options, tagOption] of [
       assert.equal(JSON.parse(readFileSync(f.pkgPath, "utf8")).version, version);
       assert.match(result.stdout, new RegExp(`Successfully bumped version to ${version.replaceAll(".", "\\.")}`));
       assert.doesNotMatch(result.stdout, /\bv[0-9]+\./);
+    });
+  }
+
+  for (const version of ["1.2.3", "1.2.4-rc.1"]) {
+    test(`${basename(source)} commits and pushes ${version} before publishing its tag`, { skip }, (t) => {
+      const f = gitFixture(t, source);
+      const extraOptions = version.includes("-") ? [tagOption] : [];
+      writeFileSync(join(f.dir, "unrelated.txt"), "uncommitted\n");
+      writeFileSync(join(f.dir, "untracked.txt"), "untracked\n");
+      git(f.dir, "tag", "unrelated-tag");
+      writeFileSync(join(f.remote, "hooks", "pre-receive"), `#!/bin/sh
+while read old new ref; do
+  if [ "$ref" = "refs/tags/${version}" ]; then
+    branch=$(git rev-parse --verify refs/heads/release-test) || exit 1
+    [ "$branch" = "$new" ] || exit 1
+  fi
+  printf '%s\\n' "$ref" >> received-refs
+done
+`, { mode: 0o755 });
+
+      const result = run(command, [...options, f.localBump, pushOption, version, ...extraOptions], join(f.dir, "docs"));
+      assert.equal(result.status, 0, result.stderr);
+      const head = git(f.dir, "rev-parse", "HEAD");
+      assert.notEqual(head, f.initialHead);
+      assert.equal(git(f.dir, "log", "-1", "--format=%s"), `Bump version to ${version}`);
+      assert.deepEqual(git(f.dir, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD").split("\n").sort(), [...versionFiles].sort());
+      assert.equal(git(f.dir, "--git-dir", f.remote, "rev-parse", "refs/heads/release-test"), head);
+      assert.equal(git(f.dir, "--git-dir", f.remote, "rev-parse", `refs/tags/${version}`), head);
+      assert.equal(git(f.dir, "rev-parse", `refs/tags/${version}`), head);
+      assert.equal(JSON.parse(git(f.dir, "--git-dir", f.remote, "show", `${version}:frontend/package.json`)).version, version);
+      assert.equal(git(f.dir, "--git-dir", f.remote, "tag", "--list"), version);
+      assert.deepEqual(readFileSync(join(f.remote, "received-refs"), "utf8").trim().split("\n"), ["refs/heads/release-test", `refs/tags/${version}`]);
+      assert.equal(git(f.dir, "rev-parse", "--abbrev-ref", "@{upstream}"), "origin/release-test");
+      assert.match(git(f.dir, "status", "--porcelain"), /M unrelated\.txt/);
+      assert.match(git(f.dir, "status", "--porcelain"), /\?\? untracked\.txt/);
+      assert.match(result.stdout, /Successfully bumped version/);
+    });
+  }
+
+  test(`${basename(source)} pushes to the configured upstream remote`, { skip }, (t) => {
+    const f = gitFixture(t, source);
+    git(f.dir, "remote", "rename", "origin", "releases");
+    git(f.dir, "push", "--quiet", "--set-upstream", "releases", "release-test");
+    const result = run(command, [...options, f.localBump, "1.2.3", pushOption], f.dir);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(git(f.dir, "--git-dir", f.remote, "rev-parse", "refs/tags/1.2.3"), git(f.dir, "rev-parse", "HEAD"));
+    assert.equal(git(f.dir, "rev-parse", "--abbrev-ref", "@{upstream}"), "releases/release-test");
+  });
+
+  test(`${basename(source)} does not commit or push without the push option`, { skip }, (t) => {
+    const f = gitFixture(t, source);
+    const result = run(command, [...options, f.localBump, "1.2.3"], f.dir);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(git(f.dir, "rev-parse", "HEAD"), f.initialHead);
+    assert.equal(git(f.dir, "tag", "--list"), "");
+    assert.equal(git(f.dir, "--git-dir", f.remote, "for-each-ref", "--format=%(refname)"), "");
+  });
+
+  for (const failure of ["staged changes", "version edits", "existing tag", "detached HEAD", "missing remote"]) {
+    test(`${basename(source)} rejects push with ${failure} before modifying version files`, { skip }, (t) => {
+      const f = gitFixture(t, source);
+      if (failure === "staged changes") {
+        writeFileSync(join(f.dir, "unrelated.txt"), "staged\n");
+        git(f.dir, "add", "unrelated.txt");
+      } else if (failure === "version edits") {
+        writeFileSync(f.readmePath, "uncommitted documentation\n");
+      } else if (failure === "existing tag") {
+        git(f.dir, "tag", "1.2.3");
+      } else if (failure === "detached HEAD") {
+        git(f.dir, "checkout", "--quiet", "--detach");
+      } else {
+        git(f.dir, "remote", "remove", "origin");
+      }
+      const original = versionFiles.map((path) => readFileSync(join(f.dir, path), "utf8"));
+      const result = run(command, [...options, f.localBump, "1.2.3", pushOption, tagOption], f.dir);
+      assert.notEqual(result.status, 0, result.stdout);
+      assert.ok(result.stderr.trim(), "failure must be reported");
+      assert.doesNotMatch(result.stdout, /Successfully bumped version/);
+      assert.deepEqual(versionFiles.map((path) => readFileSync(join(f.dir, path), "utf8")), original);
+      assert.equal(git(f.dir, "rev-parse", "HEAD"), f.initialHead);
+      assert.equal(git(f.dir, "tag", "--list"), failure === "existing tag" ? "1.2.3" : "");
+    });
+  }
+
+  for (const failure of ["commit", "branch push", "tag push"]) {
+    test(`${basename(source)} stops when ${failure} fails`, { skip }, (t) => {
+      const f = gitFixture(t, source);
+      if (failure === "commit") {
+        writeFileSync(join(f.dir, ".git", "hooks", "pre-commit"), "#!/bin/sh\necho 'Commit rejected' >&2\nexit 1\n", { mode: 0o755 });
+      } else {
+        writeFileSync(join(f.remote, "hooks", "pre-receive"), `#!/bin/sh
+while read old new ref; do
+  case "$ref" in
+    ${failure === "branch push" ? "refs/heads/*" : "refs/tags/*"}) echo 'Push rejected' >&2; exit 1 ;;
+  esac
+done
+`, { mode: 0o755 });
+      }
+      const result = run(command, [...options, f.localBump, "1.2.3", pushOption], f.dir);
+      assert.notEqual(result.status, 0, result.stdout);
+      assert.match(result.stderr, /rejected/i);
+      assert.doesNotMatch(result.stdout, /Successfully bumped version/);
+      assert.equal(git(f.dir, "--git-dir", f.remote, "tag", "--list"), "");
+      assert.equal(git(f.dir, "tag", "--list"), failure === "tag push" ? "1.2.3" : "");
+      assert.equal(git(f.dir, "--git-dir", f.remote, "for-each-ref", "--format=%(refname)", "refs/heads"), failure === "tag push" ? "refs/heads/release-test" : "");
+      if (failure === "commit") {
+        assert.equal(git(f.dir, "rev-parse", "HEAD"), f.initialHead);
+      }
     });
   }
 }
