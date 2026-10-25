@@ -1,8 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { appSettings } from "./api";
 import { DefaultPreferences, readPreferences } from "./preferences";
+import { defaultQuery, sessionFilters } from "./model";
 
 describe("preferences API", () => {
+  it("reads reusable saved searches and migrates preferences without presets", () => {
+    const filters = sessionFilters({ ...defaultQuery(), search: "error", since: "2026-10-11T18:00:00Z" });
+    const searches = [{ name: "Errors", filters }];
+    expect(readPreferences({ ...DefaultPreferences, savedSearches: searches }).savedSearches).toEqual(searches);
+    const { savedSearches: _, ...legacy } = DefaultPreferences;
+    expect(readPreferences(legacy).savedSearches).toEqual([]);
+    expect(() => readPreferences({ ...DefaultPreferences, savedSearches: [...searches, { name: "errors", filters }] })).toThrow();
+    expect(() => readPreferences({ ...DefaultPreferences, savedSearches: [{ name: "Bad", filters: { ...filters, until: "invalid" } }] })).toThrow();
+  });
   it("reads settings and saves only changed fields with the explicit action and keepalive", async () => {
     const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ preferences: DefaultPreferences, hasPreferences: true }) });
     vi.stubGlobal("fetch", fetch);

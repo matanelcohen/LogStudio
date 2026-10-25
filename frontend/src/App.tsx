@@ -6,6 +6,7 @@ import { ConditionDialog } from "./ConditionDialog";
 import { ClearHistoryDialog } from "./ClearHistoryDialog";
 import { SessionsDialog } from "./SessionsDialog";
 import { SessionImportDialog } from "./SessionImportDialog";
+import { SavedSearchesDialog } from "./SavedSearchesDialog";
 import { CopilotChatPanel } from "./CopilotChatPanel";
 import { SettingsDialog } from "./SettingsDialog";
 import { TerminalInput } from "./TerminalInput";
@@ -45,6 +46,8 @@ export default function App() {
   const [importOpen, setImportOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [savedSearchesOpen, setSavedSearchesOpen] = useState(false);
+  const savedSearchesOpener = useRef<HTMLElement | null>(null);
   const [applicationListening, setApplicationListening] = useState(false);
   const filters = useSessionFilters(
     filters => setQuery(query => query.sessionId ? query : { ...query, ...filters }),
@@ -256,6 +259,7 @@ export default function App() {
             history.refresh(); live.reconnect();
           }} />}
           <QueryBar query={query} page={activePage} loading={history.loading} error={history.error} searchRef={searchRef}
+            onSavedSearches={() => { savedSearchesOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setSavedSearchesOpen(true); }}
             maximumId={pause?.maximumId ?? null} onChange={changeQuery} onEdit={condition => openEditor(condition ?? null)}
             onReset={() => { changeQuery({ ...defaultQuery(), pageSize: query.pageSize, sessionId: query.sessionId }, true); setNotice(null); }}
             onNotice={message => setNotice({ message, tone: "info" })} />
@@ -289,7 +293,7 @@ export default function App() {
             onWrap={wrap => updateExplorer({ wrap })}
             onClear={() => { changeQuery({ ...query, dismissedThrough: status?.lastId ?? 0 }); setSelected(null); setNotice({ tone: "info", message: "Existing entries are hidden in this tab only. Reset restores disk history." }); }}
             onRetry={history.refresh} onInspector={() => setInspector(!inspector)} />
-          {inspector && <Inspector entry={visibleSelection} status={status} onClose={() => setInspector(false)}
+          {inspector && <Inspector entry={visibleSelection} entries={activePage?.entries ?? []} status={status} onSelect={setSelected} onClose={() => setInspector(false)}
             onCondition={addCondition} onDraft={openEditor} onNotice={setNotice} />}
           </div>
           </Oui.Card>
@@ -331,6 +335,14 @@ export default function App() {
           onChange={changes => preferences.update({ typography: changes })}
           onReset={() => preferences.update({ typography: { ...DefaultTypography } })} onClose={() => setSettingsOpen(false)}
           returnFocus={() => settingsOpener.current?.focus()} />
+        <SavedSearchesDialog open={savedSearchesOpen} query={query} searches={preferences.settings.savedSearches}
+          saved={preferences.saved} saveError={preferences.error} onRetry={preferences.retry}
+          onChange={savedSearches => preferences.update({ savedSearches })}
+          onApply={filters => changeQuery({ ...query, ...filters, dismissedThrough: 0 }, true)}
+          onClose={() => setSavedSearchesOpen(false)} returnFocus={() => {
+            if (savedSearchesOpener.current?.isConnected) savedSearchesOpener.current.focus();
+            else searchRef.current?.focus();
+          }} />
       </div>
       </div>
     </Oui.TooltipProvider>

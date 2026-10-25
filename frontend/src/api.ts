@@ -1,9 +1,12 @@
 import {
-  ApiRoutes, ClearActionHeader, ClearActionValue, ConditionFields, ConditionModes, ConditionOperators, CopilotChatActionValue, CopilotClearHistoryActionValue, CopilotConnectActionValue, DeleteSessionActionValue, ImportActionValue, importFormat, IncludeModes, MaximumCategorySuggestions, MaximumChatAnswerLength, MaximumChatRequestBytes, MaximumHighlights, MaximumPageSize, PageSize, QueryKeys, readChoice, RenameActionValue, SaveFiltersActionValue, Severities, Streams, UploadContentType, validateConditions, validateImportFile,
+  ApiRoutes, ClearActionHeader, ClearActionValue, CopilotChatActionValue, CopilotClearHistoryActionValue, CopilotConnectActionValue, DeleteSessionActionValue, ImportActionValue, importFormat, MaximumCategorySuggestions, MaximumChatAnswerLength, MaximumChatRequestBytes, MaximumHighlights, MaximumPageSize, PageSize, QueryKeys, RenameActionValue, SaveFiltersActionValue, Severities, Streams, UploadContentType, validateImportFile,
   InputActionValue, MaximumInputLength, SelectApplicationActionValue, type RunningApplication, type RunningApplicationProcess, type RunningApplicationsState,
   type ChatMessage, type ChatOptions, type ChatResponse, type CopilotConnection, type ClearResult, type LogEntry, type LogPage, type SessionFilters, type SessionInfo, type ViewerStatus
 } from "./model";
 import { readPreferences, type PreferencesChanges } from "./preferences";
+import { boolean, count, nullableText, object, text, timestamp } from "./apiValues";
+import { readSessionFilters } from "./sessionFilters";
+export { readSessionFilters } from "./sessionFilters";
 
 export async function appSettings(changes?: PreferencesChanges, signal?: AbortSignal) {
   const response = await fetch("api/settings", changes
@@ -63,42 +66,6 @@ export async function appUpdate(action?: "check-update" | "install-update", vers
     installationUnavailableReason: nullableText(data.installationUnavailableReason, "installation availability"),
     installedVersion: nullableText(data.installedVersion, "installed update")
   };
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function object(value: unknown): Record<string, unknown> {
-  if (!isObject(value))
-    throw new Error("The server returned an invalid object.");
-  return value;
-}
-
-function text(value: unknown, name: string): string {
-  if (typeof value !== "string") throw new Error(`The server returned an invalid ${name}.`);
-  return value;
-}
-
-function nullableText(value: unknown, name: string): string | null {
-  return value === null ? null : text(value, name);
-}
-
-function count(value: unknown, name: string): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
-    throw new Error(`The server returned an invalid ${name}.`);
-  return value;
-}
-
-function boolean(value: unknown, name: string): boolean {
-  if (typeof value !== "boolean") throw new Error(`The server returned an invalid ${name}.`);
-  return value;
-}
-
-function timestamp(value: unknown, name: string): string {
-  const result = text(value, name);
-  if (!Number.isFinite(Date.parse(result))) throw new Error(`The server returned an invalid ${name}.`);
-  return result;
 }
 
 export function readStatus(value: unknown): ViewerStatus {
@@ -279,40 +246,6 @@ export function readSessionInfo(value: unknown): SessionInfo {
     command: nullableText(data.command, "run command"), arguments: data.arguments.map(value => text(value, "argument")),
     workingDirectory: text(data.workingDirectory, "working directory"), isCurrent: boolean(data.isCurrent, "current session"),
     ...(data.filters == null ? {} : { filters: readSessionFilters(data.filters) })
-  };
-}
-
-export function readSessionFilters(value: unknown): SessionFilters {
-  const data = object(value);
-  if (data.levels !== null && (!Array.isArray(data.levels) || data.levels.length > Severities.length))
-    throw new Error("The server returned invalid saved levels.");
-  if (!Array.isArray(data.conditions)) throw new Error("The server returned invalid saved conditions.");
-  const conditions = data.conditions.map(value => {
-    const condition = object(value);
-    return {
-      mode: readChoice(text(condition.mode, "condition mode"), ConditionModes),
-      field: readChoice(text(condition.field, "condition field"), ConditionFields),
-      operator: readChoice(text(condition.operator, "condition operator"), ConditionOperators),
-      value: text(condition.value, "condition value")
-    };
-  });
-  if (validateConditions(conditions)) throw new Error("The server returned invalid saved conditions.");
-  const search = text(data.search, "saved search");
-  const category = text(data.category, "saved category");
-  if (search.length > 1024) throw new Error("The server returned an oversized saved search.");
-  if (category) {
-    const label = nullableText(JSON.parse(category), "saved category");
-    if (label !== null && label.length > 512) throw new Error("The server returned an oversized saved category.");
-  }
-  const timeWindow = count(data.timeWindow, "saved time window");
-  if (![0, 60000, 300000, 900000].includes(timeWindow)) throw new Error("The server returned an invalid saved time window.");
-  return {
-    search, matchCase: boolean(data.matchCase, "saved case setting"),
-    severity: readChoice(text(data.severity, "saved severity"), ["all", "warningPlus", "errorPlus", ...Severities]),
-    levels: data.levels === null ? null : (data.levels as unknown[]).map(value => readChoice(text(value, "saved level"), Severities)),
-    stream: readChoice(text(data.stream, "saved stream"), ["all", ...Streams]),
-    category, timeWindow, conditions,
-    includeMode: readChoice(text(data.includeMode, "saved include mode"), IncludeModes)
   };
 }
 

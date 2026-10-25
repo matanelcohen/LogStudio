@@ -33,8 +33,14 @@ public sealed class SessionTransferTests
         fixture.Viewer.Record("expired");
         fixture.Viewer.Record("retained first", category: "Transfer.Tests", severity: LogSeverity.Warning);
         fixture.Viewer.Record("retained second", LogStream.Stderr, severity: LogSeverity.Error, category: "Transfer.Tests");
+        SessionFilters savedFilters = SessionFiltersTests.Filters() with
+        {
+            TimeWindow = 0,
+            Since = "2026-10-11T18:00:00.123Z",
+            Until = "2026-10-11T18:01:00.456Z",
+        };
         using (HttpResponseMessage filters = await fixture.Action(ViewerConstants.SessionsRoute, ViewerConstants.SaveFiltersAction,
-            JsonSerializer.Serialize(new { filters = SessionFiltersTests.Filters() }, ViewerConstants.JsonOptions)))
+            JsonSerializer.Serialize(new { filters = savedFilters }, ViewerConstants.JsonOptions)))
             filters.EnsureSuccessStatusCode();
         fixture.Viewer.Complete(7);
         SessionInfo original = (await fixture.List()).Single();
@@ -62,7 +68,7 @@ public sealed class SessionTransferTests
         Assert.Equal(original.Command, imported.Command);
         Assert.Equal(original.Arguments, imported.Arguments);
         Assert.Equal(original.WorkingDirectory, imported.WorkingDirectory);
-        SessionFiltersTests.AssertFilters(SessionFiltersTests.Filters(), imported.Filters);
+        SessionFiltersTests.AssertFilters(savedFilters, imported.Filters);
         using LogHistoryReader history = fixture.Catalog.Open(imported.Id);
         LogEntry[] logs = history.ReadEntries().ToArray();
         Assert.Equal(new long[] { 1, 2 }, logs.Select(entry => entry.Id));
@@ -106,6 +112,9 @@ public sealed class SessionTransferTests
         Assert.Equal(5, fixture.Viewer.GetLogs().Count);
         using JsonDocument page = JsonDocument.Parse(await fixture.Client.GetStringAsync(fixture.Url(ViewerConstants.SearchRoute + "?sessionId=" + imported.Id)));
         Assert.Equal(2, page.RootElement.GetProperty("matchCount").GetInt64());
+        string csv = await fixture.Client.GetStringAsync(fixture.Url(ViewerConstants.ExportRoute + "?format=csv&sessionId=" + imported.Id + "&q=id%3A2"));
+        Assert.Contains("\"record 4\"", csv, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"record 2\"", csv, StringComparison.Ordinal);
     }
 
     [Fact]

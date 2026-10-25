@@ -125,6 +125,16 @@ export function LogTable({ page, loading, error, selected, matchCase, follow, wr
   }, [entries, follow, typography]);
   useEffect(() => {
     const pane = scroll.current;
+    const row = selected && pane?.querySelector(`[data-log-id="${selected.id}"]`);
+    if (!pane || !row) return;
+    const bounds = pane.getBoundingClientRect();
+    const entryBounds = row.getBoundingClientRect();
+    const top = bounds.top + (pane.querySelector("thead")?.getBoundingClientRect().height ?? 0);
+    if (entryBounds.top < top) pane.scrollTop += entryBounds.top - top;
+    else if (entryBounds.bottom > bounds.bottom) pane.scrollTop += entryBounds.bottom - bounds.bottom;
+  }, [selected?.id]);
+  useEffect(() => {
+    const pane = scroll.current;
     if (!pane) return;
     setPaneWidth(pane.clientWidth);
     const observer = new ResizeObserver(() => setPaneWidth(pane.clientWidth));
@@ -215,7 +225,7 @@ export function LogTable({ page, loading, error, selected, matchCase, follow, wr
           </SortableContext>
           <Oui.TableBody id="rows" data-loaded-entries={entries.length}>
             {table.getRowModel().rows.map(row => (
-              <Oui.TableRow key={row.id} data-log-id={row.id} data-severity={row.original.severity} tabIndex={0} className={selected?.id === row.original.id ? "selected" : ""}
+              <Oui.TableRow key={row.id} data-log-id={row.id} data-severity={row.original.severity} tabIndex={0} aria-selected={selected?.id === row.original.id} className={selected?.id === row.original.id ? "selected" : ""}
                 onClick={() => onSelect(row.original)} onKeyDown={event => {
                   if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(row.original); }
                   if (event.key === "ArrowDown" || event.key === "ArrowUp") {

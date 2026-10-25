@@ -1,6 +1,6 @@
 import * as Oui from "@opensearch-project/oui";
 
-import { ChevronDown, CircleHelp, Download, FileArchive, Filter, RotateCcw, Search, SlidersHorizontal, X } from "lucide-react";
+import { Bookmark, ChevronDown, CircleHelp, Download, FileArchive, Filter, RotateCcw, Search, SlidersHorizontal, X } from "lucide-react";
 import type { RefObject } from "react";
 import {
   buildExportUrl, buildSessionExportUrl, FieldLabels, NumberFormatter, OperatorLabels, Streams,
@@ -8,6 +8,7 @@ import {
 } from "./model";
 import { SelectControl, type Choice } from "./ui";
 import { LevelFilter } from "./LevelFilter";
+import { TimeRangeControl } from "./TimeRangeControl";
 
 const TimeChoices: Choice[] = [
   { value: "0", label: "All history" }, { value: "60000", label: "Last minute" },
@@ -21,7 +22,7 @@ function categoryLabel(value: string): string {
   return category;
 }
 
-export function QueryBar({ query, page, loading, error, searchRef, maximumId, onChange, onEdit, onReset, onNotice }: {
+export function QueryBar({ query, page, loading, error, searchRef, maximumId, onChange, onEdit, onReset, onNotice, onSavedSearches }: {
   query: QueryState;
   page: LogPage | null;
   loading: boolean;
@@ -32,6 +33,7 @@ export function QueryBar({ query, page, loading, error, searchRef, maximumId, on
   onEdit(condition?: LogCondition): void;
   onReset(): void;
   onNotice(message: string): void;
+  onSavedSearches?(): void;
 }) {
   const categories: Choice[] = [
     { value: "", label: "All categories" },
@@ -56,6 +58,7 @@ export function QueryBar({ query, page, loading, error, searchRef, maximumId, on
         <Oui.Button variant="outline" size="sm" id="conditionsButton" className="query-builder-button" onClick={() => onEdit()}>
           <SlidersHorizontal size={15} /> Add filter {query.conditions.length > 0 && <span className="button-count">{query.conditions.length}</span>}
         </Oui.Button>
+        {onSavedSearches && <Oui.Button variant="outline" size="sm" onClick={onSavedSearches}><Bookmark size={15} />Saved searches</Oui.Button>}
         <Oui.Popover>
           <Oui.PopoverTrigger asChild><Oui.Button variant="ghost" size="icon" className="icon-button" aria-label="Search help"><CircleHelp size={17} /></Oui.Button></Oui.PopoverTrigger>
 
@@ -85,6 +88,9 @@ export function QueryBar({ query, page, loading, error, searchRef, maximumId, on
             <Oui.DropdownMenuItem className="menu-item" asChild disabled={!page?.matchCount || loading || !!error}>
               <a href={buildExportUrl(query, exportId)} download><Download size={16} /><div><strong>Matching records (.jsonl)</strong><small>All entries matching your current filters</small></div></a>
             </Oui.DropdownMenuItem>
+            <Oui.DropdownMenuItem className="menu-item" asChild disabled={!page?.matchCount || loading || !!error}>
+              <a href={buildExportUrl(query, exportId, "csv")} download><Download size={16} /><div><strong>Spreadsheet (.csv)</strong><small>Filtered rows with spreadsheet-safe text</small></div></a>
+            </Oui.DropdownMenuItem>
           </Oui.DropdownMenuContent>
         </Oui.DropdownMenu>
         </div>
@@ -97,8 +103,10 @@ export function QueryBar({ query, page, loading, error, searchRef, maximumId, on
         ]} onChange={stream => onChange({ ...query, stream })} />
         <SelectControl id="category" label="Category" value={query.category} choices={categories}
           onChange={category => onChange({ ...query, category })} />
-        <SelectControl id="timeWindow" label="Time window" value={String(query.timeWindow)} choices={TimeChoices}
-          onChange={value => onChange({ ...query, timeWindow: Number(value) })} />
+        <SelectControl id="timeWindow" label="Time window" value={query.since || query.until ? "custom" : String(query.timeWindow)}
+          choices={query.since || query.until ? [...TimeChoices, { value: "custom", label: "Custom range" }] : TimeChoices}
+          onChange={value => { if (value !== "custom") onChange({ ...query, timeWindow: Number(value), since: "", until: "" }); }} />
+        <TimeRangeControl query={query} onChange={onChange} />
         <span className="filter-separator" />
         <label className="checkbox-label"><Oui.Checkbox id="caseSensitive" checked={query.matchCase}
           onCheckedChange={checked => onChange({ ...query, matchCase: checked === true })} />Match case</label>

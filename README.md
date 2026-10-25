@@ -106,6 +106,8 @@ See the [source installation guide](docs/guide.md#build-test-and-install-from-so
 ![Log Studio's log explorer in dark mode with search results, a visible-page timeline, and a selected log's inspector](docs/design/discover-dark.png)
 
 Search and filter your logs, then select an entry to inspect its details alongside the results.
+Reuse named searches, narrow investigations to exact time ranges, and export matches as JSONL or CSV.
+The inspector includes JSON message formatting, original-text copying, and previous/next entry navigation.
 The screenshot uses synthetic local demo logs. The optional timeline covers the visible page only.
 
 See the [user guide](docs/guide.md) for search, saved sessions, imports and exports, optional

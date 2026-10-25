@@ -29,7 +29,7 @@ export const ApiRoutes = { Applications: "api/applications", Input: "api/input",
 export const LiveStatusEvent = "status";
 export const QueryKeys = {
   Search: "q", MatchCase: "matchCase", Severity: "severity", Stream: "stream", Category: "category",
-  Since: "since", MinimumId: "minId", MaximumId: "maxId", Conditions: "filters", IncludeMode: "includeMode",
+  Since: "since", Until: "until", MinimumId: "minId", MaximumId: "maxId", Conditions: "filters", IncludeMode: "includeMode",
   Before: "before", After: "after", PageSize: "pageSize", Levels: "levels", SessionId: "sessionId"
 } as const;
 
@@ -190,6 +190,8 @@ export interface QueryState {
   stream: string;
   category: string;
   timeWindow: number;
+  since: string;
+  until: string;
   conditions: LogCondition[];
   includeMode: IncludeMode;
   dismissedThrough: number;
@@ -198,11 +200,11 @@ export interface QueryState {
 }
 
 export type SessionFilters = Pick<QueryState,
-  "search" | "matchCase" | "severity" | "levels" | "stream" | "category" | "timeWindow" | "conditions" | "includeMode">;
+  "search" | "matchCase" | "severity" | "levels" | "stream" | "category" | "timeWindow" | "since" | "until" | "conditions" | "includeMode">;
 
 export function sessionFilters(query: QueryState): SessionFilters {
-  const { search, matchCase, severity, levels, stream, category, timeWindow, conditions, includeMode } = query;
-  return { search, matchCase, severity, levels, stream, category, timeWindow, conditions, includeMode };
+  const { search, matchCase, severity, levels, stream, category, timeWindow, since, until, conditions, includeMode } = query;
+  return { search, matchCase, severity, levels, stream, category, timeWindow, since, until, conditions, includeMode };
 }
 
 export interface PageCursor {
@@ -235,7 +237,7 @@ export const TimeFormatter = new Intl.DateTimeFormat(undefined, {
 
 export function defaultQuery(): QueryState {
   return {
-    search: "", matchCase: false, severity: "all", levels: null, stream: "all", category: "", timeWindow: 0,
+    search: "", matchCase: false, severity: "all", levels: null, stream: "all", category: "", timeWindow: 0, since: "", until: "",
     conditions: [], includeMode: "all", dismissedThrough: 0, pageSize: PageSize, sessionId: ""
   };
 }
@@ -266,6 +268,10 @@ export function buildQueryParameters(query: QueryState, cursor: PageCursor, maxi
   if (query.stream !== "all") parameters.set(QueryKeys.Stream, query.stream);
   if (query.category) parameters.set(QueryKeys.Category, query.category);
   if (query.timeWindow) parameters.set(QueryKeys.Since, new Date(now - query.timeWindow).toISOString());
+  else {
+    if (query.since) parameters.set(QueryKeys.Since, query.since);
+    if (query.until) parameters.set(QueryKeys.Until, query.until);
+  }
   if (query.dismissedThrough) parameters.set(QueryKeys.MinimumId, String(query.dismissedThrough));
   if (maximumId !== null) parameters.set(QueryKeys.MaximumId, String(maximumId));
   if (query.conditions.length) {
@@ -277,8 +283,17 @@ export function buildQueryParameters(query: QueryState, cursor: PageCursor, maxi
   return parameters;
 }
 
-export function buildExportUrl(query: QueryState, maximumId: number): string {
-  return `${ApiRoutes.Export}?${buildQueryParameters(query, { before: null, after: null }, maximumId)}`;
+export function buildExportUrl(query: QueryState, maximumId: number, format: "jsonl" | "csv" = "jsonl"): string {
+  const parameters = buildQueryParameters(query, { before: null, after: null }, maximumId);
+  if (format === "csv") parameters.set("format", format);
+  return `${ApiRoutes.Export}?${parameters}`;
+}
+
+export function validateTimeRange(since: string, until: string): string | null {
+  if ((since && !Number.isFinite(Date.parse(since))) || (until && !Number.isFinite(Date.parse(until))))
+    return "Enter valid start and end dates.";
+  if (since && until && Date.parse(since) > Date.parse(until)) return "Start must be at or before end.";
+  return null;
 }
 
 export function buildSessionExportUrl(sessionId = ""): string {

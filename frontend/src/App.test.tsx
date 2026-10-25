@@ -46,6 +46,47 @@ vi.mock("./useLogExplorer", async () => {
 });
 
 describe("log-first workspace", () => {
+  it("persists named searches across viewer reloads and applies filters without adopting another session or page size", async () => {
+    const first = render(<App />);
+    fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "timeout" } });
+    fireEvent.click(screen.getByRole("button", { name: "Saved searches" }));
+    fireEvent.change(screen.getByLabelText("Search name"), { target: { value: "Timeouts" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save current filters" }));
+    await waitFor(() => expect(savedPreferences.savedSearches).toEqual([{ name: "Timeouts", filters: sessionFilters({ ...defaultQuery(), search: "timeout" }) }]));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    first.unmount();
+    render(<App />);
+    await waitFor(() => expect(api.appSettings).toHaveBeenCalledWith(undefined, expect.any(AbortSignal)));
+    fireEvent.click(screen.getByRole("button", { name: "Saved searches" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Timeouts" }));
+    await waitFor(() => expect(vi.mocked(useLogPage).mock.lastCall?.[0]).toEqual({
+      ...defaultQuery(), search: "timeout"
+    }));
+    expect(screen.queryByRole("dialog", { name: "Saved searches" })).toBeNull();
+  });
+
+  it("keeps inspector navigation and the highlighted log row synchronized", async () => {
+    const second = { ...Entry, id: 2, message: "second entry" };
+    vi.mocked(useLogPage).mockReturnValue({ page: { ...fixturePage(), entries: [Entry, second] }, loading: false, error: null, refresh: vi.fn() });
+    try {
+      render(<App />);
+      const pane = screen.getByLabelText("Scrollable log entries");
+      vi.spyOn(pane, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 100, 500, 200));
+      vi.spyOn(document.querySelector("thead")!, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 100, 500, 40));
+      vi.spyOn(document.querySelector('[data-log-id="1"]')!, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 140, 500, 30));
+      vi.spyOn(document.querySelector('[data-log-id="2"]')!, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 330, 500, 30));
+      fireEvent.click(screen.getByRole("row", { name: /Hello/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Next entry" }));
+      expect(document.getElementById("detailId")?.textContent).toBe("2");
+      expect(document.querySelector('[data-log-id="2"]')?.getAttribute("aria-selected")).toBe("true");
+      expect(pane.scrollTop).toBe(60);
+      expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+      await act(async () => undefined);
+    } finally {
+      vi.mocked(useLogPage).mockReturnValue({ page: fixturePage(), loading: false, error: null, refresh: vi.fn() });
+    }
+  });
+
   it("restores saved fonts, theme, page size and explorer layout in a fresh viewer", async () => {
     history.replaceState(null, "", "/");
     savedPreferences = mergePreferences(DefaultPreferences, {

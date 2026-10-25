@@ -17,5 +17,26 @@ describe("export menu", () => {
     expect(filtered.getAttribute("href")).toContain("q=error");
     expect(filtered.getAttribute("href")).toContain("sessionId=saved");
     expect(filtered.getAttribute("href")).toContain("maxId=100");
+    const csv = screen.getByRole("menuitem", { name: /Spreadsheet/ });
+    expect(csv.getAttribute("href")).toContain("format=csv");
+    expect(csv.getAttribute("href")).toContain("sessionId=saved");
+    expect(csv.getAttribute("href")).toContain("maxId=100");
+  });
+
+  it("disables CSV export while a query is loading or has no matches", async () => {
+    render(<QueryBar query={defaultQuery()} page={fixturePage()} loading error={null} searchRef={createRef()} maximumId={null}
+      onChange={vi.fn()} onEdit={vi.fn()} onReset={vi.fn()} onNotice={vi.fn()} />);
+    fireEvent.keyDown(screen.getByLabelText("Export options"), { key: "Enter" });
+    expect((await screen.findByRole("menuitem", { name: /Spreadsheet/ })).getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("clears exact bounds when a relative time window is chosen", async () => {
+    const change = vi.fn();
+    render(<QueryBar query={{ ...defaultQuery(), since: "2026-10-11T18:00:00Z", until: "2026-10-11T18:01:00Z" }}
+      page={fixturePage()} loading={false} error={null} searchRef={createRef()} maximumId={null}
+      onChange={change} onEdit={vi.fn()} onReset={vi.fn()} onNotice={vi.fn()} />);
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Time window" }), { key: "Enter" });
+    fireEvent.keyDown(await screen.findByRole("option", { name: "Last minute" }), { key: "Enter" });
+    expect(change).toHaveBeenCalledWith({ ...defaultQuery(), timeWindow: 60000 });
   });
 });
