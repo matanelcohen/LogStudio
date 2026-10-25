@@ -1,8 +1,10 @@
 import * as Menu from "@radix-ui/react-dropdown-menu";
 import * as Popover from "@radix-ui/react-popover";
+import * as Select from "@radix-ui/react-select";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { AlertCircle, Check, ChevronDown, ChevronRight, Clock3, Compass, Database, FileUp, HardDrive, History, Logs, MessageSquare, Monitor, Moon, Pause, Play, Settings, Sun, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { getNonce } from "get-nonce";
+import { AlertCircle, Check, ChevronDown, ChevronRight, ChevronUp, Clock3, Compass, Database, FileUp, HardDrive, History, Logs, MessageSquare, Monitor, Moon, Pause, Play, Settings, Sun, X } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ConditionDialog } from "./ConditionDialog";
 import { ClearHistoryDialog } from "./ClearHistoryDialog";
 import { SessionsDialog } from "./SessionsDialog";
@@ -240,7 +242,6 @@ export default function App() {
         <div className="query-region">
           <div className="workspace-heading">
             <div><span className="workspace-kicker">LOG EXPLORER</span><h2>Discover</h2><p>Search, filter, and inspect your session history.</p></div>
-            <span className="workspace-context"><Database size={14} /> Disk-backed history <span className="context-divider" /> Local workspace</span>
           </div>
           {live.status?.listenAll && !archived && <RunningApplicationPicker onListening={setApplicationListening} onAttached={() => {
             changeQuery({ ...defaultQuery(), pageSize: query.pageSize });
@@ -328,9 +329,8 @@ function RunningApplicationPicker({ onAttached, onListening }: { onAttached(): v
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
-  const [retry, setRetry] = useState(0);
-  const [search, setSearch] = useState("");
   const mounted = useRef(true);
+  const optionId = useId();
 
   useEffect(() => {
     mounted.current = true;
@@ -354,7 +354,7 @@ function RunningApplicationPicker({ onAttached, onListening }: { onAttached(): v
     }
     void refresh();
     return () => { active = false; controller.abort(); if (timer !== null) clearTimeout(timer); };
-  }, [busy, retry, onListening]);
+  }, [busy, onListening]);
 
   const identity = (app: RunningApplication) => app.groupId ?? `${app.processId}:${app.startedAtTicks}`;
   const processes = (app: RunningApplication) => app.processes ?? [app];
@@ -380,30 +380,45 @@ function RunningApplicationPicker({ onAttached, onListening }: { onAttached(): v
   const applications = state?.applications ?? [];
   const selected = state?.selected;
   const choices = selected && !applications.some(app => identity(app) === identity(selected)) ? [selected, ...applications] : applications;
-  const term = search.trim().toLocaleLowerCase();
-  const filtered = choices.filter(app => identity(app) === (selected && identity(selected)) ||
-    [app.name, app.path, ...processes(app).flatMap(process => [process.name, process.path, String(process.processId)])]
-      .some(value => value?.toLocaleLowerCase().includes(term)));
   function label(app: RunningApplication) {
     if (!app.groupId) return `${app.name} (PID ${app.processId})`;
     const members = processes(app);
     return `${app.name} (${members.length} ${members.length === 1 ? "process" : "processes"}; PIDs ${members.map(process => process.processId).join(", ")}) — ${app.path ?? "Path unavailable"}`;
   }
+  function option(app: RunningApplication) {
+    const members = processes(app);
+    const descriptionId = `${optionId}-${app.processId}-${app.startedAtTicks}`;
+    return <Select.Item key={identity(app)} value={identity(app)} className="select-item" aria-describedby={descriptionId} title={label(app)}>
+      <div className="application-select-option">
+        <Select.ItemText>{app.groupId ? `${app.name} · ${members.length} ${members.length === 1 ? "process" : "processes"}` : `${app.name} (PID ${app.processId})`}</Select.ItemText>
+        <span id={descriptionId} className="application-option-details">{app.path ?? "Path unavailable"}{app.groupId && ` · PIDs ${members.map(process => process.processId).join(", ")}`}</span>
+      </div>
+      <Select.ItemIndicator><Check size={14} /></Select.ItemIndicator>
+    </Select.Item>;
+  }
   return <section className="application-picker" aria-label="Live application capture">
     <div className="application-picker-controls">
-      <input type="search" aria-label="Find running app" placeholder="Find app, path, or PID…" value={search}
-        onChange={event => setSearch(event.target.value)} />
       <label htmlFor="runningApplication">Running app</label>
-      <select id="runningApplication" value={selected ? identity(selected) : ""} disabled={busy || !state}
-        aria-describedby="applicationCaptureHelp" onChange={event => void choose(event.target.value)}>
-        <option value="" disabled>{state && applications.length === 0 ? "No running .NET apps found" : "Choose a running app"}</option>
-        {filtered.filter(app => !app.isTool).map(app => <option key={identity(app)} value={identity(app)}>{label(app)}</option>)}
-        {filtered.some(app => app.isTool) && <optgroup label=".NET tooling">
-          {filtered.filter(app => app.isTool).map(app => <option key={identity(app)} value={identity(app)}>{label(app)}</option>)}
-        </optgroup>}
-        {applications.length > 0 && filtered.length === 0 && <option disabled>No apps match your search</option>}
-      </select>
-      <button className="ghost-button" disabled={busy} onClick={() => { setSelectionError(null); setRetry(value => value + 1); }}>Refresh apps</button>
+      <Select.Root value={selected ? identity(selected) : ""} disabled={busy || !state} onValueChange={value => void choose(value)}>
+        <Select.Trigger id="runningApplication" className="select-trigger" aria-label="Running app" aria-describedby="applicationCaptureHelp">
+          <Select.Value placeholder={state && applications.length === 0 ? "No running .NET apps found" : "Choose a running app"} />
+          <Select.Icon><ChevronDown size={13} /></Select.Icon>
+        </Select.Trigger>
+        <Select.Portal>
+          <Select.Content className="select-content application-select-content" position="popper" sideOffset={5} collisionPadding={12}>
+            <Select.ScrollUpButton className="select-scroll"><ChevronUp size={14} /></Select.ScrollUpButton>
+            <Select.Viewport nonce={getNonce()}>
+              {choices.filter(app => !app.isTool).map(option)}
+              {choices.some(app => app.isTool) && <Select.Group>
+                <Select.Label className="menu-label">.NET tooling</Select.Label>
+                {choices.filter(app => app.isTool).map(option)}
+              </Select.Group>}
+              {choices.length === 0 && <div className="menu-label">No running .NET apps found</div>}
+            </Select.Viewport>
+            <Select.ScrollDownButton className="select-scroll"><ChevronDown size={14} /></Select.ScrollDownButton>
+          </Select.Content>
+        </Select.Portal>
+      </Select.Root>
       {selected && (selectionError || state?.error) && <button disabled={busy} onClick={() => void choose(identity(selected))}>Retry app</button>}
       <span role="status">{busy ? "Connecting to application…" : selected?.groupId && processes(selected).length === 0 ?
         `Connecting to ${selected.name}…` : selected ?

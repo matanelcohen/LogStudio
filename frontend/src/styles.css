@@ -443,9 +443,14 @@ pre, code, kbd { font-family: Consolas, "Courier New", Courier, monospace; }
 .query-region > .notice { margin-top: 12px; }
 .application-picker { margin-bottom: 16px; font-size: var(--ui-font-size, 14px); }
 .application-picker-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
-.application-picker-controls input { width: 220px; max-width: 100%; }
-.application-picker-controls select { flex: 1; min-width: 180px; max-width: 100%; text-overflow: ellipsis; }
-.application-picker-controls > [role="status"] { min-width: 0; overflow-wrap: anywhere; }
+.application-picker-controls > label { color: var(--cp-secondary-text); }
+.application-picker-controls .select-trigger { flex: 0 1 320px; width: 320px; min-width: 0; max-width: 100%; text-align: left; }
+.application-picker-controls > [role="status"] { min-width: 0; color: var(--cp-secondary-text); overflow-wrap: anywhere; }
+.application-select-content { width: min(420px, calc(100vw - 24px)); }
+.application-select-content .select-item { padding: 8px 10px; gap: 8px; }
+.application-select-option { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.application-select-option > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.application-option-details { color: var(--cp-secondary-text); }
 .application-processes { margin: 8px 0; overflow-wrap: anywhere; }
 .application-processes summary { cursor: pointer; color: var(--cp-secondary-text); }
 .application-processes ul { display: grid; gap: 6px; padding: 8px 0 8px 20px; }
@@ -455,8 +460,6 @@ pre, code, kbd { font-family: Consolas, "Courier New", Courier, monospace; }
 .workspace-kicker { color: var(--cp-native-accent); font-size: var(--ui-font-size, 14px); font-weight: 600; letter-spacing: 1px; }
 .workspace-heading h2 { font-size: calc(28px * var(--ui-font-scale, 1)); font-weight: 650; letter-spacing: -.9px; margin: 3px 0; line-height: 1.25; }
 .workspace-heading p { color: var(--cp-secondary-text); font-size: var(--ui-font-size, 14px); }
-.workspace-context { display: inline-flex; align-items: center; gap: 8px; font-size: var(--ui-font-size, 14px); color: var(--cp-secondary-text); padding: 7px 11px; border: 1px solid var(--cp-material-border); border-radius: 20px; background: var(--cp-chrome-material); white-space: nowrap; }
-.context-divider { height: 12px; width: 1px; background: var(--cp-border-strong); margin: 0 4px; }
 .search-row { gap: 8px; flex-wrap: wrap; }
 .search-box {
   display: flex;
@@ -864,7 +867,6 @@ mark { background: var(--cp-highlight); color: var(--cp-text); border-radius: 2p
   .category-column { width: 112px; }
   .filter-spacer { display: none; }
   .panel-footer > span:last-child { display: none; }
-  .workspace-context { display: none; }
 }
 @media (max-width: 760px) {
   .copilot-fullscreen { inset: 0; height: 100dvh; border-radius: 0; }
