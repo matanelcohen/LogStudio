@@ -166,11 +166,11 @@ logstudio --listen-all --open
 
 This starts a localhost viewer without launching or following a command. Open the
 printed URL if you omit `--open`, then choose **Running app** from the dropdown.
-Discovery refreshes automatically, and **Refresh apps** updates it immediately.
+Discovery refreshes automatically in the background every two seconds.
 Even if only one app is running, no app is attached until you select it.
 
-Use **Find running app** to search app names, entrypoint paths, or any member's PID.
-The picker groups a `dotnet run` / `dotnet watch` launcher and its .NET descendants
+The compact picker shows app names with entrypoint paths and PIDs in the dropdown.
+It groups a `dotnet run` / `dotnet watch` launcher and its .NET descendants
 under the actual app's name and path, instead of making you guess which `dotnet`
 PID to select. Separate launches remain separate choices. Standalone processes
 with the same full managed entrypoint path are grouped together; unrelated apps

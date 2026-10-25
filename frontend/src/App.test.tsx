@@ -108,34 +108,95 @@ describe("log-first workspace", () => {
       });
     });
 
-    it("waits for explicit selection even when only one app is running, including refresh", async () => {
+    async function openApplications() {
+      const dropdown = screen.getByRole("combobox", { name: "Running app" });
+      await waitFor(() => expect(dropdown.hasAttribute("disabled")).toBe(false));
+      fireEvent.keyDown(dropdown, { key: "Enter" });
+      await screen.findByRole("listbox");
+      return dropdown;
+    }
+
+    async function chooseApplication(name: string | RegExp) {
+      await openApplications();
+      fireEvent.keyDown(screen.getByRole("option", { name }), { key: "Enter" });
+    }
+
+    async function pollApplications() {
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    }
+
+    it("refreshes discovery every two seconds without selecting the only running app", async () => {
+      vi.useFakeTimers();
       const select = vi.spyOn(api, "selectApplication");
-      render(<App />);
-      const dropdown = await screen.findByRole("combobox", { name: "Running app" }) as HTMLSelectElement;
-      await screen.findByRole("option", { name: "Example.Api (PID 42)" });
-      expect(dropdown.value).toBe("");
+      await act(async () => { render(<App />); });
+      const dropdown = screen.getByRole("combobox", { name: "Running app" });
+      expect(dropdown.textContent).toBe("Choose a running app");
       expect(screen.getByText("Choose an app")).toBeDefined();
-      fireEvent.click(screen.getByRole("button", { name: "Refresh apps" }));
-      await waitFor(() => expect(api.fetchApplications).toHaveBeenCalledTimes(2));
-      expect(dropdown.value).toBe("");
+      expect(screen.queryByRole("searchbox", { name: "Find running app" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Refresh apps" })).toBeNull();
+      expect(screen.queryByText("Disk-backed history")).toBeNull();
+      expect(document.querySelector(".workspace-context")).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1999); });
+      expect(api.fetchApplications).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+      expect(api.fetchApplications).toHaveBeenCalledTimes(2);
+      await pollApplications();
+      expect(api.fetchApplications).toHaveBeenCalledTimes(3);
+      expect(dropdown.textContent).toBe("Choose a running app");
       expect(select).not.toHaveBeenCalled();
     });
 
-    it("shows one app choice with its path and PIDs and searches app names, paths, and member PIDs", async () => {
-      const other = { ...group, processId: 50, groupId: "other", path: "/another/Example.Api.dll", processes: [{ ...application, processId: 50 }] };
+    it("discovers newly started apps while the dropdown is open without changing the selection", async () => {
+      vi.useFakeTimers();
+      vi.mocked(api.fetchApplications).mockResolvedValueOnce(waiting)
+        .mockResolvedValue({ ...waiting, applications: [application, worker] });
+      const select = vi.spyOn(api, "selectApplication");
+      await act(async () => { render(<App />); });
+      fireEvent.keyDown(screen.getByRole("combobox", { name: "Running app" }), { key: "Enter" });
+      expect(screen.getAllByRole("option")).toHaveLength(1);
+      await pollApplications();
+      expect(screen.getByRole("option", { name: "Example.Worker (PID 43)" })).toBeDefined();
+      expect(screen.getAllByRole("option")).toHaveLength(2);
+      expect(select).not.toHaveBeenCalled();
+    });
+
+    it("recovers from a discovery failure on the next background refresh", async () => {
+      vi.useFakeTimers();
+      vi.mocked(api.fetchApplications).mockRejectedValueOnce(new Error("Discovery unavailable.")).mockResolvedValue(waiting);
+      await act(async () => { render(<App />); });
+      expect(screen.getByRole("alert").textContent).toContain("Discovery unavailable.");
+      expect(screen.getByRole("combobox", { name: "Running app" }).hasAttribute("disabled")).toBe(true);
+      await pollApplications();
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.getByRole("combobox", { name: "Running app" }).hasAttribute("disabled")).toBe(false);
+    });
+
+    it("stops background discovery when the picker is unmounted", async () => {
+      vi.useFakeTimers();
+      const { unmount } = await act(async () => render(<App />));
+      const signal = vi.mocked(api.fetchApplications).mock.calls.at(0)?.[0];
+      expect(api.fetchApplications).toHaveBeenCalledTimes(1);
+      unmount();
+      expect(signal?.aborted).toBe(true);
+      await pollApplications();
+      expect(api.fetchApplications).toHaveBeenCalledTimes(1);
+    });
+
+    it("distinguishes app groups by their paths and PIDs and separates .NET tooling", async () => {
+      const other = { ...group, processId: 50, groupId: "path:/another workspace/Example.Api.dll", path: "/another workspace/Example.Api.dll", processes: [{ ...application, processId: 50 }] };
       const tooling = { ...application, processId: 60, name: "MSBuild", isTool: true };
       vi.mocked(api.fetchApplications).mockResolvedValue({ ...waiting, applications: [group, other, tooling] });
       const select = vi.spyOn(api, "selectApplication");
       render(<App />);
-      await screen.findByRole("option", { name: /2 processes; PIDs 42, 43.*\/repo\/Example.Api.dll/ });
+      await openApplications();
+      const apiGroup = screen.getByRole("option", { name: "Example.Api · 2 processes" });
+      expect(within(apiGroup).getByText("/repo/Example.Api.dll · PIDs 42, 43")).toBeDefined();
+      expect(document.getElementById(apiGroup.getAttribute("aria-describedby")!)?.textContent).toContain("/repo/Example.Api.dll · PIDs 42, 43");
+      const otherGroup = screen.getByRole("option", { name: "Example.Api · 1 process" });
+      expect(within(otherGroup).getByText("/another workspace/Example.Api.dll · PIDs 50")).toBeDefined();
+      expect(otherGroup.getAttribute("aria-describedby")).not.toMatch(/\s/);
       expect(screen.getByRole("group", { name: ".NET tooling" }).textContent).toContain("MSBuild");
-      for (const term of ["EXAMPLE.WORKER", "/REPO/", "43"]) {
-        fireEvent.change(screen.getByRole("searchbox", { name: "Find running app" }), { target: { value: term } });
-        expect(screen.getAllByRole("option")).toHaveLength(2);
-        expect(screen.getByRole("option", { name: /PIDs 42, 43/ })).toBeDefined();
-      }
-      fireEvent.change(screen.getByRole("searchbox", { name: "Find running app" }), { target: { value: "not-a-running-app" } });
-      expect(screen.getByRole("option", { name: "No apps match your search" })).toBeDefined();
+      expect(screen.getAllByRole("option")).toHaveLength(3);
       expect(select).not.toHaveBeenCalled();
     });
 
@@ -144,27 +205,29 @@ describe("log-first workspace", () => {
       vi.mocked(api.fetchApplications).mockResolvedValueOnce(grouped).mockResolvedValue({ ...grouped, selected: group });
       vi.spyOn(api, "selectApplication").mockResolvedValue({ ...grouped, selected: group });
       render(<App />);
-      await screen.findByRole("option", { name: /PIDs 42, 43/ });
-      fireEvent.change(screen.getByRole("combobox", { name: "Running app" }), { target: { value: group.groupId } });
+      await chooseApplication("Example.Api · 2 processes");
       await screen.findByText("Listening to Example.Api · 2 processes");
       expect(api.selectApplication).toHaveBeenCalledExactlyOnceWith(group);
+      expect(screen.getByRole("combobox", { name: "Running app" }).textContent).toBe("Example.Api · 2 processes");
       expect(screen.getByText("PID 43")).toBeDefined();
       expect(screen.getByText("/repo/Example.Worker.dll")).toBeDefined();
     });
 
     it("keeps the selected group and a paused investigation when the lead PID changes", async () => {
+      vi.useFakeTimers();
       const updated = { ...group, processId: worker.processId, startedAtTicks: worker.startedAtTicks, processes: [worker] };
       vi.mocked(api.fetchApplications).mockResolvedValueOnce({ ...waiting, applications: [group], selected: group })
         .mockResolvedValue({ ...waiting, applications: [updated], selected: updated });
       const select = vi.spyOn(api, "selectApplication");
-      render(<App />);
-      await screen.findByText("Listening to Example.Api · 2 processes");
+      await act(async () => { render(<App />); });
+      expect(screen.getByText("Listening to Example.Api · 2 processes")).toBeDefined();
       fireEvent.click(screen.getByRole("button", { name: "Pause" }));
-      fireEvent.change(screen.getByRole("searchbox", { name: "Find running app" }), { target: { value: "unrelated search" } });
-      fireEvent.click(screen.getByRole("button", { name: "Refresh apps" }));
-      await screen.findByText("Listening to Example.Api · 1 process");
-      expect((screen.getByRole("combobox", { name: "Running app" }) as HTMLSelectElement).value).toBe(group.groupId);
+      fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "Keep my query" } });
+      await pollApplications();
+      expect(screen.getByText("Listening to Example.Api · 1 process")).toBeDefined();
+      expect(screen.getByRole("combobox", { name: "Running app" }).textContent).toBe("Example.Api · 1 process");
       expect(screen.getByRole("button", { name: "Resume" })).toBeDefined();
+      expect((screen.getByLabelText("Search logs") as HTMLInputElement).value).toBe("Keep my query");
       expect(select).not.toHaveBeenCalled();
       expect(screen.queryByText("PID 42")).toBeNull();
     });
@@ -174,9 +237,8 @@ describe("log-first workspace", () => {
       vi.mocked(api.fetchApplications).mockResolvedValueOnce({ ...waiting, applications: [group] }).mockResolvedValue(partial);
       vi.spyOn(api, "selectApplication").mockResolvedValue(partial);
       render(<App />);
-      await screen.findByRole("option", { name: /PIDs 42, 43/ });
       fireEvent.click(screen.getByRole("button", { name: "Pause" }));
-      fireEvent.change(screen.getByRole("combobox", { name: "Running app" }), { target: { value: group.groupId } });
+      await chooseApplication("Example.Api · 2 processes");
       await screen.findByText("Listening to Example.Api · 1 process");
       expect(screen.getByRole("alert").textContent).toContain("Could not attach to PID 42.");
       expect(screen.getByRole("button", { name: "Pause" })).toBeDefined();
@@ -184,16 +246,14 @@ describe("log-first workspace", () => {
     });
 
     it("clears a partial attachment warning when the missing process connects", async () => {
+      vi.useFakeTimers();
       const partial = { ...waiting, applications: [group], selected: { ...group, processes: [worker] }, error: "Could not attach to PID 42." };
-      vi.mocked(api.fetchApplications).mockResolvedValueOnce({ ...waiting, applications: [group] }).mockResolvedValue(partial);
-      vi.spyOn(api, "selectApplication").mockResolvedValue(partial);
-      render(<App />);
-      await screen.findByRole("option", { name: /PIDs 42, 43/ });
-      fireEvent.change(screen.getByRole("combobox", { name: "Running app" }), { target: { value: group.groupId } });
-      await screen.findByRole("button", { name: "Retry app" });
+      vi.mocked(api.fetchApplications).mockResolvedValue(partial);
+      await act(async () => { render(<App />); });
+      expect(screen.getByRole("button", { name: "Retry app" })).toBeDefined();
       vi.mocked(api.fetchApplications).mockResolvedValue({ ...waiting, applications: [group], selected: group });
-      fireEvent.click(screen.getByRole("button", { name: "Refresh apps" }));
-      await screen.findByText("Listening to Example.Api · 2 processes");
+      await pollApplications();
+      expect(screen.getByText("Listening to Example.Api · 2 processes")).toBeDefined();
       expect(screen.queryByRole("alert")).toBeNull();
       expect(screen.queryByRole("button", { name: "Retry app" })).toBeNull();
     });
@@ -226,11 +286,8 @@ describe("log-first workspace", () => {
       vi.spyOn(api, "selectApplication").mockResolvedValue({ ...waiting, selected: application });
       vi.mocked(api.fetchApplications).mockResolvedValueOnce(waiting).mockResolvedValue({ ...waiting, selected: application });
       render(<App />);
-      await screen.findByRole("option", { name: "Example.Api (PID 42)" });
       fireEvent.click(screen.getByRole("button", { name: "Pause" }));
-      fireEvent.change(screen.getByRole("combobox", { name: "Running app" }), {
-        target: { value: `${application.processId}:${application.startedAtTicks}` }
-      });
+      await chooseApplication("Example.Api (PID 42)");
       await screen.findByText("Listening to Example.Api");
       expect(api.selectApplication).toHaveBeenCalledExactlyOnceWith(application);
       expect(screen.getByRole("button", { name: "Pause" })).toBeDefined();
@@ -291,44 +348,39 @@ describe("log-first workspace", () => {
     it("keeps a failed selection visible after refreshing discovery", async () => {
       vi.spyOn(api, "selectApplication").mockRejectedValue(new Error("The application exited."));
       render(<App />);
-      await screen.findByRole("option", { name: "Example.Api (PID 42)" });
-      fireEvent.change(screen.getByRole("combobox", { name: "Running app" }), {
-        target: { value: `${application.processId}:${application.startedAtTicks}` }
-      });
+      await chooseApplication("Example.Api (PID 42)");
       await waitFor(() => expect(api.fetchApplications).toHaveBeenCalledTimes(2));
       expect(screen.getByRole("alert").textContent).toContain("The application exited.");
-      expect((screen.getByRole("combobox", { name: "Running app" }) as HTMLSelectElement).value).toBe("");
+      expect(screen.getByRole("combobox", { name: "Running app" }).textContent).toBe("Choose a running app");
     });
 
     it("shows empty discovery without attaching", async () => {
       vi.mocked(api.fetchApplications).mockResolvedValue({ ...waiting, applications: [] });
       const select = vi.spyOn(api, "selectApplication");
       render(<App />);
-      await screen.findByRole("option", { name: "No running .NET apps found" });
+      await screen.findByText("No running .NET apps found");
       expect(screen.getByText("Waiting for you to choose an app.")).toBeDefined();
       expect(select).not.toHaveBeenCalled();
     });
 
     it("shows an existing selection on reload but does not attach a replacement when it exits", async () => {
+      vi.useFakeTimers();
       vi.mocked(api.fetchApplications).mockResolvedValueOnce({ ...waiting, selected: application }).mockResolvedValue(waiting);
       const select = vi.spyOn(api, "selectApplication");
-      render(<App />);
-      await screen.findByText("Listening to Example.Api");
-      fireEvent.click(screen.getByRole("button", { name: "Refresh apps" }));
-      await screen.findByText("Waiting for you to choose an app.");
-      expect((screen.getByRole("combobox", { name: "Running app" }) as HTMLSelectElement).value).toBe("");
+      await act(async () => { render(<App />); });
+      expect(screen.getByText("Listening to Example.Api")).toBeDefined();
+      await pollApplications();
+      expect(screen.getByText("Waiting for you to choose an app.")).toBeDefined();
+      expect(screen.getByRole("combobox", { name: "Running app" }).textContent).toBe("Choose a running app");
       expect(select).not.toHaveBeenCalled();
     });
 
     it("does not reset a paused investigation when the collector reports an attachment error", async () => {
       vi.spyOn(api, "selectApplication").mockResolvedValue({ ...waiting, error: "Attaching timed out." });
       render(<App />);
-      await screen.findByRole("option", { name: "Example.Api (PID 42)" });
       fireEvent.click(screen.getByRole("button", { name: "Pause" }));
       fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "Keep my query" } });
-      fireEvent.change(screen.getByRole("combobox", { name: "Running app" }), {
-        target: { value: `${application.processId}:${application.startedAtTicks}` }
-      });
+      await chooseApplication("Example.Api (PID 42)");
       await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Attaching timed out."));
       expect(screen.getByRole("button", { name: "Resume" })).toBeDefined();
       expect((screen.getByLabelText("Search logs") as HTMLInputElement).value).toBe("Keep my query");
