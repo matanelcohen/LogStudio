@@ -15,11 +15,6 @@ interface GettingStartedProps {
 export function GettingStarted({ canChooseApp, dismissed, sampleBusy, onChooseApp, onImport, onSample, onDismiss }: GettingStartedProps) {
   return <div className="getting-started">
     <h3>{dismissed ? "Ready for logs" : "Get your first useful log"}</h3>
-    {!dismissed && <>
-      <p><strong>Running app</strong> attaches only when you choose an app. It captures new ILogger events, requires the .NET logging EventSource provider (Microsoft-Extensions-Logging), and cannot recover historical stdout/stderr.</p>
-      <p><strong>Import</strong> opens existing Log Studio session bundles or JSONL files in a separate saved session. <strong>CLI</strong> wrapping captures a command’s stdout/stderr from launch: <code>logstudio --open -- &lt;command&gt;</code>. Start commands yourself in a terminal.</p>
-    </>}
-    {!canChooseApp && <p>To attach to a running app, use the desktop app or start <code>logstudio --listen-all --open</code> yourself.</p>}
     <div className="empty-state-actions">
       {canChooseApp && <Oui.Button variant="default" size="sm" onClick={onChooseApp}>Choose running app</Oui.Button>}
       <Oui.Button variant="outline" size="sm" onClick={onImport}>Import a session</Oui.Button>
@@ -27,6 +22,11 @@ export function GettingStarted({ canChooseApp, dismissed, sampleBusy, onChooseAp
       {!dismissed && onDismiss && <Oui.Button variant="ghost" size="sm" onClick={onDismiss}>Dismiss getting started</Oui.Button>}
     </div>
     <p className="muted">Demo: bundled synthetic logs, available offline. No app is started or attached. Then search for <code>timeout</code> or filter by level.</p>
+    {!dismissed && <>
+      <p><strong>Running app</strong> attaches only when you choose an app. It captures new ILogger events, requires the .NET logging EventSource provider (Microsoft-Extensions-Logging), and cannot recover historical stdout/stderr.</p>
+      <p><strong>Import</strong> opens existing Log Studio session bundles or JSONL files in a separate saved session. <strong>CLI</strong> wrapping captures a command’s stdout/stderr from launch: <code>logstudio --open -- &lt;command&gt;</code>. Start commands yourself in a terminal.</p>
+    </>}
+    {!canChooseApp && <p>To attach to a running app, use the desktop app or start <code>logstudio --listen-all --open</code> yourself.</p>}
   </div>;
 }
 
