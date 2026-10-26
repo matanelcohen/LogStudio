@@ -469,6 +469,13 @@ Push mode stops on Git errors and never overwrites an existing tag.
 Without the push option, the script only updates files; `--tag` / `-Tag` additionally
 creates or updates a local tag on the existing `HEAD`, without committing or pushing.
 
+To do the same entirely on GitHub, open **Actions → Bump version → Run workflow**,
+select the branch (normally `main`), and enter the new version without a `v` prefix.
+The [bump workflow](../.github/workflows/bump-version.yml) runs the script with `--push`,
+then dispatches **Compiled releases** for the new tag. It uses the built-in `GITHUB_TOKEN`;
+no additional secret is needed. The explicit dispatch is necessary because pushes made
+with that token do not trigger other workflows.
+
 Desktop icon assets live in `packaging/logstudio.svg` (editable source), `.png`, `.ico`, and
 `.icns`. To regenerate the committed native formats after editing the SVG, install the
 developer tool `rsvg-convert` (librsvg), then run `node packaging/generate-icons.mjs`.

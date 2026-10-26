@@ -9,15 +9,17 @@ import { test } from "node:test";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const bashBump = fileURLToPath(new URL("../../bump-version.sh", import.meta.url));
 const powershellBump = fileURLToPath(new URL("../../bump-version.ps1", import.meta.url));
+const bumpWorkflow = readFileSync(new URL("../../.github/workflows/bump-version.yml", import.meta.url), "utf8");
 const windows = process.platform === "win32";
 const versionFiles = [
   "Directory.Build.props", "frontend/package.json", "frontend/package-lock.json",
   "samples/PackageConsumer/PackageConsumer.csproj", "README.md", "docs/guide.md"
 ];
 
-function run(command, args, cwd) {
+function run(command, args, cwd, env = {}) {
   const result = spawnSync(command, args, {
     cwd: cwd || process.env.TEMP || process.env.TMPDIR || root,
+    env: { ...process.env, ...env },
     encoding: "utf8",
     timeout: 30000
   });
@@ -72,6 +74,55 @@ function gitFixture(t, source) {
   git(f.dir, "commit", "--quiet", "-m", "fixture");
   git(f.dir, "remote", "add", "origin", remote);
   return { ...f, remote, initialHead: git(f.dir, "rev-parse", "HEAD") };
+}
+
+function workflowStep(name) {
+  const match = bumpWorkflow.replace(/\r\n/g, "\n").match(new RegExp(`      - name: ${name}\\n[\\s\\S]*?        run: \\|\\n((?:          .*\\n)+)`));
+  assert.ok(match, name);
+  return match[1].replace(/^          /gm, "");
+}
+
+test("bump workflow accepts a manual version and checks out the selected branch with tags", () => {
+  assert.match(bumpWorkflow, /workflow_dispatch:\s+inputs:\s+version:\s+description: [^\n]+\s+required: true\s+type: string/);
+  assert.match(bumpWorkflow, /contents: write/);
+  assert.match(bumpWorkflow, /actions: write/);
+  assert.match(bumpWorkflow, /group: bump-version\s+cancel-in-progress: false/);
+  assert.match(bumpWorkflow, /ref: \$\{\{ github\.ref \}\}\s+fetch-depth: 0/);
+  assert.match(bumpWorkflow, /RELEASE_VERSION: \$\{\{ inputs\.version \}\}/);
+  assert.match(bumpWorkflow, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(bumpWorkflow, /GH_REPO: \$\{\{ github\.repository \}\}/);
+  assert.doesNotMatch(workflowStep("Bump version and push"), /\$\{\{/);
+  assert.doesNotMatch(workflowStep("Start compiled release"), /\$\{\{/);
+});
+
+for (const version of ["1.2.3", "1.2.4-rc.1"]) {
+  test(`bump workflow pushes ${version} before dispatching its compiled release`, { skip: windows }, (t) => {
+    const f = gitFixture(t, bashBump);
+    const tools = join(f.dir, "tools");
+    const dispatchLog = join(f.dir, "dispatch.log");
+    mkdirSync(tools);
+    writeFileSync(join(tools, "gh"), `#!/bin/sh
+set -eu
+branch=$(git --git-dir "$MOCK_REMOTE" rev-parse --verify "refs/heads/$GITHUB_REF_NAME")
+tag=$(git --git-dir "$MOCK_REMOTE" rev-parse --verify "refs/tags/$RELEASE_VERSION")
+[ "$branch" = "$tag" ]
+printf '%s\\n' "$@" > "$MOCK_DISPATCH_LOG"
+`, { mode: 0o755 });
+
+    const result = run("bash", ["-e", "-c", `${workflowStep("Bump version and push")}\n${workflowStep("Start compiled release")}`], f.dir, {
+      PATH: `${tools}:${process.env.PATH}`,
+      RELEASE_VERSION: version,
+      GITHUB_REF_NAME: "release-test",
+      MOCK_REMOTE: f.remote,
+      MOCK_DISPATCH_LOG: dispatchLog
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(git(f.dir, "log", "-1", "--format=%an <%ae>"), "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>");
+    assert.equal(JSON.parse(git(f.dir, "--git-dir", f.remote, "show", `${version}:frontend/package.json`)).version, version);
+    assert.deepEqual(readFileSync(dispatchLog, "utf8").trim().split("\n"), [
+      "workflow", "run", "release.yml", "--ref", "release-test", "-f", `tag=${version}`
+    ]);
+  });
 }
 
 test("bump-version.sh help runs and displays usage", { skip: windows }, () => {
