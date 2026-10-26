@@ -611,7 +611,8 @@ kbd { font-size: var(--ui-font-size, 14px); white-space: nowrap; color: var(--cp
 .entry-filter-actions button { white-space: normal; min-height: 32px; font-size: var(--ui-font-size, 14px); }
 .workspace-region { min-height: 0; min-width: 0; display: flex; flex-wrap: wrap; gap: 12px; margin: 0 24px 16px; overflow: auto; }
 .workspace { flex: 3 1 600px; height: 100%; min-width: 0; min-height: 360px; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); container: log-workspace / inline-size; overflow: hidden; padding: 0; gap: 0; }
-.workspace-layout { min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.workspace-layout { grid-area: 1 / 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.history-switch-status { grid-area: 1 / 1; z-index: 2; align-self: start; justify-self: center; max-width: calc(100% - 24px); margin-top: 60px; padding: 8px 12px; border: 1px solid var(--cp-material-border); border-radius: 8px; background: var(--cp-panel-strong); color: var(--cp-text); box-shadow: var(--cp-card-shadow); }
 .workspace-region:focus-visible { outline: 2px solid var(--cp-native-accent); outline-offset: 2px; }
 .workspace[data-inspector="true"] > .workspace-layout { grid-template-columns: minmax(0, 1fr) 360px; }
 .workspace[data-fields="true"] > .workspace-layout { grid-template-columns: 210px minmax(0, 1fr); }

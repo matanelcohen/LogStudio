@@ -78,7 +78,7 @@ export function useLiveStatus(paused: boolean) {
 
 export function useLogPage(query: QueryState, cursor: PageCursor, maximumId: number | null, revision: number, paused: boolean, clearedThroughId = 0, historyDirectory = "") {
   const key = JSON.stringify({ query, cursor, maximumId, clearedThroughId, historyDirectory });
-  const [response, setResponse] = useState<{ key: string; page: LogPage | null; error: string | null } | null>(null);
+  const [response, setResponse] = useState<{ key: string; historyDirectory: string; page: LogPage | null; error: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
   const refreshRef = useRef<() => void>(() => undefined);
@@ -101,10 +101,10 @@ export function useLogPage(query: QueryState, cursor: PageCursor, maximumId: num
         if (!active) return;
         if (historyDirectory && result.status.historyDirectory !== historyDirectory) throw new Error("The selected application changed. Refresh the current history.");
         if (result.status.clearedThroughId < clearedThroughId) throw new Error("Session history changed during the request. Refresh the current history.");
-        setResponse({ key, page: result, error: null });
+        setResponse({ key, historyDirectory, page: result, error: null });
       } catch (error) {
         if (!active || controller.signal.aborted) return;
-        setResponse({ key, page: null, error: errorMessage(error) });
+        setResponse({ key, historyDirectory, page: null, error: errorMessage(error) });
       } finally {
         inFlight = false;
         if (active) {
@@ -127,7 +127,7 @@ export function useLogPage(query: QueryState, cursor: PageCursor, maximumId: num
       controller?.abort();
       refreshRef.current = () => undefined;
     };
-  }, [query, cursor, maximumId, key, retry]);
+  }, [key, retry]);
 
   useEffect(() => refreshRef.current(), [revision]);
   useEffect(() => {
@@ -142,5 +142,6 @@ export function useLogPage(query: QueryState, cursor: PageCursor, maximumId: num
   }, [query.sessionId]);
   const refresh = useCallback(() => setRetry(value => value + 1), []);
   const current = response?.key === key ? response : null;
-  return { page: current?.page ?? null, loading: loading || current === null, error: current?.error ?? null, refresh };
+  const previous = !current && historyDirectory && response?.historyDirectory && response.historyDirectory !== historyDirectory ? response.page : null;
+  return { page: current?.page ?? previous, loading: loading || current === null, error: current?.error ?? null, refresh };
 }
