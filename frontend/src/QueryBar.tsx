@@ -6,7 +6,7 @@ import {
   buildExportUrl, buildSessionExportUrl, FieldLabels, NumberFormatter, OperatorLabels, Streams,
   type LogCondition, type LogPage, type QueryState
 } from "./model";
-import { SelectControl, type Choice } from "./ui";
+import { ResponsiveActions, SelectControl, type Choice } from "./ui";
 import { LevelFilter } from "./LevelFilter";
 import { TimeRangeControl } from "./TimeRangeControl";
 
@@ -22,12 +22,13 @@ function categoryLabel(value: string): string {
   return category;
 }
 
-export function QueryBar({ query, page, loading, error, searchRef, maximumId, onChange, onEdit, onReset, onNotice, onSavedSearches }: {
+export function QueryBar({ query, page, loading, error, searchRef, actionsRef, maximumId, onChange, onEdit, onReset, onNotice, onSavedSearches }: {
   query: QueryState;
   page: LogPage | null;
   loading: boolean;
   error: string | null;
   searchRef: RefObject<HTMLInputElement | null>;
+  actionsRef?: RefObject<HTMLButtonElement | null>;
   maximumId: number | null;
   onChange(query: QueryState): void;
   onEdit(condition?: LogCondition): void;
@@ -43,6 +44,14 @@ export function QueryBar({ query, page, loading, error, searchRef, maximumId, on
     categories.push({ value: query.category, label: categoryLabel(query.category) });
   const shortcut = navigator.platform.startsWith("Mac") ? "⌘ K" : "Ctrl+K";
   const exportId = Math.min(maximumId ?? page?.status.lastId ?? 0, page?.status.lastId ?? 0);
+  const activeFilters = [
+    query.levels !== null ? `Levels: ${query.levels.length ? query.levels.join(", ") : "none"}` : "",
+    query.stream !== "all" ? `Stream: ${query.stream}` : "",
+    query.category ? `Category: ${categoryLabel(query.category)}` : "",
+    query.since || query.until ? `Time: ${query.since || "start"} – ${query.until || "now"}` :
+      query.timeWindow ? TimeChoices.find(choice => choice.value === String(query.timeWindow))?.label : "",
+    query.matchCase ? "Match case" : ""
+  ].filter(Boolean);
 
   return (
     <Oui.Card className="query-bar" role="region" aria-label="Search and filter logs">
@@ -58,7 +67,8 @@ export function QueryBar({ query, page, loading, error, searchRef, maximumId, on
         <Oui.Button variant="outline" size="sm" id="conditionsButton" className="query-builder-button" onClick={() => onEdit()}>
           <SlidersHorizontal size={15} /> Add filter {query.conditions.length > 0 && <span className="button-count">{query.conditions.length}</span>}
         </Oui.Button>
-        {onSavedSearches && <Oui.Button variant="outline" size="sm" onClick={onSavedSearches}><Bookmark size={15} />Saved searches</Oui.Button>}
+        <ResponsiveActions label="Query actions" className="secondary-actions" triggerRef={actionsRef}>
+        {onSavedSearches && <Oui.Button variant="outline" size="sm" data-disclosure-close onClick={onSavedSearches}><Bookmark size={15} />Saved searches</Oui.Button>}
         <Oui.Popover>
           <Oui.PopoverTrigger asChild><Oui.Button variant="ghost" size="icon" className="icon-button" aria-label="Search help"><CircleHelp size={17} /></Oui.Button></Oui.PopoverTrigger>
 
@@ -94,8 +104,9 @@ export function QueryBar({ query, page, loading, error, searchRef, maximumId, on
           </Oui.DropdownMenuContent>
         </Oui.DropdownMenu>
         </div>
+        </ResponsiveActions>
       </div>
-      <div className="filter-row">
+      <ResponsiveActions label={`Filters${activeFilters.length || query.conditions.length ? ` · ${activeFilters.length + query.conditions.length} active` : ""}`} className="filter-row">
         <span className="field-label"><Filter size={13} /> Filters</span>
         <LevelFilter value={query.levels} onChange={levels => onChange({ ...query, levels, severity: "all" })} />
         <SelectControl id="stream" label="Stream" value={query.stream} choices={[
@@ -111,7 +122,8 @@ export function QueryBar({ query, page, loading, error, searchRef, maximumId, on
         <label className="checkbox-label"><Oui.Checkbox id="caseSensitive" checked={query.matchCase}
           onCheckedChange={checked => onChange({ ...query, matchCase: checked === true })} />Match case</label>
         <Oui.Button variant="ghost" size="sm" id="reset" className="ghost-button" onClick={onReset}><RotateCcw size={13} /> Reset</Oui.Button>
-      </div>
+      </ResponsiveActions>
+      {activeFilters.length > 0 && <p className="active-filter-summary" aria-label="Active filters">{activeFilters.join(" · ")}</p>}
       {query.conditions.length > 0 && (
         <div id="filterChips" className="filter-chips" aria-label="Active condition filters">
           <span className="chip-logic">Includes: {query.includeMode === "all" ? "AND" : "OR"} · Excludes: OR</span>

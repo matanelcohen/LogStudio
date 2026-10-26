@@ -49,7 +49,7 @@ Light (Visual Studio), Dark (Visual Studio), Light High Contrast, Dark High Cont
 Abyss, Kimbie Dark, Monokai, Monokai Dimmed, Quiet Light, Red, Solarized Light,
 Solarized Dark, and Tomorrow Night Blue. These palettes also override OUI's tokens, including portalled controls, so menus and dialogs
 match the selected editor palette. High-contrast options remove shadows and strengthen borders.
-The sidebar collapses to icons on smaller screens. System typography, keyboard navigation,
+The navigation rail collapses to icons on smaller screens. System typography, keyboard navigation,
 resize/reorder grips, and per-query filter chips remain available. All visual materials
 are rendered locally with CSS, without external fonts, images, or downloads.
 
@@ -58,12 +58,28 @@ area, capped at 1280 x 800. Later launches restore the saved window size and max
 fitting the normal size to the current display if necessary. Resizing autosaves after a short
 pause and on close; minimizing never replaces the saved normal size.
 It can be resized or maximized (minimum 640 x 400, reduced for smaller displays).
-Toolbars wrap to the available width; the field browser and inspector stack when the
-results pane becomes narrow, including beside Copilot.
+At widths of 900 CSS pixels or less, or heights of 500 CSS pixels or less, secondary header
+controls move into **Session actions** (Import, Ask Copilot, storage, appearance, and Settings).
+**Pause/Resume**, capture/connection state, and the selected-session switcher remain visible.
+In listen-all mode, **Running app** stays visible and **Capture details** holds its guidance.
+**Query actions** contains saved searches, search help, and the unchanged Export formats.
+**Filters** discloses the filter editors; active filter summaries and condition chips stay visible.
+Search and the results come before optional panels: Fields appears beside results on the right
+in a wide workspace, and Fields and Inspector stack after results when the pane narrows.
+Copilot follows the results, stacking below them in compact windows. Resizing does not change
+panel choices, the selected entry, column customization, or a Copilot draft.
 Short windows scroll without hiding controls or collapsing the log results. Wide log tables
 scroll inside their results pane; dialogs and menus stay within the window with their own scrolling.
 
-Open **Settings** (the gear in the header) to choose the UI font and base size (12–18 px),
+This compact contract includes a 640 x 400 CSS-pixel window and a 1280 x 800 browser at
+200% zoom (the same effective CSS size). To investigate with the keyboard, use **Ctrl+K**
+(**Cmd+K** on macOS) to search, then the **Skip to log results** link or Tab to reach results.
+Focus a log row and press Enter to inspect it; use Tab/Shift+Tab to reach inspector controls.
+Open **Query actions**, then **Export** or **Export options**, to export the selected session's
+matching records. Escape closes disclosures and dialogs; focus returns to their visible opener.
+Import and Settings are reachable through **Session actions** without changing the selected session.
+
+Open **Settings** (the gear in the header, or under **Session actions**) to choose the UI font and base size (12–18 px),
 plus an independent monospace font, size (10–24 px), and line spacing for log messages.
 Both sizes default to **14 px**. UI text, including controls, menus, dialogs, and helper text,
 uses the chosen UI size, with larger headings scaling proportionally. The log size applies
