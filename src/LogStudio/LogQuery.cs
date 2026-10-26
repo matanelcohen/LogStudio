@@ -38,6 +38,7 @@ internal sealed class LogQuery
     private readonly bool hasCategory;
     private readonly string? category;
     private readonly DateTimeOffset? since;
+    private readonly DateTimeOffset? until;
     private readonly CompiledLogCondition[] conditions;
     private readonly bool includeAny;
 
@@ -132,6 +133,14 @@ internal sealed class LogQuery
                 throw new ArgumentException("since must be a valid timestamp.");
             this.since = timestamp;
         }
+        string? until = parameters[ViewerConstants.UntilQuery];
+        if (until is not null)
+        {
+            if (!DateTimeOffset.TryParse(until, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTimeOffset timestamp))
+                throw new ArgumentException("until must be a valid timestamp.");
+            this.until = timestamp;
+        }
+        if (this.since > this.until) throw new ArgumentException("since must be at or before until.");
 
         this.MinimumId = ReadId(parameters, ViewerConstants.MinimumIdQuery) ?? 0;
         this.MaximumId = ReadId(parameters, ViewerConstants.MaximumIdQuery);
@@ -160,7 +169,8 @@ internal sealed class LogQuery
             (this.severity.HasValue && entry.Severity != this.severity.Value) ||
             (this.minimumSeverity.HasValue && entry.Severity < this.minimumSeverity.Value) ||
             (this.hasCategory && !string.Equals(entry.Category, this.category, StringComparison.Ordinal)) ||
-            (this.since.HasValue && entry.Timestamp < this.since.Value))
+            (this.since.HasValue && entry.Timestamp < this.since.Value) ||
+            (this.until.HasValue && entry.Timestamp > this.until.Value))
             return false;
 
         string? allText = null;
@@ -205,7 +215,7 @@ internal sealed class LogQuery
         if (this.levels?.Count == 0)
             return this.Result(Array.Empty<LogEntry>(), history.Status, 0, 0, 0, 0, 0, history.Categories);
         if (this.levels is null && this.terms.Length == 0 && this.conditions.Length == 0 && !this.stream.HasValue && !this.severity.HasValue &&
-            !this.minimumSeverity.HasValue && !this.hasCategory && !this.since.HasValue &&
+            !this.minimumSeverity.HasValue && !this.hasCategory && !this.since.HasValue && !this.until.HasValue &&
             this.MinimumId == 0 && !this.MaximumId.HasValue && history.Status.EvictedCount == 0)
             return this.ReadUnfilteredPage(history, cancellationToken);
 

@@ -1,3 +1,4 @@
+import * as Oui from "@opensearch-project/oui";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
@@ -70,7 +71,7 @@ describe("full-session log chat panel", () => {
     const close = vi.fn();
     const focus = vi.fn();
     render(<>
-      <input aria-label="Search logs" />
+      <Oui.Input aria-label="Search logs" />
       <CopilotChatPanel status={Status} sessionId="" onClose={close} returnFocus={focus} />
     </>);
     await connectCli();
@@ -419,7 +420,7 @@ describe("full-session log chat panel", () => {
     let finish!: (value: ChatResponse) => void;
     vi.spyOn(api, "askCopilot").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
     render(<>
-      <input aria-label="Search logs" />
+      <Oui.Input aria-label="Search logs" />
       <CopilotChatPanel status={Status} sessionId="" onClose={vi.fn()} returnFocus={vi.fn()} />
     </>);
     await connectCli();

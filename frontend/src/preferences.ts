@@ -1,4 +1,5 @@
-import { MaximumPageSize, PageSize } from "./model";
+import { MaximumPageSize, PageSize, type SessionFilters } from "./model";
+import { readSessionFilters } from "./sessionFilters";
 import { AppearanceChoices, type Appearance } from "./themes";
 
 export const TypographyStorageKey = "logstudio.typography.v1";
@@ -60,12 +61,17 @@ export interface AppPreferences {
   appearance: Appearance;
   typography: TypographySettings;
   explorer: ExplorerPreferences;
+  savedSearches: SavedSearch[];
 }
+
+export const MaximumSavedSearches = 10;
+export interface SavedSearch { name: string; filters: SessionFilters; }
 
 export interface PreferencesChanges {
   appearance?: Appearance;
   typography?: Partial<TypographySettings>;
   explorer?: Partial<ExplorerPreferences>;
+  savedSearches?: SavedSearch[];
 }
 
 export function mergePreferenceChanges(current: PreferencesChanges, changes: PreferencesChanges): PreferencesChanges {
@@ -86,6 +92,7 @@ export function mergePreferences(current: AppPreferences, changes: PreferencesCh
 
 export const DefaultPreferences: AppPreferences = {
   appearance: "system",
+  savedSearches: [],
   typography: { ...DefaultTypography },
   explorer: {
     wrap: true, pageSize: PageSize, fields: false, inspector: false, timeline: false,
@@ -112,6 +119,17 @@ export function readPreferences(value: unknown): AppPreferences {
   const visibility = object(explorer.columnVisibility);
   const sizing = object(explorer.columnSizing);
   const order = explorer.columnOrder;
+  const rawSearches = data.savedSearches === undefined ? [] : data.savedSearches;
+  if (!Array.isArray(rawSearches) || rawSearches.length > MaximumSavedSearches) throw new Error("The server returned invalid saved searches.");
+  const names = new Set<string>();
+  const savedSearches = rawSearches.map(value => {
+    const search = object(value);
+    const name = search.name;
+    if (typeof name !== "string" || !name || name !== name.trim() || name.length > 64 ||
+      /[\u0000-\u001f\u007f-\u009f]/u.test(name) || names.has(name.toLowerCase())) throw new Error("The server returned invalid saved searches.");
+    names.add(name.toLowerCase());
+    return { name, filters: readSessionFilters(search.filters) };
+  });
   if (!appearance || Object.entries(typography).some(([key, value]) => rawTypography[key] !== value) ||
     ["wrap", "fields", "inspector", "timeline"].some(key => typeof explorer[key] !== "boolean") ||
     typeof explorer.pageSize !== "number" || !Number.isInteger(explorer.pageSize) || explorer.pageSize < 1 || explorer.pageSize > MaximumPageSize ||
@@ -121,7 +139,7 @@ export function readPreferences(value: unknown): AppPreferences {
     Object.entries(sizing).some(([key, value]) => !DefaultColumnOrder.includes(key) || typeof value !== "number" || !Number.isFinite(value) || value < 44 || value > 4000))
     throw new Error("The server returned invalid app settings.");
   return {
-    appearance, typography,
+    appearance, typography, savedSearches,
     explorer: {
       wrap: explorer.wrap as boolean, pageSize: explorer.pageSize,
       fields: explorer.fields as boolean, inspector: explorer.inspector as boolean, timeline: explorer.timeline as boolean,

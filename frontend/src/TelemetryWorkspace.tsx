@@ -1,3 +1,4 @@
+import * as Oui from "@opensearch-project/oui";
 import { Activity, Clock3, Database, GitBranch, Search, ShieldAlert, X } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { MetricChart } from "./MetricChart";
@@ -7,6 +8,7 @@ import { displayText, MaximumDisplayedPoints, MaximumDisplayedSeries, metricSeri
 import { TelemetrySourcesDialog } from "./TelemetrySourcesDialog";
 import { TelemetryTags } from "./TelemetryTags";
 import { TraceExplorer } from "./TraceExplorer";
+import { SelectControl } from "./ui";
 
 export type TelemetryView = "metrics" | "traces";
 export function TelemetryWorkspace({ view, archived }: { view: TelemetryView; archived: boolean }) {
@@ -58,7 +60,7 @@ export function TelemetryWorkspace({ view, archived }: { view: TelemetryView; ar
         <TelemetrySourcesDialog key={view} /></div>}</div>
     {archived ? <div className="telemetry-empty" role="status"><Database size={28} aria-hidden="true" />
       <h3>Current-run telemetry only</h3><p>Telemetry is not saved with sessions. Select the current run to view metrics and traces.</p></div> : <>
-      {error && <p className="notice danger" role="alert">{error} Retrying automatically.</p>}
+      {error && <Oui.Alert variant="destructive" className="notice danger" role="alert">{error} Retrying automatically.</Oui.Alert>}
       {!snapshot && !error && <p className="telemetry-empty" role="status">Loading telemetry…</p>}
       {snapshot && !snapshot.enabled && <div className="telemetry-empty" role="status"><Activity size={28} aria-hidden="true" />
         <h3>Enable telemetry to get started</h3><p>Telemetry capture is disabled. Enable capture and restart the instrumented application.</p></div>}
@@ -77,13 +79,12 @@ export function TelemetryWorkspace({ view, archived }: { view: TelemetryView; ar
         {view === "metrics" ? <>
           <div className="telemetry-toolbar">
             <label className="telemetry-search"><Search size={16} aria-hidden="true" />
-              <input type="search" aria-label="Search metrics" placeholder="Search instruments, sources, or tags"
+              <Oui.Input type="search" aria-label="Search metrics" placeholder="Search instruments, sources, or tags"
                 value={query} onChange={event => setQuery(event.target.value)} /></label>
-            <label className="telemetry-filter"><span>Source</span><select aria-label="Metric source" value={meter} onChange={event => setMeter(event.target.value)}>
-              <option value="">All meters</option>{meters.map(source => <option key={source} value={source}>{displayText(source)}</option>)}
-              {meter && !meters.includes(meter) && <option value={meter}>{displayText(meter)} (not retained)</option>}
-            </select></label>
-            {(query || meter) && <button className="ghost-button" onClick={() => { setQuery(""); setMeter(""); }}><X size={14} aria-hidden="true" />Reset filters</button>}
+            <label className="telemetry-filter"><span>Source</span><SelectControl label="Metric source" value={meter} onChange={setMeter}
+              choices={[{ value: "", label: "All meters" }, ...meters.map(source => ({ value: source, label: displayText(source) })),
+                ...(meter && !meters.includes(meter) ? [{ value: meter, label: `${displayText(meter)} (not retained)` }] : [])]} /></label>
+            {(query || meter) && <Oui.Button variant="ghost" size="sm" className="ghost-button" onClick={() => { setQuery(""); setMeter(""); }}><X size={14} aria-hidden="true" />Reset filters</Oui.Button>}
           </div>
           <div className="telemetry-results-heading"><h3>Measurement panels <span>{Math.min(matchingGroups.length, MaximumDisplayedSeries)}</span></h3>
             <span className="muted">Showing {Math.min(matchingGroups.length, MaximumDisplayedSeries)} of {matchingGroups.length} {query.trim() || meter ? "matching " : ""}series, up to {MaximumDisplayedPoints} recent points each.</span></div>
@@ -104,8 +105,8 @@ export function TelemetryWorkspace({ view, archived }: { view: TelemetryView; ar
               <TelemetryTags tags={metric.tags} compact />
               <MetricChart metrics={metrics} />
               <details><summary>Raw measurement table ({points.length} points)</summary>
-                <table><caption>{displayText(metric.name)} raw measurements</caption><thead><tr><th scope="col">Timestamp</th><th scope="col">Value</th></tr></thead>
-                  <tbody>{points.map(metric => <tr key={metric.id}><td>{metric.timestamp}</td><td>{metric.value}</td></tr>)}</tbody></table>
+                <Oui.Table><Oui.TableCaption>{displayText(metric.name)} raw measurements</Oui.TableCaption><Oui.TableHeader><Oui.TableRow><Oui.TableHead scope="col">Timestamp</Oui.TableHead><Oui.TableHead scope="col">Value</Oui.TableHead></Oui.TableRow></Oui.TableHeader>
+                  <Oui.TableBody>{points.map(metric => <Oui.TableRow key={metric.id}><Oui.TableCell>{metric.timestamp}</Oui.TableCell><Oui.TableCell>{metric.value}</Oui.TableCell></Oui.TableRow>)}</Oui.TableBody></Oui.Table>
               </details>
             </section>;
           })}</div>

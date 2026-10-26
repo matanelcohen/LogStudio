@@ -61,15 +61,27 @@ internal sealed record AppPreferences
     public string Appearance { get; init; } = "system";
     public TypographyPreferences Typography { get; init; } = new();
     public ExplorerPreferences Explorer { get; init; } = new();
+    public SavedSearch[] SavedSearches { get; init; } = [];
 
     internal void Validate()
     {
-        if (!Appearances.Contains(this.Appearance, StringComparer.Ordinal) || this.Typography is null || this.Explorer is null)
+        if (!Appearances.Contains(this.Appearance, StringComparer.Ordinal) || this.Typography is null || this.Explorer is null || this.SavedSearches is null)
             throw new ArgumentException("Choose a supported appearance and valid preferences.");
         this.Typography.Validate();
         this.Explorer.Validate();
+        if (this.SavedSearches.Length > 10) throw new ArgumentException("Save no more than 10 searches.");
+        HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
+        foreach (SavedSearch search in this.SavedSearches)
+        {
+            if (search is null || string.IsNullOrWhiteSpace(search.Name) || search.Name.Length > 64 ||
+                search.Name != search.Name.Trim() || search.Name.Any(char.IsControl) || !names.Add(search.Name) || search.Filters is null)
+                throw new ArgumentException("Saved searches need unique names containing 1-64 characters and valid filters.");
+            search.Filters.Validate();
+        }
     }
 }
+
+internal sealed record SavedSearch(string Name, SessionFilters Filters);
 
 internal sealed record DesktopWindowSettings(int Width, int Height, bool Maximized)
 {
@@ -129,9 +141,9 @@ internal sealed class AppSettingsStore
         HashSet<string> seen = new(StringComparer.Ordinal);
         foreach (JsonProperty property in patch.EnumerateObject())
         {
-            if (property.Name is not ("appearance" or "typography" or "explorer") ||
+            if (property.Name is not ("appearance" or "typography" or "explorer" or "savedSearches") ||
                 property.Value.ValueKind == JsonValueKind.Null || !seen.Add(property.Name))
-                throw new ArgumentException("Settings must contain appearance, typography or explorer preferences without duplicates.");
+                throw new ArgumentException("Settings must contain appearance, typography, explorer or savedSearches preferences without duplicates.");
         }
         if (seen.Count == 0) throw new ArgumentException("Choose at least one setting to save.");
         return this.Update(current =>
@@ -210,6 +222,7 @@ internal sealed class AppSettingsStore
                 using (FileStream file = new(pending, options))
                 {
                     JsonSerializer.Serialize(file, updated, JsonOptions);
+                    if (file.Position > MaximumBytes) throw new ArgumentException("App settings, including saved searches, must fit within 32 KiB. Remove a search or shorten its filters.");
                     file.Flush(flushToDisk: true);
                 }
                 File.Move(pending, this.path, overwrite: true);

@@ -1,11 +1,12 @@
-import * as Menu from "@radix-ui/react-dropdown-menu";
+import * as Oui from "@opensearch-project/oui";
+
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, pointerWithin, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, horizontalListSortingStrategy, SortableContext, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import {
   flexRender, getCoreRowModel, useReactTable,
   type ColumnDef, type ColumnSizingState, type VisibilityState
 } from "@tanstack/react-table";
-import { AlertTriangle, ArrowDownToLine, ArrowLeft, ArrowRight, ChartNoAxesColumn, Check, ChevronDown, CircleAlert, Columns3, ListFilter, MoreHorizontal, PanelRight, RotateCcw, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, ArrowLeft, ArrowRight, ChartNoAxesColumn, ChevronDown, CircleAlert, Columns3, ListFilter, MoreHorizontal, PanelRight, RotateCcw, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { MaximumHighlights, NumberFormatter, SeverityLabels, TimeFormatter, type LogEntry, type LogPage, type Severity } from "./model";
 import { ColumnHeader } from "./ColumnHeader";
@@ -90,7 +91,7 @@ export function LogTable({ page, loading, error, selected, matchCase, follow, wr
     { accessorKey: "timestamp", header: "Captured", size: 110, minSize: 90, cell: info =>
       <span className="timestamp">{TimeFormatter.format(new Date(info.row.original.timestamp))}</span> },
     { accessorKey: "severity", header: "Level", size: 90, minSize: 72, cell: info =>
-      <span className={`severity-badge ${info.row.original.severity}`}>{SeverityLabels[info.row.original.severity]}</span> },
+      <Oui.Badge variant="outline" className={`severity-badge ${info.row.original.severity}`}>{SeverityLabels[info.row.original.severity]}</Oui.Badge> },
     { accessorKey: "stream", header: "Stream", size: 80, minSize: 66, cell: info => <span className="stream-cell">{info.row.original.stream}</span> },
     { accessorKey: "category", header: "Category", size: 180, minSize: 90, cell: info =>
       <span className="category-cell" title={info.row.original.category ?? "Uncategorized"}>{info.row.original.category ?? "—"}</span> },
@@ -122,6 +123,16 @@ export function LogTable({ page, loading, error, selected, matchCase, follow, wr
   useEffect(() => {
     if (follow && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
   }, [entries, follow, typography]);
+  useEffect(() => {
+    const pane = scroll.current;
+    const row = selected && pane?.querySelector(`[data-log-id="${selected.id}"]`);
+    if (!pane || !row) return;
+    const bounds = pane.getBoundingClientRect();
+    const entryBounds = row.getBoundingClientRect();
+    const top = bounds.top + (pane.querySelector("thead")?.getBoundingClientRect().height ?? 0);
+    if (entryBounds.top < top) pane.scrollTop += entryBounds.top - top;
+    else if (entryBounds.bottom > bounds.bottom) pane.scrollTop += entryBounds.bottom - bounds.bottom;
+  }, [selected?.id]);
   useEffect(() => {
     const pane = scroll.current;
     if (!pane) return;
@@ -158,63 +169,63 @@ export function LogTable({ page, loading, error, selected, matchCase, follow, wr
           <h2>Logs</h2><span id="matchCount" className="result-count">{error ? "Search failed" : page ? `${NumberFormatter.format(page.matchCount)} ${page.matchCount === page.status.retainedCount ? "entries" : "matching"}` : "Loading…"}</span>
           {page && page.matchCount !== page.status.retainedCount && <span className="captured-count">of <span id="retainedCount">{NumberFormatter.format(page.status.retainedCount)}</span></span>}
           <span className="result-divider" />
-          <button className="severity-stat error-stat" title="Show error and critical entries in this query" aria-label="Filter error entries" onClick={() => onSeverity(["error", "critical"])}>
+          <Oui.Button variant="ghost" size="sm" className="severity-stat error-stat" title="Show error and critical entries in this query" aria-label="Filter error entries" onClick={() => onSeverity(["error", "critical"])}>
             <CircleAlert size={12} /><span id="errorCount">{NumberFormatter.format(page?.errorCount ?? 0)}</span><span>errors</span>
-          </button>
-          <button className="severity-stat warning-stat" title="Show warning entries in this query" aria-label="Filter warning entries" onClick={() => onSeverity(["warning"])}>
+          </Oui.Button>
+          <Oui.Button variant="ghost" size="sm" className="severity-stat warning-stat" title="Show warning entries in this query" aria-label="Filter warning entries" onClick={() => onSeverity(["warning"])}>
             <AlertTriangle size={12} /><span id="warningCount">{NumberFormatter.format(page?.warningCount ?? 0)}</span><span>warnings</span>
-          </button>
+          </Oui.Button>
           {loading && page && <span className="query-loading" role="status">Searching…</span>}
         </div>
         <div className="table-tools">
-          <button className="view-toggle small" aria-label="Available fields" aria-pressed={fields} onClick={onFields}><ListFilter size={14} />Fields</button>
-          <button className="view-toggle small" aria-label="Toggle timeline" aria-pressed={timeline} onClick={() => onPreferences({ timeline: !timeline })}><ChartNoAxesColumn size={14} />Timeline</button>
-          <Menu.Root>
-            <Menu.Trigger asChild><button className="small"><Columns3 size={14} /> Columns <ChevronDown size={11} /></button></Menu.Trigger>
-            <Menu.Portal><Menu.Content className="menu-content" sideOffset={6} align="end">
-              <Menu.Label className="menu-label">Visible columns</Menu.Label>
+          <Oui.Button variant="outline" size="sm" className="view-toggle small" aria-label="Available fields" aria-pressed={fields} onClick={onFields}><ListFilter size={14} />Fields</Oui.Button>
+          <Oui.Button variant="outline" size="sm" className="view-toggle small" aria-label="Toggle timeline" aria-pressed={timeline} onClick={() => onPreferences({ timeline: !timeline })}><ChartNoAxesColumn size={14} />Timeline</Oui.Button>
+          <Oui.DropdownMenu>
+            <Oui.DropdownMenuTrigger asChild><Oui.Button variant="outline" size="sm" className="small"><Columns3 size={14} /> Columns <ChevronDown size={11} /></Oui.Button></Oui.DropdownMenuTrigger>
+            <Oui.DropdownMenuContent className="menu-content" sideOffset={6} align="end">
+              <Oui.DropdownMenuLabel className="menu-label">Visible columns</Oui.DropdownMenuLabel>
               {table.getAllLeafColumns().map(column => (
-                <Menu.CheckboxItem className="menu-item" key={column.id} checked={column.getIsVisible()} disabled={!column.getCanHide()}
+                <Oui.DropdownMenuCheckboxItem className="menu-item" key={column.id} checked={column.getIsVisible()} disabled={!column.getCanHide()}
                   onCheckedChange={value => column.toggleVisibility(value)}>
-                  <Menu.ItemIndicator><Check size={13} /></Menu.ItemIndicator>{column.id === "id" ? "Sequence ID" : typeof column.columnDef.header === "string" ? column.columnDef.header : column.id}
-                </Menu.CheckboxItem>
+                  {column.id === "id" ? "Sequence ID" : typeof column.columnDef.header === "string" ? column.columnDef.header : column.id}
+                </Oui.DropdownMenuCheckboxItem>
               ))}
-              <Menu.Separator className="menu-separator" />
-              <Menu.Item className="menu-item" onSelect={() => onPreferences({ columnSizing: {}, columnVisibility: DefaultVisibility, columnOrder: DefaultOrder })}><RotateCcw size={13} /> Reset columns</Menu.Item>
-            </Menu.Content></Menu.Portal>
-          </Menu.Root>
-          <button className="view-toggle icon-button" aria-label="Toggle inspector" aria-pressed={inspector} onClick={onInspector}><PanelRight size={15} /></button>
-          <button id="clearSession" ref={clearButtonRef} className="icon-button" aria-label="Clear logs" disabled={clearing} onClick={onClearSession}
-            title="Delete all session history, not just the current view"><Trash2 size={14} /></button>
-          <Menu.Root>
-            <Menu.Trigger asChild><button className="icon-button" aria-label="Explorer options"><MoreHorizontal size={17} /></button></Menu.Trigger>
-            <Menu.Portal><Menu.Content className="menu-content" sideOffset={6} align="end">
-              <Menu.Label className="menu-label">View options</Menu.Label>
-              <Menu.CheckboxItem className="menu-item" checked={wrap} onCheckedChange={onWrap}><Menu.ItemIndicator><Check size={13} /></Menu.ItemIndicator>Wrap long lines</Menu.CheckboxItem>
-              <Menu.CheckboxItem className="menu-item" checked={follow} onCheckedChange={onFollow}><Menu.ItemIndicator><Check size={13} /></Menu.ItemIndicator>Follow newest entries</Menu.CheckboxItem>
-              <Menu.Separator className="menu-separator" />
-              <Menu.Item className="menu-item" onSelect={onClear}>Clear view (this tab)</Menu.Item>
-              <Menu.Item className="menu-item" onSelect={onRetry}>Refresh disk history</Menu.Item>
-            </Menu.Content></Menu.Portal>
-          </Menu.Root>
+              <Oui.DropdownMenuSeparator className="menu-separator" />
+              <Oui.DropdownMenuItem className="menu-item" onSelect={() => onPreferences({ columnSizing: {}, columnVisibility: DefaultVisibility, columnOrder: DefaultOrder })}><RotateCcw size={13} /> Reset columns</Oui.DropdownMenuItem>
+            </Oui.DropdownMenuContent>
+          </Oui.DropdownMenu>
+          <Oui.Button variant="ghost" size="icon" className="view-toggle icon-button" aria-label="Toggle inspector" aria-pressed={inspector} onClick={onInspector}><PanelRight size={15} /></Oui.Button>
+          <Oui.Button variant="ghost" size="icon" id="clearSession" ref={clearButtonRef} className="icon-button" aria-label="Clear logs" disabled={clearing} onClick={onClearSession}
+            title="Delete all session history, not just the current view"><Trash2 size={14} /></Oui.Button>
+          <Oui.DropdownMenu>
+            <Oui.DropdownMenuTrigger asChild><Oui.Button variant="ghost" size="icon" className="icon-button" aria-label="Explorer options"><MoreHorizontal size={17} /></Oui.Button></Oui.DropdownMenuTrigger>
+            <Oui.DropdownMenuContent className="menu-content" sideOffset={6} align="end">
+              <Oui.DropdownMenuLabel className="menu-label">View options</Oui.DropdownMenuLabel>
+              <Oui.DropdownMenuCheckboxItem className="menu-item" checked={wrap} onCheckedChange={onWrap}>Wrap long lines</Oui.DropdownMenuCheckboxItem>
+              <Oui.DropdownMenuCheckboxItem className="menu-item" checked={follow} onCheckedChange={onFollow}>Follow newest entries</Oui.DropdownMenuCheckboxItem>
+              <Oui.DropdownMenuSeparator className="menu-separator" />
+              <Oui.DropdownMenuItem className="menu-item" onSelect={onClear}>Clear view (this tab)</Oui.DropdownMenuItem>
+              <Oui.DropdownMenuItem className="menu-item" onSelect={onRetry}>Refresh disk history</Oui.DropdownMenuItem>
+            </Oui.DropdownMenuContent>
+          </Oui.DropdownMenu>
         </div>
       </div>
       {timeline && <VisiblePageChart entries={entries} />}
       <div id="logsScroll" ref={scroll} className={`logs-scroll ${wrap ? "wrapped" : ""}`} tabIndex={0} aria-label="Scrollable log entries" aria-busy={loading}>
         <DndContext sensors={sensors} collisionDetection={event => event.pointerCoordinates ? pointerWithin(event) : closestCenter(event)} onDragEnd={dropColumn}>
-        <table aria-label="Captured logs" style={{ width: `max(100%, ${table.getTotalSize()}px)` }}>
+        <Oui.Table aria-label="Captured logs" style={{ width: `max(100%, ${table.getTotalSize()}px)` }}>
           <colgroup>{table.getVisibleLeafColumns().map(column => <col key={column.id} style={{ width: column.getSize() }} />)}</colgroup>
           <SortableContext items={table.getVisibleLeafColumns().map(column => column.id)} strategy={horizontalListSortingStrategy}>
-          <thead>
-            {table.getHeaderGroups().map(group => <tr key={group.id}>{group.headers.map(header => (
+          <Oui.TableHeader>
+            {table.getHeaderGroups().map(group => <Oui.TableRow key={group.id}>{group.headers.map(header => (
               <ColumnHeader key={header.id} header={header} order={order} onMove={moveColumn}
                 onResize={(id, width) => setSizing(value => ({ ...value, [id]: width }))} />
-            ))}</tr>)}
-          </thead>
+            ))}</Oui.TableRow>)}
+          </Oui.TableHeader>
           </SortableContext>
-          <tbody id="rows" data-loaded-entries={entries.length}>
+          <Oui.TableBody id="rows" data-loaded-entries={entries.length}>
             {table.getRowModel().rows.map(row => (
-              <tr key={row.id} data-log-id={row.id} data-severity={row.original.severity} tabIndex={0} className={selected?.id === row.original.id ? "selected" : ""}
+              <Oui.TableRow key={row.id} data-log-id={row.id} data-severity={row.original.severity} tabIndex={0} aria-selected={selected?.id === row.original.id} className={selected?.id === row.original.id ? "selected" : ""}
                 onClick={() => onSelect(row.original)} onKeyDown={event => {
                   if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(row.original); }
                   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -223,26 +234,26 @@ export function LogTable({ page, loading, error, selected, matchCase, follow, wr
                     if (target instanceof HTMLElement) target.focus();
                   }
                 }}>
-                {row.getVisibleCells().map(cell => <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}
-              </tr>
+                {row.getVisibleCells().map(cell => <Oui.TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</Oui.TableCell>)}
+              </Oui.TableRow>
             ))}
-          </tbody>
-        </table>
+          </Oui.TableBody>
+        </Oui.Table>
         </DndContext>
         {entries.length === 0 && <div id="emptyState" className="empty-state">
           <Search size={28} />
           <h3>{error ? "Couldn’t load history" : loading ? "Searching disk history…" : page?.status.retainedCount ? "No matching entries" : "Waiting for output"}</h3>
           <p>{error ?? (loading ? "Only the current page is loaded into memory." : "Change your query or conditions. Reset restores entries hidden by Clear view.")}</p>
-          {error && <button onClick={onRetry}>Retry request</button>}
+          {error && <Oui.Button variant="outline" size="sm" onClick={onRetry}>Retry request</Oui.Button>}
         </div>}
       </div>
       <div className="panel-footer">
         <span id="rangeSummary">{loading ? "Searching disk history…" : first && last ? `#${first.id}–${last.id} · ${entries.length} of ${NumberFormatter.format(page?.matchCount ?? 0)} matches` : "No matching entries"}</span>
         <div className="paging">
           <PageSizeControl value={pageSize} onChange={onPageSize} />
-          <button id="older" className="small" disabled={loading || !first || !page?.olderCount} onClick={onOlder}><ArrowLeft size={13} /> Older</button>
-          <button id="newer" className="small" disabled={loading || !last || !page?.newerCount} onClick={onNewer}>Newer <ArrowRight size={13} /></button>
-          {!follow && <button id="jumpLive" className="small" onClick={onLive}><ArrowDownToLine size={13} /> Latest {page?.newerCount ? `(${NumberFormatter.format(page.newerCount)})` : ""}</button>}
+          <Oui.Button variant="outline" size="sm" id="older" className="small" disabled={loading || !first || !page?.olderCount} onClick={onOlder}><ArrowLeft size={13} /> Older</Oui.Button>
+          <Oui.Button variant="outline" size="sm" id="newer" className="small" disabled={loading || !last || !page?.newerCount} onClick={onNewer}>Newer <ArrowRight size={13} /></Oui.Button>
+          {!follow && <Oui.Button variant="outline" size="sm" id="jumpLive" className="small" onClick={onLive}><ArrowDownToLine size={13} /> Latest {page?.newerCount ? `(${NumberFormatter.format(page.newerCount)})` : ""}</Oui.Button>}
         </div>
       </div>
     </section>

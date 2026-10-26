@@ -20,11 +20,10 @@ chrome, a session switcher, query/filter bar, document results, and optional fie
 timeline, and inspector. The distribution is explicitly **visible-page-only**, not a fabricated full-history
 histogram. It uses the compatible React 19 stack, not a copied OpenSearch Dashboards server.
 `@opensearch-project/opensearch` is a Node client, not UI components, and is not required.
-The published OUI library requires an older React/TypeScript toolchain; it is not forced into
-this application with ignored peer dependencies.
-
-The frontend uses **React + TypeScript**, **Radix UI** accessible controls, **TanStack Table**,
-and **Lucide** icons. **dnd-kit** provides pointer, touch and keyboard column dragging.
+The frontend uses **React + TypeScript** and the **OpenSearch UI Framework (OUI)** for
+buttons, fields, checkboxes, selects, menus, dialogs, popovers, tooltips, cards, alerts,
+progress indicators, and table primitives. **TanStack Table** retains server-paged table state,
+**Lucide** supplies locally bundled icons, and **dnd-kit** provides pointer, touch and keyboard column dragging.
 Menus, popovers, and the condition dialog support keyboard navigation and
 focus management. Columns can be resized, hidden, moved, and reset without changing server paging.
 There is no runtime CDN, Node server, or accumulating client-side query cache.
@@ -41,15 +40,15 @@ closed. Selecting a row opens its inspector. The initial columns focus on captur
 category, and message; sequence ID and stream remain available in **Columns**.
 **Explorer options** holds Wrap long lines, Follow newest entries, Clear view, and Refresh.
 
-The macOS-inspired workspace uses a frosted sidebar, translucent window chrome, rounded
-controls, and layered glass panels over a soft local gradient. The original Light and Dark Mode
-use coordinated blue accents; log rows stay mostly opaque for readable monospace text.
+The workspace uses OUI's solid surfaces, compact controls, blue accents, and coordinated light
+and dark themes. Application-specific layouts and log visualizations inherit OUI's design tokens
+rather than maintaining a separate component skin.
 The **Appearance** button and **Settings > Color theme** also offer the built-in VS Code
 color themes: Light 2026, Dark 2026, Light Modern, Dark Modern, Light+, Dark+,
 Light (Visual Studio), Dark (Visual Studio), Light High Contrast, Dark High Contrast,
 Abyss, Kimbie Dark, Monokai, Monokai Dimmed, Quiet Light, Red, Solarized Light,
-Solarized Dark, and Tomorrow Night Blue. These palettes use opaque editor-style surfaces;
-the high-contrast options also remove blur and shadows and strengthen borders.
+Solarized Dark, and Tomorrow Night Blue. These palettes also override OUI's tokens, including portalled controls, so menus and dialogs
+match the selected editor palette. High-contrast options remove shadows and strengthen borders.
 The sidebar collapses to icons on smaller screens. System typography, keyboard navigation,
 resize/reorder grips, and per-query filter chips remain available. All visual materials
 are rendered locally with CSS, without external fonts, images, or downloads.
@@ -77,7 +76,7 @@ Fonts use installed local fallbacks and do not require downloads.
 ### Settings persistence
 
 Theme, UI and log fonts, sizes and line spacing, page size, line wrapping, optional panels,
-and column visibility, widths and order autosave to the app's per-user `LogStudio/settings.json`
+column visibility, widths and order, and named saved searches autosave to the app's per-user `LogStudio/settings.json`
 file. Browser and desktop viewers on the same device and OS user share these preferences,
 independently of the localhost port or browser storage. New viewers load the latest saved
 preferences; already-open viewers keep their current choices. Session filters remain attached
@@ -316,7 +315,7 @@ PATH, use the command printed by the installer. No sudo or shell-profile edits a
 ```bash
 # Pin a release or choose user-writable directories:
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/matanelcohen/LogStudio/releases/latest/download/install-release.sh \
-  | bash -s -- --version 1.9.3 --install-dir "$HOME/.local/share/logstudio" --bin-dir "$HOME/.local/bin"
+  | bash -s -- --version 1.9.4 --install-dir "$HOME/.local/share/logstudio" --bin-dir "$HOME/.local/bin"
 logstudio --open -- dotnet run --project ./path/to/App.csproj
 ```
 
@@ -329,7 +328,7 @@ Invoke-WebRequest -UseBasicParsing https://github.com/matanelcohen/LogStudio/rel
 logstudio --open -- dotnet run --project .\path\to\App.csproj
 ```
 
-Use `& $installer -Version 1.9.3 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
+Use `& $installer -Version 1.9.4 -InstallDir "$env:LOCALAPPDATA\LogStudio"` to pin a
 version or choose a directory. If execution policy blocks the script, use the process-only
 override described below; when launching a separate PowerShell process, add the printed
 `bin` and `desktop-bin` directories to PATH in your current terminal yourself. The installer otherwise updates
@@ -447,7 +446,7 @@ does not verify Windows-specific execution.
 ### Publishing compiled releases
 
 Set and commit the package version in `Directory.Build.props`, then push a matching tag
-on that commit, such as `1.9.3` (or `1.9.3-rc.1` for a prerelease). Versions and tags
+on that commit, such as `1.9.4` (or `1.9.4-rc.1` for a prerelease). Versions and tags
 must not have a `v` prefix. The
 [compiled-release workflow](../.github/workflows/release.yml) validates the tag, restores,
 builds, tests the frontend/backend and installer contracts, and verifies a source install.
@@ -608,7 +607,7 @@ was installed** are available; earlier deleted temporary histories cannot be rec
 Selecting a prior session routes search, paging, level selection and export to that history,
 without changing or stopping the current command. Clear logs affects only the selected session.
 Cleared saved sessions retain their name/date/parameter metadata with zero log entries.
-Search text, match case, selected levels, stream, category, time window, and include/exclude
+Search text, match case, selected levels, stream, category, relative or exact time range, and include/exclude
 conditions are saved automatically with each session. Reopening a session restores its filters;
 switching sessions keeps each run's filters separate. Older sessions without saved filters open
 with the defaults. Pause bounds, paging position, and **Clear view** are not saved.
@@ -635,6 +634,12 @@ Use the arrow beside **Export** to choose between:
 
 - **Matching records (.jsonl):** streams all records matching the current search, conditions,
   levels, stream, category, time window, and snapshot bounds—not just the visible page.
+- **Spreadsheet (.csv):** streams the same matching records with columns for ID, capture timestamp,
+  stream, severity, category, message, and partial-line state. UTF-8 with a BOM, CRLF records and
+  quoted cells preserve Unicode, commas, quotes, and multiline messages in spreadsheet applications.
+  Formula-like text is prefixed with an apostrophe for spreadsheet safety; JSONL remains the lossless
+  choice. CSV is for analysis, not session import. The API uses `api/export?format=csv` with the
+  same query and session parameters as JSONL.
 - **Portable session bundle (.zip):** streams the selected session's complete retained history,
   independent of search or page filters, plus its name, dates, exit state, command, redacted
   arguments, working directory, and saved filters. Session cards have the same bundle-export action.
@@ -999,6 +1004,28 @@ remove the reported folder if necessary. Download JSONL before closing if you wa
   Selected levels are OR-ed. All levels removes the level restriction; Deselect all shows
   no entries. Warning/error presets remain shortcuts, and export uses the same selection.
 - Ctrl/Cmd+K or `/` focuses search. Escape clears it.
+- **Date range** opens exact start/end controls in your local time zone, with millisecond precision.
+  Both bounds are inclusive; either can be left blank. Applying a range replaces the relative
+  time window, and choosing a relative window clears exact bounds. Search, JSONL/CSV export and
+  per-session saved filters use the same bounds. The API accepts ISO timestamps as `since` and
+  `until`, including explicit offsets, and rejects reversed ranges.
+- **Saved searches** stores named filter presets for reuse across current and saved sessions.
+  Save the current filters, apply a preset by name, or delete it from the dialog.
+  Presets include search, case, levels, stream, category, time range and include/exclude rules;
+  they never change the selected session or page size, and applying one restores entries hidden
+  by Clear view. Up to 10 names of 1–64 characters are supported, with case-insensitive uniqueness.
+  Presets share the app settings file across ports and restarts; all settings together must fit
+  within 32 KiB. Save failures stay visible with **Retry settings**. Filter text is not redacted.
+- In the **Inspector**, **Format JSON** toggles between the original message and an indented view
+  for JSON objects/arrays. Invalid JSON and plain text remain unchanged. **Copy message** always
+  copies the original text; **JSON** copies the complete entry, including metadata. Clipboard
+  permission failures are reported instead of claiming the copy succeeded.
+  Formatting preserves large numeric IDs, duplicate keys and string escapes; exceptionally deep
+  or oversized formatted messages stay raw to bound rendering cost.
+- The inspector's **Previous entry** and **Next entry** buttons move through the current visible
+  page, keep the selected row in view, and show its position. They stop at page boundaries.
+  If a selected entry moves off the page or expires, its details remain available, but navigation
+  is disabled until another visible row is selected. Older / Newer still load other pages.
 - The entire retained history is searched. **Rows/page** accepts any positive 32-bit integer
   (default 250). Press Enter or leave the input to apply it; invalid values show an error without
   changing the active size. Older / Newer use the selected size, while exports remain unlimited.
@@ -1345,6 +1372,23 @@ Both NuGets include the component licenses. Dependencies were downloaded through
 public package mirror where the primary npm registry was unavailable; the lockfile retains those
 resolved download URLs and integrity hashes.
 
+OUI is pinned to **`@opensearch-project/oui@2.0.0-alpha.2`**, the published 2.x prerelease
+that declares React 19 support. The stable 1.x package declares React 16 / TypeScript 4 peers;
+installing it with ignored peer checks or downgrading the application is intentionally avoided.
+OUI 2 exports modern component names (`Button`, `Dialog`, `Select`, etc.), not the 1.x `Oui*` API.
+See the [upstream framework](https://github.com/opensearch-project/oui) and
+[package metadata](https://www.npmjs.com/package/@opensearch-project/oui/v/2.0.0-alpha.2).
+The scoped `react-hook-form` override aligns OUI's older internal pin with its resolver's peer
+requirement and React 19. No legacy-peer-deps setting is needed.
+The packaged `style.css` is imported before application layout styles. The resolved scheme
+sets OUI's document-level `dark` class, and saved editor palettes override `--oui-*` tokens,
+including portalled menus and dialogs. Only system/local font fallbacks are used.
+OUI CSS, icons, and component code are bundled into the existing embedded assets; no CDN,
+external stylesheet, font download, extra server, or runtime chunk request is introduced.
+Vite records the dependency packages that contribute code to the bundle. The license generator
+uses that manifest and the lockfile, so unused OUI components and build-tool binaries are not
+mistaken for browser dependencies; a missing license for shipped code still fails the build.
+
 The frontend keeps one validated server page (at most the user-selected size)
 and one selected entry.
 Live notifications are coalesced, and only one search request is in flight for a given query.
@@ -1357,3 +1401,6 @@ viewer must use the embedded build and its real disk APIs for end-to-end verific
 The Content Security Policy retains script nonces and same-origin loading. Dynamic component
 positioning / column widths use inline style attributes; generated scroll-lock styles use the
 session's nonce rather than allowing arbitrary inline style blocks.
+OUI's select viewport does not expose the nonce option, so its fixed scrollbar stylesheet is
+allowlisted by exact SHA-256 CSP hashes for that stylesheet and its empty update state;
+arbitrary inline stylesheets remain blocked.

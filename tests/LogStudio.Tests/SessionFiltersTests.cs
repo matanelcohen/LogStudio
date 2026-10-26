@@ -15,6 +15,25 @@ namespace LogStudio.Tests;
 
 public sealed class SessionFiltersTests
 {
+    [Fact]
+    public async Task AbsoluteBoundsPersistAndOlderFiltersRemainCompatible()
+    {
+        using Fixture fixture = new(saveSession: true);
+        SessionFilters filters = Filters() with { TimeWindow = 0, Since = "2026-10-11T18:00:00.123Z", Until = "2026-10-11T18:01:00.456Z" };
+        SessionInfo current = await fixture.Save(filters);
+        fixture.Viewer.Complete();
+        AssertFilters(filters, ReadMetadata(Path.Combine(fixture.Root, current.Id, "session.json")).Session.Filters);
+        JsonObject legacy = JsonSerializer.SerializeToNode(Filters(), ViewerConstants.JsonOptions)!.AsObject();
+        legacy.Remove("since");
+        legacy.Remove("until");
+        using HttpResponseMessage response = await fixture.Post("{\"filters\":" + legacy.ToJsonString() + "}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        AssertFilters(Filters(), (await fixture.Current()).Filters);
+        Assert.Throws<ArgumentException>(() => (filters with { Since = filters.Until, Until = filters.Since }).Validate());
+        Assert.Throws<ArgumentException>(() => (filters with { TimeWindow = 60_000 }).Validate());
+        Assert.Throws<ArgumentException>(() => (filters with { Until = "invalid" }).Validate());
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -265,9 +284,12 @@ public sealed class SessionFiltersTests
         JsonObject original = JsonSerializer.SerializeToNode(Filters(), ViewerConstants.JsonOptions)!.AsObject();
         foreach (string property in original.Select(property => property.Key))
         {
-            JsonObject missing = (JsonObject)original.DeepClone();
-            missing.Remove(property);
-            yield return new object[] { missing.ToJsonString() };
+            if (property is not ("since" or "until"))
+            {
+                JsonObject missing = (JsonObject)original.DeepClone();
+                missing.Remove(property);
+                yield return new object[] { missing.ToJsonString() };
+            }
             if (property != "levels") yield return Case(property, "null");
         }
         foreach ((string property, string value) in new (string, string)[]

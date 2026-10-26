@@ -73,6 +73,7 @@ internal static class ViewerConstants
     internal const string StreamQuery = "stream";
     internal const string CategoryQuery = "category";
     internal const string SinceQuery = "since";
+    internal const string UntilQuery = "until";
     internal const string MinimumIdQuery = "minId";
     internal const string MaximumIdQuery = "maxId";
     internal const string ConditionsQuery = "filters";

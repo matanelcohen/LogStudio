@@ -1,3 +1,4 @@
+import * as Oui from "@opensearch-project/oui";
 import { useEffect, useRef, useState } from "react";
 import { errorMessage } from "./model";
 import type { TelemetrySourcePatterns } from "./telemetry-api";
@@ -77,9 +78,9 @@ export function TelemetrySourceSuggestions({ disabled, onUse }: { disabled: bool
       <h3 id="discovered-sources-title">Discovered runtime sources</h3>
       <p>Includes discovered source names excluded by the current capture filters when telemetry was enabled at startup. A meter is discovered only after an instrument is published.
         Refresh to see newly created sources; this is not an exhaustive list of future sources. Completed applications may show frozen discovered names.</p>
-      <button type="button" disabled={discovering} onClick={() => setRefresh(value => value + 1)}>Refresh sources</button>
+      <Oui.Button variant="outline" size="sm" type="button" disabled={discovering} onClick={() => setRefresh(value => value + 1)}>Refresh sources</Oui.Button>
       {discovering && <p role="status">Discovering runtime sources…</p>}
-      {discoveryError && <p role="alert" className="notice danger">{discoveryError}</p>}
+      {discoveryError && <Oui.Alert variant="destructive" role="alert" className="notice danger">{discoveryError}</Oui.Alert>}
       {sources && <div className="telemetry-source-list">
         <h4>Meter sources</h4>
         {sources.meterSources.length ? <ul>{sources.meterSources.map((source, index) => <li key={index}>{source}</li>)}</ul> : <p>No meter sources discovered.</p>}
@@ -96,20 +97,20 @@ export function TelemetrySourceSuggestions({ disabled, onUse }: { disabled: bool
         XML project files are accepted but not analyzed; dynamically computed names, comments, raw strings, and interpolated strings are not analyzed.
         C# scanning stops at the first interpolated string, so later declarations may be omitted.</p>
       <p>Namespace and source identifiers can reveal application information; sanitization is not exhaustive secret redaction. Do not put credentials or secrets in source names, and select only files you are authorized to submit.</p>
-      <label><input type="checkbox" checked={consent} disabled={disabled || suggesting}
-        onChange={event => setConsent(event.target.checked)} /> I consent to ask Copilot for source suggestions. Copilot receives only sanitized runtime source identifiers and literal instrumentation identifier evidence extracted from approved files. Selected files are submitted to the local server for deterministic instrumentation-only extraction; no raw project content, filenames, logs, environment values, or unrelated configuration values are sent to the model. Authenticated Copilot may use network access.</label>
+      <label><Oui.Checkbox checked={consent} disabled={disabled || suggesting}
+        onCheckedChange={checked => setConsent(checked === true)} /> I consent to ask Copilot for source suggestions. Copilot receives only sanitized runtime source identifiers and literal instrumentation identifier evidence extracted from approved files. Selected files are submitted to the local server for deterministic instrumentation-only extraction; no raw project content, filenames, logs, environment values, or unrelated configuration values are sent to the model. Authenticated Copilot may use network access.</label>
       <p>Optional: explicitly choose only files you approve submitting to the local server. No disk scan or arbitrary project path is used.
         Maximum 8 files; 32768 characters each, 65536 characters total; files over 131072 bytes are rejected before reading.</p>
-      <label>Approved project files <input aria-label="Approved project files" type="file" multiple accept={ProjectFileAccept}
+      <label>Approved project files <Oui.Input aria-label="Approved project files" type="file" multiple accept={ProjectFileAccept}
         disabled={disabled || suggesting} onChange={event => { const selected = Array.from(event.target.files ?? []); event.target.value = ""; void selectFiles(selected); }} /></label>
       {readingFiles && <p role="status">Validating approved files locally…</p>}
       {files.length > 0 && <ul>{files.map((file, index) => <li key={index}>{file.name} ({file.content.length} characters)
-        <button type="button" disabled={disabled || suggesting} aria-label={`Remove ${file.name}`} onClick={() => setFiles(current => current.filter((_, item) => item !== index))}>Remove</button></li>)}</ul>}
-      {(files.length > 0 || fileError || readingFiles) && <button type="button" disabled={disabled || suggesting} onClick={clearFiles}>Clear approved files</button>}
-      {fileError && <p role="alert" className="notice danger">{fileError} No files will be submitted until the selection is valid or cleared.</p>}
-      <button type="button" disabled={disabled || !consent || suggesting || readingFiles || !!fileError} onClick={() => void suggest()}>Suggest sources</button>
+        <Oui.Button variant="outline" size="sm" type="button" disabled={disabled || suggesting} aria-label={`Remove ${file.name}`} onClick={() => setFiles(current => current.filter((_, item) => item !== index))}>Remove</Oui.Button></li>)}</ul>}
+      {(files.length > 0 || fileError || readingFiles) && <Oui.Button variant="outline" size="sm" type="button" disabled={disabled || suggesting} onClick={clearFiles}>Clear approved files</Oui.Button>}
+      {fileError && <Oui.Alert variant="destructive" role="alert" className="notice danger">{fileError} No files will be submitted until the selection is valid or cleared.</Oui.Alert>}
+      <Oui.Button variant="outline" size="sm" type="button" disabled={disabled || !consent || suggesting || readingFiles || !!fileError} onClick={() => void suggest()}>Suggest sources</Oui.Button>
       {suggesting && <p role="status">Requesting source suggestions… Manual drafts remain unchanged.</p>}
-      {suggestionError && <p role="alert" className="notice danger">{suggestionError}</p>}
+      {suggestionError && <Oui.Alert variant="destructive" role="alert" className="notice danger">{suggestionError}</Oui.Alert>}
       {suggestion && <section aria-labelledby="review-suggestion-title" className="telemetry-suggestion-preview">
         <h3 id="review-suggestion-title">Review suggestion</h3>
         <p>{suggestion.explanation}</p>
@@ -120,7 +121,7 @@ export function TelemetrySourceSuggestions({ disabled, onUse }: { disabled: bool
           {item.file !== null && <>: {item.file}{item.line !== null && `:${item.line}`}</>}</li>)}</ul>
         {suggestion.warnings.length > 0 && <><h4>Warnings</h4><ul>{suggestion.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></>}
         <p>Using this suggestion explicitly replaces both editable draft fields. Capture changes only after you click Apply.</p>
-        <button type="button" disabled={disabled} onClick={() => onUse({ meterSources: suggestion.meterSources, activitySources: suggestion.activitySources })}>Use suggestion</button>
+        <Oui.Button variant="outline" size="sm" type="button" disabled={disabled} onClick={() => onUse({ meterSources: suggestion.meterSources, activitySources: suggestion.activitySources })}>Use suggestion</Oui.Button>
       </section>}
     </section>
   </>;

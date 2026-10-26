@@ -157,6 +157,8 @@ public sealed class HttpTests
     [InlineData("?category=123")]
     [InlineData("?before=1&after=2")]
     [InlineData("?since=invalid")]
+    [InlineData("?until=invalid")]
+    [InlineData("?since=2026-10-12T00:00:00Z&until=2026-10-11T00:00:00Z")]
     public async Task InvalidSearchRequestsReturnActionableErrors(string query)
     {
         await using ConsoleLogViewer viewer = CaptureTests.StartServer();
@@ -165,6 +167,53 @@ public sealed class HttpTests
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         using JsonDocument error = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.False(string.IsNullOrWhiteSpace(error.RootElement.GetProperty("error").GetString()));
+    }
+
+    [Fact]
+    public async Task CsvExportStreamsAllFilteredMatchesRatherThanOnlyTheVisiblePage()
+    {
+        await using ConsoleLogViewer viewer = CaptureTests.StartServer();
+        for (int index = 1; index <= 300; index++)
+            viewer.Record("keep " + index, severity: index % 2 == 0 ? LogSeverity.Error : LogSeverity.Information);
+        using HttpClient client = new();
+        string parameters = "?q=keep&levels=%5B%22error%22%5D&minId=10&maxId=290&pageSize=1";
+        using HttpResponseMessage csv = await client.GetAsync(new Uri(viewer.Url, ViewerConstants.ExportRoute + parameters + "&format=csv"));
+        Assert.Equal(HttpStatusCode.OK, csv.StatusCode);
+        Assert.Equal("text/csv", csv.Content.Headers.ContentType?.MediaType);
+        Assert.EndsWith(".csv", csv.Content.Headers.ContentDisposition?.FileName?.Trim('"'), StringComparison.Ordinal);
+        byte[] bytes = await csv.Content.ReadAsByteArrayAsync();
+        Assert.Equal(new byte[] { 0xEF, 0xBB, 0xBF }, bytes.Take(3));
+        string[] lines = (await csv.Content.ReadAsStringAsync()).TrimStart('\uFEFF').Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(LogCsv.Header, lines[0]);
+        Assert.Equal(141, lines.Length);
+        Assert.StartsWith("\"12\",", lines[1], StringComparison.Ordinal);
+        Assert.StartsWith("\"290\",", lines[^1], StringComparison.Ordinal);
+        using JsonDocument page = JsonDocument.Parse(await client.GetStringAsync(new Uri(viewer.Url, ViewerConstants.SearchRoute + parameters)));
+        Assert.Single(page.RootElement.GetProperty("entries").EnumerateArray());
+        Assert.Equal(140, page.RootElement.GetProperty("matchCount").GetInt64());
+        using HttpResponseMessage invalid = await client.GetAsync(new Uri(viewer.Url, ViewerConstants.ExportRoute + "?format=unknown"));
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+    }
+
+    [Fact]
+    public async Task ExactTimeBoundsApplyToSearchAndBothExportFormats()
+    {
+        await using ConsoleLogViewer viewer = CaptureTests.StartServer();
+        viewer.Record("at boundary");
+        LogEntry entry = Assert.Single(viewer.GetLogs());
+        string timestamp = Uri.EscapeDataString(entry.Timestamp.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        using HttpClient client = new();
+        string bounds = "?since=" + timestamp + "&until=" + timestamp;
+        using JsonDocument included = JsonDocument.Parse(await client.GetStringAsync(new Uri(viewer.Url, ViewerConstants.SearchRoute + bounds)));
+        Assert.Equal(1, included.RootElement.GetProperty("matchCount").GetInt64());
+        string jsonl = await client.GetStringAsync(new Uri(viewer.Url, ViewerConstants.ExportRoute + bounds));
+        Assert.Contains("at boundary", jsonl, StringComparison.Ordinal);
+        string csv = await client.GetStringAsync(new Uri(viewer.Url, ViewerConstants.ExportRoute + bounds + "&format=csv"));
+        Assert.Contains("\"at boundary\"", csv, StringComparison.Ordinal);
+        string before = "?until=" + Uri.EscapeDataString(entry.Timestamp.AddTicks(-1).ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        using JsonDocument excluded = JsonDocument.Parse(await client.GetStringAsync(new Uri(viewer.Url, ViewerConstants.SearchRoute + before)));
+        Assert.Equal(0, excluded.RootElement.GetProperty("matchCount").GetInt64());
+        Assert.Empty(await client.GetStringAsync(new Uri(viewer.Url, ViewerConstants.ExportRoute + before)));
     }
 
     [Fact]

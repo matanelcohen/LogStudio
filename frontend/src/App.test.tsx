@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { Entry, fixturePage, Status } from "./test-fixtures";
 import { useLiveStatus, useLogPage } from "./useLogExplorer";
-import { DefaultTypography, TypographyStorageKey } from "./useTypography";
+import { DefaultTypography, LogFonts, TypographyStorageKey, UiFonts } from "./useTypography";
 import { AppearanceOptions, ColorThemes } from "./themes";
 import * as api from "./api";
 import { defaultQuery, sessionFilters, type ChatResponse, type LogEntry, type RunningApplicationsState } from "./model";
@@ -46,6 +46,47 @@ vi.mock("./useLogExplorer", async () => {
 });
 
 describe("log-first workspace", () => {
+  it("persists named searches across viewer reloads and applies filters without adopting another session or page size", async () => {
+    const first = render(<App />);
+    fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "timeout" } });
+    fireEvent.click(screen.getByRole("button", { name: "Saved searches" }));
+    fireEvent.change(screen.getByLabelText("Search name"), { target: { value: "Timeouts" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save current filters" }));
+    await waitFor(() => expect(savedPreferences.savedSearches).toEqual([{ name: "Timeouts", filters: sessionFilters({ ...defaultQuery(), search: "timeout" }) }]));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    first.unmount();
+    render(<App />);
+    await waitFor(() => expect(api.appSettings).toHaveBeenCalledWith(undefined, expect.any(AbortSignal)));
+    fireEvent.click(screen.getByRole("button", { name: "Saved searches" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Timeouts" }));
+    await waitFor(() => expect(vi.mocked(useLogPage).mock.lastCall?.[0]).toEqual({
+      ...defaultQuery(), search: "timeout"
+    }));
+    expect(screen.queryByRole("dialog", { name: "Saved searches" })).toBeNull();
+  });
+
+  it("keeps inspector navigation and the highlighted log row synchronized", async () => {
+    const second = { ...Entry, id: 2, message: "second entry" };
+    vi.mocked(useLogPage).mockReturnValue({ page: { ...fixturePage(), entries: [Entry, second] }, loading: false, error: null, refresh: vi.fn() });
+    try {
+      render(<App />);
+      const pane = screen.getByLabelText("Scrollable log entries");
+      vi.spyOn(pane, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 100, 500, 200));
+      vi.spyOn(document.querySelector("thead")!, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 100, 500, 40));
+      vi.spyOn(document.querySelector('[data-log-id="1"]')!, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 140, 500, 30));
+      vi.spyOn(document.querySelector('[data-log-id="2"]')!, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 330, 500, 30));
+      fireEvent.click(screen.getByRole("row", { name: /Hello/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Next entry" }));
+      expect(document.getElementById("detailId")?.textContent).toBe("2");
+      expect(document.querySelector('[data-log-id="2"]')?.getAttribute("aria-selected")).toBe("true");
+      expect(pane.scrollTop).toBe(60);
+      expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+      await act(async () => undefined);
+    } finally {
+      vi.mocked(useLogPage).mockReturnValue({ page: fixturePage(), loading: false, error: null, refresh: vi.fn() });
+    }
+  });
+
   it("restores saved fonts, theme, page size and explorer layout in a fresh viewer", async () => {
     history.replaceState(null, "", "/");
     savedPreferences = mergePreferences(DefaultPreferences, {
@@ -139,6 +180,15 @@ describe("log-first workspace", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Update available" }));
     expect(screen.getByLabelText("Release notes").textContent).toContain("Improved capture reliability.");
     expect(api.appUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses a non-destructive OUI notice for clearing only the current view", async () => {
+    render(<App />);
+    fireEvent.keyDown(screen.getByRole("button", { name: "Explorer options" }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Clear view (this tab)" }));
+    const notice = screen.getByText("Existing entries are hidden in this tab only. Reset restores disk history.").closest("[data-slot='alert']");
+    expect(notice?.getAttribute("role")).toBe("status");
+    expect(notice?.classList.contains("oui:text-destructive")).toBe(false);
   });
 
   describe("wrapped program input", () => {
@@ -864,7 +914,7 @@ describe("log-first workspace", () => {
     expect(screen.queryByRole("button", { name: "Connect local Copilot" })).toBeNull();
     const panel = screen.getByRole("complementary", { name: "Ask Copilot about logs" });
     expect(panel.parentElement).toBe(screen.getByRole("main", { name: "Log exploration workspace" }));
-    expect(panel.nextElementSibling?.className).toBe("workspace");
+    expect(panel.nextElementSibling?.classList.contains("workspace")).toBe(true);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByLabelText("Search logs").hasAttribute("disabled")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Close Copilot chat" }));
@@ -939,7 +989,7 @@ describe("log-first workspace", () => {
     render(<App />);
     const search = screen.getByLabelText("Search logs") as HTMLInputElement;
     await waitFor(() => expect(search.value).toBe("Current search"));
-    expect((screen.getByLabelText("Match case") as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByLabelText("Match case").getAttribute("aria-checked")).toBe("true");
     expect(api.saveSessionFilters).not.toHaveBeenCalled();
     fireEvent.change(search, { target: { value: "Edited current" } });
     await waitFor(() => expect(api.saveSessionFilters).toHaveBeenCalledWith("", { ...current.filters, search: "Edited current" }));
@@ -957,7 +1007,7 @@ describe("log-first workspace", () => {
     await waitFor(() => expect(api.saveSessionFilters).toHaveBeenLastCalledWith("", { ...current.filters, search: "" }));
   });
 
-  it("keeps glass on chrome and provides opaque accessibility and unsupported-browser fallbacks", () => {
+  it("uses OUI surface tokens and preserves opaque accessibility fallbacks", () => {
     const { container } = render(<><style>{styles}</style><App /></>);
     const rules = Array.from(container.querySelector("style")!.sheet!.cssRules);
     function declaration(rules: CSSRule[], selector: string, property: string) {
@@ -966,8 +1016,12 @@ describe("log-first workspace", () => {
         .map(rule => rule.style.getPropertyValue(property)).filter(Boolean).at(-1);
     }
     expect(declaration(rules, ".discover-shell", "background")).toBe("var(--cp-shell-material)");
-    expect(declaration(rules, ".discover-shell", "border-radius")).toBe("20px");
-    expect(declaration(rules, ".query-bar", "background")).toBe("var(--cp-card-material)");
+    expect(declaration(rules, ":root", "--cp-surface")).toBe("var(--oui-card)");
+    expect(declaration(rules, ":root", "--cp-native-accent")).toBe("var(--cp-accent)");
+    expect(declaration(rules, ":root", "--cp-accent")).toBe("var(--oui-primary)");
+    expect(declaration(rules, ":root", "--cp-wallpaper")).toBe("none");
+    expect(declaration(rules, "html[data-color-theme]", "--oui-primary")).toBe("var(--theme-accent)");
+    expect(screen.getByRole("region", { name: "Search and filter logs" }).getAttribute("data-slot")).toBe("card");
     expect(declaration(rules, ".logs-scroll", "background")).toBe("var(--cp-content-material)");
     expect(declaration(rules, "tr[data-log-id]", "background")).toBe("var(--cp-surface)");
 
@@ -996,9 +1050,10 @@ describe("log-first workspace", () => {
       return rules.filter(rule => rule.selectorText.split(",").map(value => value.trim()).includes(selector))
         .map(rule => rule.style.getPropertyValue("font-size")).filter(Boolean).at(-1);
     }
-    for (const selector of ["button", ".select-trigger", ".menu-item", ".tooltip", ".field-row", ".muted", ".copilot-copy", ".telemetry-status"]) {
+    for (const selector of [".select-trigger", ".field-row", ".muted", ".copilot-copy", ".telemetry-status"]) {
       expect(fontSize(selector), selector).toBe("var(--ui-font-size, 14px)");
     }
+    expect(rules.find(rule => rule.selectorText === ":root")?.style.getPropertyValue("--oui-text-sm")).toBe("var(--ui-font-size, 14px)");
     for (const selector of [".logs-scroll tbody", ".logs-scroll .severity-badge", ".message-lines", ".message", "#detailMessage", ".selected-details .metadata", ".selected-details .severity-badge"]) {
       expect(fontSize(selector), selector).toBe("var(--log-font-size, 14px)");
     }
@@ -1009,49 +1064,66 @@ describe("log-first workspace", () => {
     expect(rules.find(rule => rule.selectorText === ".metadata dt")?.style.getPropertyValue("overflow-wrap")).toBe("anywhere");
   });
 
-  it("changes typography immediately, keeps the current query, and restores focus on dismissal", async () => {
-    render(<App />);
-    const search = screen.getByLabelText("Search logs") as HTMLInputElement;
-    fireEvent.change(search, { target: { value: "Hello" } });
-    const opener = screen.getByRole("button", { name: "Settings" });
-    fireEvent.click(opener);
-    expect(screen.getByRole("dialog", { name: "Settings" })).toBeDefined();
-    expect(screen.getByRole("combobox", { name: "UI font" })).toBeDefined();
-    expect(screen.getByRole("combobox", { name: "Log font" })).toBeDefined();
-    expect(screen.getByRole("combobox", { name: "UI font size" }).textContent).toContain("14 px");
-    expect(screen.getByRole("combobox", { name: "Log font size" }).textContent).toContain("14 px");
-    expect(screen.getByLabelText("Log font preview").textContent).toContain("Application started");
-
-    async function choose(label: string, option: string) {
-      fireEvent.keyDown(screen.getByRole("combobox", { name: label }), { key: "Enter" });
-      fireEvent.keyDown(await screen.findByRole("option", { name: option }), { key: "Enter" });
+  describe("typography settings", () => {
+    async function openSettings() {
+      render(<App />);
+      const search = screen.getByLabelText("Search logs") as HTMLInputElement;
+      fireEvent.change(search, { target: { value: "Hello" } });
+      const opener = screen.getByRole("button", { name: "Settings" });
+      fireEvent.click(opener);
+      const dialog = screen.getByRole("dialog", { name: "Settings" });
+      expect((await within(dialog).findByText("All settings saved.")).tagName).toBe("P");
+      return { search, opener, dialog, settings: within(dialog) };
     }
 
-    const scroll = screen.getByLabelText("Scrollable log entries");
-    Object.defineProperty(scroll, "scrollHeight", { value: 500, configurable: true });
-    await choose("UI font", "Verdana");
-    await choose("UI font size", "18 px");
-    await choose("Log font", "Courier New");
-    await choose("Log font size", "24 px");
-    await choose("Log line spacing", "Spacious");
-    expect(document.documentElement.style.getPropertyValue("--ui-font-size")).toBe("18px");
-    expect(document.documentElement.style.getPropertyValue("--log-font-size")).toBe("24px");
-    expect(document.documentElement.style.getPropertyValue("--log-line-height")).toBe("2");
-    expect(scroll.scrollTop).toBe(500);
-    await waitFor(() => expect(savedPreferences.typography).toEqual({
-      uiFont: "verdana", uiFontSize: 18, logFont: "courier", logFontSize: 24, logLineHeight: 2
-    }));
-    expect(search.value).toBe("Hello");
-    expect(vi.mocked(useLogPage).mock.calls.at(-1)?.[0].search).toBe("Hello");
+    it.each([
+      { label: "UI font", option: "Verdana", changes: { uiFont: "verdana" },
+        property: "--ui-font-family", value: UiFonts.find(font => font.value === "verdana")!.family },
+      { label: "UI font size", option: "18 px", changes: { uiFontSize: 18 },
+        property: "--ui-font-size", value: "18px" },
+      { label: "Log font", option: "Courier New", changes: { logFont: "courier" },
+        property: "--log-font-family", value: LogFonts.find(font => font.value === "courier")!.family },
+      { label: "Log font size", option: "24 px", changes: { logFontSize: 24 },
+        property: "--log-font-size", value: "24px" },
+      { label: "Log line spacing", option: "Spacious", changes: { logLineHeight: 2 },
+        property: "--log-line-height", value: "2" }
+    ])("applies and saves $label immediately without changing the query", async ({ label, option, changes, property, value }) => {
+      const { search, settings } = await openSettings();
+      expect(settings.getByLabelText("Log font preview").textContent).toContain("Application started");
+      const scroll = screen.getByLabelText("Scrollable log entries");
+      Object.defineProperty(scroll, "scrollHeight", { value: 500, configurable: true });
 
-    fireEvent.click(screen.getByRole("button", { name: "Reset typography" }));
-    await waitFor(() => expect(savedPreferences.typography).toEqual(DefaultTypography));
-    expect(document.documentElement.style.getPropertyValue("--ui-font-size")).toBe("14px");
-    expect(document.documentElement.style.getPropertyValue("--log-font-size")).toBe("14px");
-    expect(search.value).toBe("Hello");
-    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull());
-    await waitFor(() => expect(document.activeElement).toBe(opener));
+      fireEvent.keyDown(settings.getByRole("combobox", { name: label }), { key: "Enter" });
+      const listbox = await screen.findByRole("listbox");
+      fireEvent.keyDown(within(listbox).getByRole("option", { name: option }), { key: "Enter" });
+
+      expect(document.documentElement.style.getPropertyValue(property)).toBe(value);
+      expect(scroll.scrollTop).toBe(500);
+      await waitFor(() => expect(savedPreferences.typography).toEqual({ ...DefaultTypography, ...changes }));
+      expect(search.value).toBe("Hello");
+      expect(vi.mocked(useLogPage).mock.calls.at(-1)?.[0].search).toBe("Hello");
+    });
+
+    it("resets typography without changing the query and restores focus on dismissal", async () => {
+      savedPreferences = mergePreferences(DefaultPreferences, {
+        typography: { uiFont: "verdana", uiFontSize: 18, logFont: "courier", logFontSize: 24, logLineHeight: 2 }
+      });
+      const { search, opener, dialog, settings } = await openSettings();
+      expect(document.documentElement.style.getPropertyValue("--ui-font-size")).toBe("18px");
+      expect(document.documentElement.style.getPropertyValue("--log-font-size")).toBe("24px");
+      fireEvent.click(settings.getByRole("button", { name: "Reset typography" }));
+      await waitFor(() => expect(savedPreferences.typography).toEqual(DefaultTypography));
+      expect(settings.getByRole("combobox", { name: "UI font size" }).textContent).toContain("14 px");
+      expect(settings.getByRole("combobox", { name: "Log font size" }).textContent).toContain("14 px");
+      expect(document.documentElement.style.getPropertyValue("--ui-font-size")).toBe("14px");
+      expect(document.documentElement.style.getPropertyValue("--log-font-size")).toBe("14px");
+      expect(document.documentElement.style.getPropertyValue("--log-line-height")).toBe(String(DefaultTypography.logLineHeight));
+      expect(search.value).toBe("Hello");
+      expect(vi.mocked(useLogPage).mock.calls.at(-1)?.[0].search).toBe("Hello");
+      fireEvent.keyDown(dialog, { key: "Escape" });
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull());
+      await waitFor(() => expect(document.activeElement).toBe(opener));
+    });
   });
 
   it("shows an app autosave warning without disabling settings", async () => {

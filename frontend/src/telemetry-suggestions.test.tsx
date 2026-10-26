@@ -251,7 +251,7 @@ describe("opt-in source suggestion dialog", () => {
     expect(fetch.mock.calls.filter(([url, options]) => url.endsWith("/settings") && options?.method === "POST")).toHaveLength(0);
     if (transition === "close") {
       await open();
-      expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+      expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false");
       expect(screen.queryByText("Review suggestion")).toBeNull();
     }
   });
