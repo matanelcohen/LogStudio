@@ -169,6 +169,16 @@ internal sealed class CopilotCliClient
         return TelemetrySuggestions.ParseResponse(output, evidence);
     }
 
+    internal async Task<AnalyticsInsight> AskAnalyticsAsync(AnalyticsQuestion question, LogAnalyticsSnapshot snapshot, CancellationToken cancellationToken)
+    {
+        if (!this.IsConnected) throw new CopilotException("Connect to the local Copilot CLI before requesting insights.");
+        ChatRequest options = new(question.Question, [], question.Model, question.ReasoningEffort);
+        this.ValidateOptions(options);
+        string prompt = LogAnalytics.BuildPrompt(question, snapshot);
+        string output = await this.ExecuteAsync(prompt, TimeSpan.FromMinutes(2), cancellationToken, suggestions: true, request: options).ConfigureAwait(false);
+        return LogAnalytics.ParseInsight(output, snapshot);
+    }
+
     internal ProcessStartInfo StartInfo(bool chat, bool sessionFile = false, bool suggestions = false)
     {
         ProcessStartInfo start = new(this.executable)
