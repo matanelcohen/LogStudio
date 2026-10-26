@@ -60,6 +60,7 @@ export interface ExplorerPreferences {
 
 export interface AppPreferences {
   appearance: Appearance;
+  onboardingDismissed: boolean;
   typography: TypographySettings;
   explorer: ExplorerPreferences;
   savedSearches: SavedSearch[];
@@ -71,6 +72,7 @@ export interface SavedSearch { name: string; filters: SessionFilters; }
 
 export interface PreferencesChanges {
   appearance?: Appearance;
+  onboardingDismissed?: boolean;
   typography?: Partial<TypographySettings>;
   explorer?: Partial<ExplorerPreferences>;
   savedSearches?: SavedSearch[];
@@ -95,6 +97,7 @@ export function mergePreferences(current: AppPreferences, changes: PreferencesCh
 
 export const DefaultPreferences: AppPreferences = {
   appearance: "system",
+  onboardingDismissed: false,
   savedSearches: [],
   savedGraphs: [],
   typography: { ...DefaultTypography },
@@ -134,7 +137,8 @@ export function readPreferences(value: unknown): AppPreferences {
     names.add(name.toLowerCase());
     return { name, filters: readSessionFilters(search.filters) };
   });
-  if (!appearance || Object.entries(typography).some(([key, value]) => rawTypography[key] !== value) ||
+  if (!appearance || (data.onboardingDismissed !== undefined && typeof data.onboardingDismissed !== "boolean") ||
+    Object.entries(typography).some(([key, value]) => rawTypography[key] !== value) ||
     ["wrap", "fields", "inspector", "timeline"].some(key => typeof explorer[key] !== "boolean") ||
     typeof explorer.pageSize !== "number" || !Number.isInteger(explorer.pageSize) || explorer.pageSize < 1 || explorer.pageSize > MaximumPageSize ||
     !Array.isArray(order) || order.length !== DefaultColumnOrder.length || new Set(order).size !== order.length ||
@@ -144,6 +148,7 @@ export function readPreferences(value: unknown): AppPreferences {
     throw new Error("The server returned invalid app settings.");
   return {
     appearance, typography, savedSearches, savedGraphs: readSavedGraphs(data.savedGraphs),
+    onboardingDismissed: data.onboardingDismissed === true,
     explorer: {
       wrap: explorer.wrap as boolean, pageSize: explorer.pageSize,
       fields: explorer.fields as boolean, inspector: explorer.inspector as boolean, timeline: explorer.timeline as boolean,

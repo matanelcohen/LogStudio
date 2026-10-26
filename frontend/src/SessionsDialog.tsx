@@ -29,6 +29,8 @@ export function SessionsDialog({ open, selected, onClose, onSelect, onRenamed, o
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const importButton = useRef<HTMLButtonElement>(null);
+  const importOpener = useRef<HTMLButtonElement | null>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
   const comparisonButton = useRef<HTMLButtonElement>(null);
   const actionButton = useRef<HTMLButtonElement | null>(null);
   useEffect(() => { if (!open) { setAction(null); setComparisonOpen(false); } }, [open]);
@@ -45,6 +47,10 @@ export function SessionsDialog({ open, selected, onClose, onSelect, onRenamed, o
   const query = search.toLowerCase();
   const matches = sessions.filter(session => [session.name, session.command, session.workingDirectory, session.startedAt, ...session.arguments]
     .some(value => value?.toLowerCase().includes(query)));
+  function openImport(event: MouseEvent<HTMLButtonElement>) {
+    importOpener.current = event.currentTarget;
+    setImportOpen(true);
+  }
   async function manage() {
     if (!action || busy) return;
     setBusy(true);
@@ -72,8 +78,8 @@ export function SessionsDialog({ open, selected, onClose, onSelect, onRenamed, o
           <Oui.DialogTitle>Sessions</Oui.DialogTitle><Oui.DialogDescription>Find a run by name, date, command, arguments, or working directory.</Oui.DialogDescription>
         </div><Oui.DialogClose asChild><Oui.Button variant="ghost" size="sm" className="icon-button" aria-label="Close sessions" disabled={busy}><X size={18} /></Oui.Button></Oui.DialogClose></div>
         <div className="sessions-content">
-          <div className="sessions-toolbar"><div className="search-box"><Search size={15} /><Oui.Input aria-label="Find sessions" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Name, date, command or parameter…" /></div>
-            <Oui.Button variant="default" size="sm" id="importSession" ref={importButton} className="primary" disabled={busy} onClick={() => setImportOpen(true)}><FileUp size={14} />Import</Oui.Button>
+          <div className="sessions-toolbar"><div className="search-box"><Search size={15} /><Oui.Input ref={searchInput} aria-label="Find sessions" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Name, date, command or parameter…" /></div>
+            <Oui.Button variant="default" size="sm" id="importSession" ref={importButton} className="primary" disabled={busy} onClick={openImport}><FileUp size={14} />Import</Oui.Button>
             <Oui.Button variant="outline" size="sm" ref={comparisonButton} disabled={busy || loading} onClick={() => setComparisonOpen(true)}><GitCompareArrows size={14} />Compare saved runs</Oui.Button>
             <Oui.Button variant="ghost" size="icon" className="icon-button" aria-label="Refresh sessions" onClick={() => setRevision(value => value + 1)}><RefreshCw size={15} /></Oui.Button></div>
           <div className="sessions-overview"><span>{sessions.length} {sessions.length === 1 ? "session" : "sessions"}</span><span>{NumberFormatter.format(sessions.reduce((count, session) => count + session.entryCount, 0))} retained entries</span><span>Private local storage</span></div>
@@ -98,7 +104,14 @@ export function SessionsDialog({ open, selected, onClose, onSelect, onRenamed, o
                 <dt>Directory</dt><dd>{session.workingDirectory}</dd><dt>Arguments</dt><dd><pre>{session.arguments.length ? session.arguments.join("\n") : "No arguments"}</pre></dd>
               </dl></details>
             </article>)}
-            {!loading && !error && !matches.length && <p className="muted">No matching saved sessions. Runs saved from this version onward appear here.</p>}
+            {!loading && !error && !sessions.some(session => !session.isCurrent) && !search && <div className="empty-state">
+              <h3>No saved sessions yet</h3><p>Completed captures are saved locally when Log Studio closes. Import a session bundle or Log Studio JSONL file to open existing logs without starting a command.</p>
+              <Oui.Button variant="outline" size="sm" onClick={openImport}>Import a session</Oui.Button>
+            </div>}
+            {!loading && !error && !matches.length && !!search && <div className="empty-state">
+              <h3>No matching saved sessions</h3><p>Try another name, date, or command.</p>
+              <Oui.Button variant="outline" size="sm" onClick={() => { setSearch(""); searchInput.current?.focus(); }}>Clear search</Oui.Button>
+            </div>}
           </div>
           <p className="muted">Saved histories remain on private local disk across restarts. Common secret flags are redacted from parameters; log contents are not automatically redacted.</p>
         </div>
@@ -121,7 +134,10 @@ export function SessionsDialog({ open, selected, onClose, onSelect, onRenamed, o
         </Oui.DialogContent>
 
     </Oui.Dialog>
-    <SessionImportDialog open={importOpen} onClose={() => setImportOpen(false)} returnFocus={() => importButton.current?.focus()}
+    <SessionImportDialog open={importOpen} onClose={() => setImportOpen(false)} returnFocus={() => {
+      if (importOpener.current?.isConnected) importOpener.current.focus();
+      else importButton.current?.focus();
+    }}
       onImported={session => { setImportOpen(false); setRevision(value => value + 1); onSelect(session); }} />
     {open && comparisonOpen && <SessionComparison sessions={sessions} onClose={() => setComparisonOpen(false)} returnFocus={() => comparisonButton.current?.focus()} />}
   </>;

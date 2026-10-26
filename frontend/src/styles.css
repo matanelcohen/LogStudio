@@ -789,6 +789,10 @@ mark { background: var(--cp-highlight); color: var(--cp-text); border-radius: 2p
 .empty-state p { max-width: 440px; margin: auto; }
 .empty-state svg { margin-bottom: 12px; }
 .empty-state button { margin-top: 12px; }
+.empty-state-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; }
+.empty-state:has(.getting-started) { padding: 24px; }
+.getting-started p { max-width: 640px; margin: 8px auto; }
+.getting-started code { overflow-wrap: anywhere; }
 .panel-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--cp-separator); color: var(--cp-secondary-text); font-size: var(--ui-font-size, 14px); background: var(--cp-native-toolbar); }
 .details-panel { overflow: auto; background: var(--cp-native-sidebar); }
 .details-panel .panel-header { position: sticky; top: 0; z-index: 1; -webkit-backdrop-filter: blur(var(--cp-content-blur)); backdrop-filter: blur(var(--cp-content-blur)); }

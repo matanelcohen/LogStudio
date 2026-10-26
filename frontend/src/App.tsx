@@ -1,17 +1,19 @@
 import * as Oui from "@opensearch-project/oui";
 
-import { AlertCircle, ChartNoAxesCombined, ChevronDown, ChevronRight, Clock3, Compass, Database, FileUp, HardDrive, History, Logs, MessageSquare, Monitor, Moon, Pause, Play, Settings, Sun, TrendingUp, X } from "lucide-react";
+import { AlertCircle, ChartNoAxesCombined, ChevronDown, ChevronRight, CircleHelp, Clock3, Compass, Database, FileUp, HardDrive, History, Logs, MessageSquare, Monitor, Moon, Pause, Play, Settings, Sun, TrendingUp, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { ConditionDialog } from "./ConditionDialog";
 import { ClearHistoryDialog } from "./ClearHistoryDialog";
 import { SessionsDialog } from "./SessionsDialog";
 import { SessionImportDialog } from "./SessionImportDialog";
+import { GettingStarted, LogEmptyState } from "./GettingStarted";
+import { sampleLogsFile, SampleSessionName } from "./sampleLogs";
 import { SavedSearchesDialog } from "./SavedSearchesDialog";
 import { CopilotChatPanel } from "./CopilotChatPanel";
 import { SettingsDialog } from "./SettingsDialog";
 import { TerminalInput } from "./TerminalInput";
 import { DiscoverSidebar } from "./DiscoverSidebar";
-import { clearSessionLogs, fetchApplications, selectApplication } from "./api";
+import { clearSessionLogs, fetchApplications, importSessionFile, selectApplication } from "./api";
 import { Inspector } from "./Inspector";
 import { SurroundingEntries } from "./SurroundingEntries";
 import { LogTable } from "./LogTable";
@@ -51,6 +53,12 @@ export default function App() {
   const [clearError, setClearError] = useState<string | null>(null);
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [gettingStartedOpen, setGettingStartedOpen] = useState(false);
+  const [sampleBusy, setSampleBusy] = useState(false);
+  const helpButton = useRef<HTMLButtonElement>(null);
+  const helpOpener = useRef<HTMLElement | null>(null);
+  const importReturnFocus = useRef<HTMLElement | null>(null);
+  const afterHelp = useRef<(() => void) | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [savedSearchesOpen, setSavedSearchesOpen] = useState(false);
@@ -65,7 +73,6 @@ export default function App() {
   const editorOpener = useRef<HTMLElement | null>(null);
   const clearOpener = useRef<HTMLButtonElement>(null);
   const sessionsOpener = useRef<HTMLButtonElement>(null);
-  const importOpener = useRef<HTMLButtonElement>(null);
   const chatOpener = useRef<HTMLButtonElement>(null);
   const settingsOpener = useRef<HTMLButtonElement>(null);
   const sessionActionsOpener = useRef<HTMLButtonElement>(null);
@@ -159,6 +166,42 @@ export default function App() {
     setSessionsOpen(false); setImportOpen(false); setNotice(null);
   }
 
+  function resetFilters() {
+    changeQuery({ ...defaultQuery(), pageSize: query.pageSize, sessionId: query.sessionId }, true);
+    setNotice(null);
+    searchRef.current?.focus();
+  }
+
+  function openImport() {
+    importReturnFocus.current = gettingStartedOpen ? helpOpener.current : document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setImportOpen(true);
+  }
+
+  function onboardingAction(action: () => void) {
+    if (gettingStartedOpen) {
+      afterHelp.current = action;
+      setGettingStartedOpen(false);
+    } else action();
+  }
+
+  async function trySample() {
+    if (sampleBusy) return;
+    setSampleBusy(true);
+    setNotice({ tone: "info", message: "Loading bundled synthetic demo logs…" });
+    try {
+      const session = await importSessionFile(sampleLogsFile(), SampleSessionName, () => {});
+      setView("discover");
+      selectSession(session);
+      setNotice({ tone: "info", message: "Demo — synthetic logs. Try searching for timeout or filtering by level. Your capture history is unchanged." });
+      searchRef.current?.focus();
+    } catch (error) {
+      setNotice({ tone: "danger", message: `Could not open sample logs: ${errorMessage(error)}` });
+      returnToSessionAction(helpButton.current);
+    } finally {
+      setSampleBusy(false);
+    }
+  }
+
   function addCondition(condition: LogCondition) {
     const conditions = [...query.conditions, condition];
     const error = validateConditions(conditions);
@@ -212,6 +255,11 @@ export default function App() {
   const connectionLabel = live.connection === "live" ? "Connected" : live.connection === "paused" ? "Paused" :
     live.connection === "reconnecting" ? "Reconnecting" : live.connection === "failed" ? "Disconnected" : "Connecting";
   const elapsed = status ? Math.max(0, Math.floor(((status.completedAt ? Date.parse(status.completedAt) : now) - Date.parse(status.startedAt)) / 1000)) : 0;
+  const gettingStarted = <GettingStarted canChooseApp={!!live.status?.listenAll && !archived}
+    dismissed={!gettingStartedOpen && preferences.settings.onboardingDismissed} sampleBusy={sampleBusy}
+    onChooseApp={() => onboardingAction(() => document.getElementById("runningApplication")?.focus())}
+    onImport={() => onboardingAction(openImport)} onSample={() => onboardingAction(() => void trySample())}
+    onDismiss={gettingStartedOpen ? undefined : () => { preferences.update({ onboardingDismissed: true }); returnToSessionAction(helpButton.current); }} />;
   function returnToSessionAction(opener: HTMLElement | null) {
     if (opener?.isConnected) opener.focus();
     else sessionActionsOpener.current?.focus();
@@ -258,7 +306,11 @@ export default function App() {
             <ResponsiveActions label="Session actions" className="secondary-actions" triggerRef={sessionActionsOpener}>
             {(updates.state?.updateAvailable || updates.state?.installedVersion || updates.error) && <Oui.Button variant="ghost" size="sm" className="ghost-button"
               data-disclosure-close onClick={() => setSettingsOpen(true)}>{updates.state?.installedVersion ? "Restart required" : updates.error ? "Update check failed" : "Update available"}</Oui.Button>}
-            <Oui.Button variant="ghost" size="sm" id="importLogs" ref={importOpener} className="ghost-button" data-disclosure-close onClick={() => setImportOpen(true)}><FileUp size={14} /> Import</Oui.Button>
+            <Oui.Button variant="ghost" size="sm" id="importLogs" className="ghost-button" data-disclosure-close onClick={openImport}><FileUp size={14} /> Import</Oui.Button>
+            <Oui.Button variant="ghost" size="sm" ref={helpButton} className="ghost-button" data-disclosure-close onClick={() => {
+              helpOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : helpButton.current;
+              setGettingStartedOpen(true);
+            }}><CircleHelp size={14} />Help</Oui.Button>
             <Oui.Button variant="ghost" size="sm" ref={chatOpener} className="ghost-button" aria-pressed={chatOpen} disabled={!status} data-disclosure-close
               onClick={openCopilot}><MessageSquare size={14} /> Ask Copilot</Oui.Button>
             <Oui.Popover>
@@ -307,7 +359,7 @@ export default function App() {
             actionsRef={queryActionsOpener}
             onSavedSearches={() => { savedSearchesOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setSavedSearchesOpen(true); }}
             maximumId={pause?.maximumId ?? null} onChange={changeQuery} onEdit={condition => openEditor(condition ?? null)}
-            onReset={() => { changeQuery({ ...defaultQuery(), pageSize: query.pageSize, sessionId: query.sessionId }, true); setNotice(null); }}
+            onReset={resetFilters}
             onNotice={message => setNotice({ message, tone: "info" })} />
           {preferences.error && <Oui.Alert variant="default" className="notice warning" role="alert">
             <AlertCircle size={15} /><span>{preferences.error} Changes still apply in this tab.</span>
@@ -328,6 +380,10 @@ export default function App() {
           {switchingHistory && <div className="history-switch-status" role="status">Loading selected application history…</div>}
           <div className="workspace-layout" inert={switchingHistory}>
           <LogTable page={activePage} loading={history.loading} error={history.error} selected={visibleSelection}
+            emptyState={activePage && <LogEmptyState status={activePage.status} archived={archived} listening={applicationListening} paused={pause !== null}
+              matchCount={activePage.matchCount} gettingStarted={gettingStarted} onReset={resetFilters} onRefresh={history.refresh}
+              onNewest={() => { setFollow(true); setCursor({ before: null, after: null }); }}
+              onChooseApp={() => document.getElementById("runningApplication")?.focus()} onImport={openImport} onResume={() => setPause(null)} />}
             matchCase={query.matchCase} follow={follow} wrap={wrap} pageSize={query.pageSize} typography={typography}
             preferences={explorer} onPreferences={updateExplorer}
             fields={fields} inspector={inspector} onFields={() => updateExplorer({ fields: !fields })}
@@ -381,7 +437,24 @@ export default function App() {
           }}
           returnFocus={() => sessionsOpener.current?.focus()} onSelect={selectSession} />
         <SessionImportDialog open={importOpen} onClose={() => setImportOpen(false)} onImported={selectSession}
-          returnFocus={() => returnToSessionAction(importOpener.current)} />
+          returnFocus={() => {
+            if (importReturnFocus.current?.isConnected) importReturnFocus.current.focus();
+            else returnToSessionAction(null);
+          }} />
+        <Oui.Dialog open={gettingStartedOpen} onOpenChange={setGettingStartedOpen}>
+          <Oui.DialogContent className="sessions-dialog" showCloseButton={false} onCloseAutoFocus={event => {
+            event.preventDefault();
+            const action = afterHelp.current;
+            afterHelp.current = null;
+            if (action) action();
+            else returnToSessionAction(helpOpener.current);
+          }}>
+            <div className="dialog-titlebar"><div><Oui.DialogTitle>Getting started</Oui.DialogTitle>
+              <Oui.DialogDescription>Choose how logs enter your local workspace.</Oui.DialogDescription></div>
+              <Oui.DialogClose asChild><Oui.Button variant="ghost" size="sm">Done</Oui.Button></Oui.DialogClose></div>
+            <div className="empty-state">{gettingStarted}</div>
+          </Oui.DialogContent>
+        </Oui.Dialog>
         <SettingsDialog open={settingsOpen} settings={typography} saved={preferences.saved} error={preferences.error} updates={updates}
           appearance={appearance.appearance} onAppearance={appearance.setAppearance}
           onChange={changes => preferences.update({ typography: changes })}
@@ -413,6 +486,7 @@ function RunningApplicationPicker({ onAttached, onListening }: { onAttached(): v
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const mounted = useRef(true);
   const optionId = useId();
 
@@ -438,7 +512,7 @@ function RunningApplicationPicker({ onAttached, onListening }: { onAttached(): v
     }
     void refresh();
     return () => { active = false; controller.abort(); if (timer !== null) clearTimeout(timer); };
-  }, [busy, onListening]);
+  }, [busy, onListening, refreshKey]);
 
   const identity = (app: RunningApplication) => app.groupId ?? `${app.processId}:${app.startedAtTicks}`;
   const processes = (app: RunningApplication) => app.processes ?? [app];
@@ -519,8 +593,12 @@ function RunningApplicationPicker({ onAttached, onListening }: { onAttached(): v
       </li>)}</ul>
     </details>}
     <ResponsiveActions label="Capture details" className="application-capture-help">
-      <p id="applicationCaptureHelp" className="muted">Apps are grouped by launch or entrypoint path. Selecting an app captures its processes together and follows new members while the group is running. Merged logs include the PID. Captures new .NET ILogger events only, not existing console output. Each app keeps its own history; switching back restores its captured logs. Only the selected app is captured.</p>
+      <p id="applicationCaptureHelp" className="muted">Apps are grouped by launch or entrypoint path. Selecting an app captures its processes together and follows new members while the group is running. Merged logs include the PID. Captures new .NET ILogger events only, requires the .NET logging EventSource provider (Microsoft-Extensions-Logging), and cannot recover historical stdout/stderr. Each app keeps its own history; switching back restores its captured logs. Only the selected app is captured.</p>
     </ResponsiveActions>
+    {state && !selected && !applications.length && !error && !state.error && <div className="application-empty">
+      <p>No apps found. Start a .NET app yourself with diagnostics and the logging EventSource provider enabled, then check again. Or use Import or Try sample logs to explore existing records.</p>
+      <Oui.Button variant="outline" size="sm" disabled={busy} onClick={() => setRefreshKey(value => value + 1)}>Refresh apps</Oui.Button>
+    </div>}
     {(selectionError || error || state?.error) && <Oui.Alert variant="destructive" className="notice danger" role="alert">{selectionError ?? error ?? state?.error}</Oui.Alert>}
   </section>;
 }

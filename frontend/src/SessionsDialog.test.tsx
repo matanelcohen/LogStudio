@@ -10,6 +10,32 @@ const Sessions: SessionInfo[] = [
 ];
 
 describe("session browser", () => {
+  it.each([{ sessions: [] }, { sessions: [Sessions[0]] }])("distinguishes no saved sessions from the current run and offers import: %j", async ({ sessions }) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(sessions))));
+    render(<SessionsDialog open selected="" onClose={vi.fn()} onSelect={vi.fn()} returnFocus={vi.fn()} />);
+    await screen.findByRole("heading", { name: "No saved sessions yet" });
+    expect(screen.queryByRole("heading", { name: "No matching saved sessions" })).toBeNull();
+    const opener = screen.getByRole("button", { name: "Import a session" });
+    opener.focus();
+    fireEvent.click(opener);
+    await screen.findByRole("dialog", { name: "Import a session" });
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+  });
+
+  it("distinguishes an unmatched session search and restores results and focus", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(Sessions))));
+    render(<SessionsDialog open selected="" onClose={vi.fn()} onSelect={vi.fn()} returnFocus={vi.fn()} />);
+    await screen.findByText("Named prior skill");
+    const input = screen.getByLabelText("Find sessions");
+    fireEvent.change(input, { target: { value: "not-a-session" } });
+    expect(screen.getByRole("heading", { name: "No matching saved sessions" })).toBeDefined();
+    expect(screen.queryByRole("heading", { name: "No saved sessions yet" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+    expect(screen.getByText("Named prior skill")).toBeDefined();
+    expect(document.activeElement).toBe(input);
+  });
+
   it("finds prior sessions by arguments and opens their run details", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(Sessions))));
     const select = vi.fn();
