@@ -19,7 +19,7 @@ import {
   type LogCondition, type LogEntry, type Notice, type PageCursor, type QueryState, type RunningApplication, type RunningApplicationsState, type SessionInfo, type ViewerStatus
 } from "./model";
 import { QueryBar } from "./QueryBar";
-import { Hint } from "./ui";
+import { Hint, ResponsiveActions } from "./ui";
 import { AppearanceChoices, AppearanceOptions } from "./themes";
 import { useAppearance } from "./useAppearance";
 import { useTypography } from "./useTypography";
@@ -61,6 +61,8 @@ export default function App() {
   const importOpener = useRef<HTMLButtonElement>(null);
   const chatOpener = useRef<HTMLButtonElement>(null);
   const settingsOpener = useRef<HTMLButtonElement>(null);
+  const sessionActionsOpener = useRef<HTMLButtonElement>(null);
+  const queryActionsOpener = useRef<HTMLButtonElement>(null);
   const seenClear = useRef(0);
   const seenHistory = useRef<string | null>(null);
   const preferences = usePreferences();
@@ -186,6 +188,10 @@ export default function App() {
   const connectionLabel = live.connection === "live" ? "Connected" : live.connection === "paused" ? "Paused" :
     live.connection === "reconnecting" ? "Reconnecting" : live.connection === "failed" ? "Disconnected" : "Connecting";
   const elapsed = status ? Math.max(0, Math.floor(((status.completedAt ? Date.parse(status.completedAt) : now) - Date.parse(status.startedAt)) / 1000)) : 0;
+  function returnToSessionAction(opener: HTMLElement | null) {
+    if (opener?.isConnected) opener.focus();
+    else sessionActionsOpener.current?.focus();
+  }
 
   return (
     <Oui.TooltipProvider delayDuration={400}>
@@ -202,7 +208,7 @@ export default function App() {
         <header className="app-header">
           <div className="brand">
             <h1>Log Studio</h1><ChevronRight size={14} className="breadcrumb-separator" />
-            <Oui.Button variant="outline" size="sm" id="sessions" className="session-switcher" ref={sessionsOpener} aria-label="Sessions" onClick={() => setSessionsOpen(true)}>
+            <Oui.Button variant="outline" size="sm" id="sessions" className="session-switcher" ref={sessionsOpener} aria-label="Sessions" title={status?.applicationName} onClick={() => setSessionsOpen(true)}>
               <History size={14} /><span id="applicationName">{status?.applicationName ?? "Select a session"}</span><ChevronDown size={12} />
             </Oui.Button>
             <Oui.Badge variant="outline" id="runStatus" className={`run-state-badge ${status?.isCompleted ? status.exitCode ? "failed" : "finished" : "running"}`}>
@@ -211,11 +217,17 @@ export default function App() {
             </Oui.Badge>
           </div>
           <div className="header-actions">
-            {(updates.state?.updateAvailable || updates.state?.installedVersion || updates.error) && <Oui.Button variant="ghost" size="sm" className="ghost-button"
-              onClick={() => setSettingsOpen(true)}>{updates.state?.installedVersion ? "Restart required" : updates.error ? "Update check failed" : "Update available"}</Oui.Button>}
             <span id="connection" className={`connection ${live.connection}`} role="status">{archived ? "Saved session" : connectionLabel}</span>
-            <Oui.Button variant="ghost" size="sm" id="importLogs" ref={importOpener} className="ghost-button" onClick={() => setImportOpen(true)}><FileUp size={14} /> Import</Oui.Button>
-            <Oui.Button variant="ghost" size="sm" ref={chatOpener} className="ghost-button" aria-pressed={chatOpen} disabled={!status}
+            <Hint label={pause ? "Resume live updates and catch up from disk." : "Freeze this tab. The command keeps capturing."}>
+              <Oui.Button variant="outline" size="sm" id="pause" className={pause ? "paused-control" : "ghost-button"} disabled={archived} onClick={() => setPause(pause ? null : { maximumId: status?.lastId ?? 0, status })}>
+                {pause ? <Play size={14} /> : <Pause size={14} />}{pause ? "Resume" : "Pause"}
+              </Oui.Button>
+            </Hint>
+            <ResponsiveActions label="Session actions" className="secondary-actions" triggerRef={sessionActionsOpener}>
+            {(updates.state?.updateAvailable || updates.state?.installedVersion || updates.error) && <Oui.Button variant="ghost" size="sm" className="ghost-button"
+              data-disclosure-close onClick={() => setSettingsOpen(true)}>{updates.state?.installedVersion ? "Restart required" : updates.error ? "Update check failed" : "Update available"}</Oui.Button>}
+            <Oui.Button variant="ghost" size="sm" id="importLogs" ref={importOpener} className="ghost-button" data-disclosure-close onClick={() => setImportOpen(true)}><FileUp size={14} /> Import</Oui.Button>
+            <Oui.Button variant="ghost" size="sm" ref={chatOpener} className="ghost-button" aria-pressed={chatOpen} disabled={!status} data-disclosure-close
               onClick={() => setChatOpen(true)}><MessageSquare size={14} /> Ask Copilot</Oui.Button>
             <Oui.Popover>
               <Oui.PopoverTrigger asChild><Oui.Button variant="ghost" size="icon" id="storageInfo" className="icon-button ghost-button" aria-label="Storage details"><HardDrive size={15} /></Oui.Button></Oui.PopoverTrigger>
@@ -230,11 +242,6 @@ export default function App() {
                 <a href="third-party-notices.txt" target="_blank" rel="noreferrer">Third-party component licenses</a>
               </Oui.PopoverContent>
             </Oui.Popover>
-            <Hint label={pause ? "Resume live updates and catch up from disk." : "Freeze this tab. The command keeps capturing."}>
-              <Oui.Button variant="outline" size="sm" id="pause" className={pause ? "paused-control" : "ghost-button"} disabled={archived} onClick={() => setPause(pause ? null : { maximumId: status?.lastId ?? 0, status })}>
-                {pause ? <Play size={14} /> : <Pause size={14} />}{pause ? "Resume" : "Pause"}
-              </Oui.Button>
-            </Hint>
             <Oui.DropdownMenu>
               <Oui.DropdownMenuTrigger asChild><Oui.Button variant="ghost" size="icon" id="theme" className="icon-button ghost-button" aria-label="Appearance">{appearance.theme === "dark" ? <Moon size={15} /> : <Sun size={15} />}</Oui.Button></Oui.DropdownMenuTrigger>
               <Oui.DropdownMenuContent className="menu-content" sideOffset={7} align="end">
@@ -247,7 +254,8 @@ export default function App() {
                 </Oui.DropdownMenuRadioGroup>
               </Oui.DropdownMenuContent>
             </Oui.DropdownMenu>
-            <Oui.Button variant="ghost" size="icon" ref={settingsOpener} className="icon-button ghost-button" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={15} /></Oui.Button>
+            <Oui.Button variant="ghost" size="icon" ref={settingsOpener} className="icon-button ghost-button" aria-label="Settings" title="Settings" data-disclosure-close onClick={() => setSettingsOpen(true)}><Settings size={15} /></Oui.Button>
+            </ResponsiveActions>
           </div>
         </header>
         <div className="query-region">
@@ -261,6 +269,7 @@ export default function App() {
             setCursor({ before: null, after: null }); setSelected(null); setPause(null); setFollow(true); setChatOpen(false);
           }} />}
           <QueryBar query={query} page={switchingHistory ? null : activePage} loading={history.loading} error={history.error} searchRef={searchRef}
+            actionsRef={queryActionsOpener}
             onSavedSearches={() => { savedSearchesOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setSavedSearchesOpen(true); }}
             maximumId={pause?.maximumId ?? null} onChange={changeQuery} onEdit={condition => openEditor(condition ?? null)}
             onReset={() => { changeQuery({ ...defaultQuery(), pageSize: query.pageSize, sessionId: query.sessionId }, true); setNotice(null); }}
@@ -275,12 +284,9 @@ export default function App() {
           </Oui.Alert>}
         </div>
         <main id="workspace" className="workspace-region" tabIndex={-1} aria-label="Log exploration workspace">
-          {chatOpen && <CopilotChatPanel key={query.sessionId} status={status} sessionId={query.sessionId}
-            onClose={() => setChatOpen(false)} returnFocus={() => chatOpener.current?.focus()} />}
           <Oui.Card className="workspace" data-inspector={inspector} data-fields={fields} aria-busy={switchingHistory}>
           {switchingHistory && <div className="history-switch-status" role="status">Loading selected application history…</div>}
           <div className="workspace-layout" inert={switchingHistory}>
-          {fields && <DiscoverSidebar page={activePage} onFilter={openEditor} />}
           <LogTable page={activePage} loading={history.loading} error={history.error} selected={visibleSelection}
             matchCase={query.matchCase} follow={follow} wrap={wrap} pageSize={query.pageSize} typography={typography}
             preferences={explorer} onPreferences={updateExplorer}
@@ -296,10 +302,13 @@ export default function App() {
             onWrap={wrap => updateExplorer({ wrap })}
             onClear={() => { changeQuery({ ...query, dismissedThrough: status?.lastId ?? 0 }); setSelected(null); setNotice({ tone: "info", message: "Existing entries are hidden in this tab only. Reset restores disk history." }); }}
             onRetry={history.refresh} onInspector={() => setInspector(!inspector)} />
+          {fields && <DiscoverSidebar page={activePage} onFilter={openEditor} />}
           {inspector && <Inspector entry={visibleSelection} entries={activePage?.entries ?? []} status={status} onSelect={setSelected} onClose={() => setInspector(false)}
             onCondition={addCondition} onDraft={openEditor} onNotice={setNotice} />}
           </div>
           </Oui.Card>
+          {chatOpen && <CopilotChatPanel key={query.sessionId} status={status} sessionId={query.sessionId}
+            onClose={() => setChatOpen(false)} returnFocus={() => returnToSessionAction(chatOpener.current)} />}
         </main>
         {!archived && !live.status?.listenAll && live.status?.canWriteInput && !live.status.isCompleted && <TerminalInput />}
         <footer className="app-footer"><span id="capacityNote"><HardDrive size={12} /> On disk · {status?.capacity ? `Limit ${NumberFormatter.format(status.capacity)}` : "Unlimited history"}
@@ -332,19 +341,19 @@ export default function App() {
           }}
           returnFocus={() => sessionsOpener.current?.focus()} onSelect={selectSession} />
         <SessionImportDialog open={importOpen} onClose={() => setImportOpen(false)} onImported={selectSession}
-          returnFocus={() => importOpener.current?.focus()} />
+          returnFocus={() => returnToSessionAction(importOpener.current)} />
         <SettingsDialog open={settingsOpen} settings={typography} saved={preferences.saved} error={preferences.error} updates={updates}
           appearance={appearance.appearance} onAppearance={appearance.setAppearance}
           onChange={changes => preferences.update({ typography: changes })}
           onReset={() => preferences.update({ typography: { ...DefaultTypography } })} onClose={() => setSettingsOpen(false)}
-          returnFocus={() => settingsOpener.current?.focus()} />
+          returnFocus={() => returnToSessionAction(settingsOpener.current)} />
         <SavedSearchesDialog open={savedSearchesOpen} query={query} searches={preferences.settings.savedSearches}
           saved={preferences.saved} saveError={preferences.error} onRetry={preferences.retry}
           onChange={savedSearches => preferences.update({ savedSearches })}
           onApply={filters => changeQuery({ ...query, ...filters, dismissedThrough: 0 }, true)}
           onClose={() => setSavedSearchesOpen(false)} returnFocus={() => {
             if (savedSearchesOpener.current?.isConnected) savedSearchesOpener.current.focus();
-            else searchRef.current?.focus();
+            else (queryActionsOpener.current ?? searchRef.current)?.focus();
           }} />
       </div>
       </div>

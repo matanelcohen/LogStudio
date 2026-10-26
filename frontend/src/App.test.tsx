@@ -758,6 +758,103 @@ describe("log-first workspace", () => {
     expect(container.querySelector(".workspace > .workspace-layout > .log-panel")).not.toBeNull();
   });
 
+  describe("compact investigation controls", () => {
+    function compactViewport() {
+      const matchMedia = window.matchMedia;
+      let compact = true;
+      const listeners = new Set<() => void>();
+      vi.stubGlobal("matchMedia", (query: string) => query === "(max-width: 900px), (max-height: 500px)" ? {
+        ...matchMedia(query),
+        get matches() { return compact; },
+        addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+        removeEventListener: (_: string, listener: () => void) => listeners.delete(listener)
+      } : matchMedia(query));
+      return (value: boolean) => act(() => { compact = value; listeners.forEach(listener => listener()); });
+    }
+
+    it("keeps session identity, pause, import, settings and export reachable with focus restoration", async () => {
+      compactViewport();
+      render(<App />);
+      expect(screen.getByRole("button", { name: "Sessions" }).textContent).toContain(Status.applicationName);
+      expect(screen.queryByRole("button", { name: "Import" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      expect(screen.getByRole("button", { name: "Resume" })).toBeDefined();
+
+      for (const [action, title, close] of [
+        ["Import", "Import a session", "Cancel"],
+        ["Settings", "Settings", "Done"]
+      ]) {
+        const opener = screen.getByRole("button", { name: "Session actions" });
+        fireEvent.click(opener);
+        fireEvent.click(screen.getByRole("button", { name: action }));
+        const dialog = screen.getByRole("dialog", { name: title });
+        expect(screen.queryByRole("dialog", { name: "Session actions" })).toBeNull();
+        fireEvent.click(within(dialog).getByRole("button", { name: close }));
+        await waitFor(() => expect(document.activeElement).toBe(opener));
+      }
+
+      fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "alpha" } });
+      const row = screen.getByRole("row", { name: /Hello/ });
+      row.focus();
+      fireEvent.keyDown(row, { key: "Enter" });
+      expect(screen.getByRole("complementary", { name: "Entry inspector" }).textContent).toContain(Entry.message);
+      fireEvent.click(screen.getByRole("button", { name: "Query actions" }));
+      const download = screen.getByRole("link", { name: "Export" });
+      expect(download.getAttribute("href")).toContain("q=alpha");
+      expect(download.getAttribute("href")).toContain(`maxId=${Status.lastId}`);
+      fireEvent.keyDown(screen.getByRole("button", { name: "Export options" }), { key: "Enter" });
+      expect((await screen.findByRole("menuitem", { name: /Spreadsheet/ })).getAttribute("href")).toContain("format=csv");
+    });
+
+    it("keeps active filters visible while their editors are disclosed", async () => {
+      compactViewport();
+      render(<App />);
+      fireEvent.click(screen.getByRole("button", { name: "Filter error entries" }));
+      expect(screen.getByLabelText("Active filters").textContent).toContain("Levels: error, critical");
+      expect(screen.queryByRole("button", { name: "Level" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Filters · 1 active" }));
+      expect(screen.getByRole("button", { name: "Level" })).toBeDefined();
+      fireEvent.keyDown(screen.getByRole("combobox", { name: "Stream" }), { key: "Enter" });
+      fireEvent.keyDown(await screen.findByRole("option", { name: "stdout" }), { key: "Enter" });
+      expect(screen.getByLabelText("Active filters").textContent).toContain("Stream: stdout");
+    });
+
+    it.each([
+      [false, false], [true, false], [false, true], [true, true]
+    ])("preserves selection and panel state across compact/wide transitions (fields=%s, chat=%s)", async (fields, chat) => {
+      const resize = compactViewport();
+      vi.spyOn(api, "connectCopilot").mockResolvedValue({ version: "test CLI", models: [] });
+      render(<App />);
+      const row = screen.getByRole("row", { name: /Hello/ });
+      fireEvent.keyDown(row, { key: "Enter" });
+      const inspector = screen.getByRole("complementary", { name: "Entry inspector" });
+      if (fields) fireEvent.click(screen.getByRole("button", { name: "Available fields" }));
+      const fieldPanel = screen.queryByRole("complementary", { name: "Discover fields" });
+      if (fieldPanel) fireEvent.change(screen.getByLabelText("Find a field"), { target: { value: "message" } });
+      if (chat) {
+        fireEvent.click(screen.getByRole("button", { name: "Session actions" }));
+        fireEvent.click(screen.getByRole("button", { name: "Ask Copilot" }));
+        fireEvent.change(screen.getByLabelText("Message Copilot"), { target: { value: "Investigation draft" } });
+      }
+      const chatPanel = screen.queryByRole("complementary", { name: "Ask Copilot about logs" });
+      for (const compact of [false, true, false]) {
+        resize(compact);
+        expect(screen.getByRole("row", { name: /Hello/ })).toBe(row);
+        expect(row.getAttribute("aria-selected")).toBe("true");
+        expect(screen.getByRole("complementary", { name: "Entry inspector" })).toBe(inspector);
+        expect(screen.queryByRole("complementary", { name: "Discover fields" })).toBe(fieldPanel);
+        expect(screen.queryByRole("complementary", { name: "Ask Copilot about logs" })).toBe(chatPanel);
+        if (fields) expect((screen.getByLabelText("Find a field") as HTMLInputElement).value).toBe("message");
+        if (chat) expect((screen.getByLabelText("Message Copilot") as HTMLTextAreaElement).value).toBe("Investigation draft");
+      }
+      const layout = document.querySelector(".workspace-layout")!;
+      expect(layout.firstElementChild?.classList.contains("log-panel")).toBe(true);
+      if (chatPanel) expect(chatPanel.previousElementSibling?.classList.contains("workspace")).toBe(true);
+      await waitFor(() => expect(savedPreferences.explorer.inspector).toBe(true));
+      expect(savedPreferences.explorer.fields).toBe(fields);
+    });
+  });
+
   describe("multiline log rows", () => {
     const error: LogEntry = {
       ...Entry, severity: "error",
@@ -905,7 +1002,7 @@ describe("log-first workspace", () => {
     expect(screen.getByRole("heading", { name: "Import a session" })).toBeDefined();
   });
 
-  it("opens Copilot in a non-modal panel before the log results, even with no visible matches", () => {
+  it("opens Copilot in a non-modal panel after the log results, even with no visible matches", () => {
     vi.mocked(useLogPage).mockReturnValueOnce({ page: { ...fixturePage(), entries: [] }, loading: false, error: null, refresh: vi.fn() });
     render(<App />);
     expect(screen.queryByRole("heading", { name: "Ask Copilot about logs" })).toBeNull();
@@ -914,7 +1011,7 @@ describe("log-first workspace", () => {
     expect(screen.queryByRole("button", { name: "Connect local Copilot" })).toBeNull();
     const panel = screen.getByRole("complementary", { name: "Ask Copilot about logs" });
     expect(panel.parentElement).toBe(screen.getByRole("main", { name: "Log exploration workspace" }));
-    expect(panel.nextElementSibling?.classList.contains("workspace")).toBe(true);
+    expect(panel.previousElementSibling?.classList.contains("workspace")).toBe(true);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByLabelText("Search logs").hasAttribute("disabled")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Close Copilot chat" }));

@@ -1,7 +1,45 @@
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip, TooltipContent, TooltipTrigger } from "@opensearch-project/oui";
-import type { ReactElement } from "react";
+import { Button, Popover, PopoverContent, PopoverTrigger, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip, TooltipContent, TooltipTrigger } from "@opensearch-project/oui";
+import { ChevronDown } from "lucide-react";
+import { useEffect, useRef, useState, type ReactElement, type ReactNode, type RefObject } from "react";
 
 const EmptySelectValue = "__all__";
+const CompactLayout = "(max-width: 900px), (max-height: 500px)";
+
+export function ResponsiveActions({ label, className, children, triggerRef }: {
+  label: string;
+  className: string;
+  children: ReactNode;
+  triggerRef?: RefObject<HTMLButtonElement | null>;
+}) {
+  const [compact, setCompact] = useState(() => matchMedia(CompactLayout).matches);
+  const [open, setOpen] = useState(false);
+  const actionClosing = useRef(false);
+  useEffect(() => {
+    const media = matchMedia(CompactLayout);
+    const update = () => { setCompact(media.matches); setOpen(false); };
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  if (!compact) return <div className={className}>{children}</div>;
+  return <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger asChild><Button ref={triggerRef} variant="outline" size="sm">{label}<ChevronDown size={13} /></Button></PopoverTrigger>
+    <PopoverContent className="popover action-disclosure" aria-label={label} sideOffset={6} align="end" collisionPadding={12}
+      onCloseAutoFocus={event => {
+        if (actionClosing.current) event.preventDefault();
+        actionClosing.current = false;
+      }}
+      onClick={event => {
+        if (event.target instanceof Element && event.target.closest("[data-disclosure-close]")) {
+          actionClosing.current = true;
+          setOpen(false);
+        }
+      }}>
+      <div className={className}>{children}</div>
+    </PopoverContent>
+  </Popover>;
+}
 
 export interface Choice {
   value: string;
