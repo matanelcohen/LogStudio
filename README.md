@@ -110,5 +110,10 @@ Reuse named searches, narrow investigations to exact time ranges, and export mat
 The inspector includes JSON message formatting, original-text copying, and previous/next entry navigation.
 The screenshot uses synthetic local demo logs. The optional timeline covers the visible page only.
 
+Use **Trends** for full-session log volume, error percentages, category breakdowns, and observations.
+Use **Graphs** to build and save line/bar charts with reusable filters. Both work with live, saved,
+and imported sessions. The existing **Copilot** connection can explain these aggregates and suggest
+an editable graph, without sending log messages. See [Trends and Graphs](docs/guide.md#trends-and-graphs).
+
 See the [user guide](docs/guide.md) for search, saved sessions, imports and exports, optional
 Copilot log chat, configuration, and development instructions.

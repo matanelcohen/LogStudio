@@ -1,6 +1,7 @@
 import { MaximumPageSize, PageSize, type SessionFilters } from "./model";
 import { readSessionFilters } from "./sessionFilters";
 import { AppearanceChoices, type Appearance } from "./themes";
+import { readSavedGraphs, type SavedGraph } from "./analytics-model";
 
 export const TypographyStorageKey = "logstudio.typography.v1";
 export const UiFonts = [
@@ -62,6 +63,7 @@ export interface AppPreferences {
   typography: TypographySettings;
   explorer: ExplorerPreferences;
   savedSearches: SavedSearch[];
+  savedGraphs: SavedGraph[];
 }
 
 export const MaximumSavedSearches = 10;
@@ -72,6 +74,7 @@ export interface PreferencesChanges {
   typography?: Partial<TypographySettings>;
   explorer?: Partial<ExplorerPreferences>;
   savedSearches?: SavedSearch[];
+  savedGraphs?: SavedGraph[];
 }
 
 export function mergePreferenceChanges(current: PreferencesChanges, changes: PreferencesChanges): PreferencesChanges {
@@ -93,6 +96,7 @@ export function mergePreferences(current: AppPreferences, changes: PreferencesCh
 export const DefaultPreferences: AppPreferences = {
   appearance: "system",
   savedSearches: [],
+  savedGraphs: [],
   typography: { ...DefaultTypography },
   explorer: {
     wrap: true, pageSize: PageSize, fields: false, inspector: false, timeline: false,
@@ -139,7 +143,7 @@ export function readPreferences(value: unknown): AppPreferences {
     Object.entries(sizing).some(([key, value]) => !DefaultColumnOrder.includes(key) || typeof value !== "number" || !Number.isFinite(value) || value < 44 || value > 4000))
     throw new Error("The server returned invalid app settings.");
   return {
-    appearance, typography, savedSearches,
+    appearance, typography, savedSearches, savedGraphs: readSavedGraphs(data.savedGraphs),
     explorer: {
       wrap: explorer.wrap as boolean, pageSize: explorer.pageSize,
       fields: explorer.fields as boolean, inspector: explorer.inspector as boolean, timeline: explorer.timeline as boolean,

@@ -236,6 +236,10 @@ internal sealed class HttpLogServer : IAsyncDisposable
             }
 
             string route = request.Url.AbsolutePath[1..];
+            if (route == "api/analytics/copilot")
+            {
+                await this.AnalyticsInsightAsync(context, session, cancellationToken).ConfigureAwait(false);
+            }            
             if (route is "api/comparison" or "api/comparison/groups" or "api/comparison/evidence")
             {
                 await this.ComparisonAsync(context, session, route, cancellationToken).ConfigureAwait(false);
@@ -469,7 +473,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
             {
                 await this.ReadHistoryAsync(context, session, route, cancellationToken).ConfigureAwait(false);
             }
-            else if (route == ViewerConstants.SearchRoute || route == ViewerConstants.ExportRoute || route == ViewerConstants.BundleExportRoute)
+            else if (route == ViewerConstants.SearchRoute || route == ViewerConstants.ExportRoute || route == ViewerConstants.BundleExportRoute || route == "api/analytics")
             {
                 await this.ReadHistoryAsync(context, session, route, cancellationToken).ConfigureAwait(false);
             }
@@ -1218,6 +1222,89 @@ internal sealed class HttpLogServer : IAsyncDisposable
         await response.OutputStream.FlushAsync(cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    private async Task AnalyticsInsightAsync(HttpListenerContext context, ViewerSession session, CancellationToken cancellationToken)
+    {
+        HttpListenerRequest request = context.Request;
+        HttpListenerResponse response = context.Response;
+        if (request.HttpMethod != ViewerConstants.PostMethod)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.MethodNotAllowed, "Copilot insights require POST.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (request.Headers[ViewerConstants.ClearRequestHeader] != "copilot-analytics")
+        {
+            await WriteErrorAsync(response, HttpStatusCode.Forbidden, "An explicit Copilot analytics action header is required.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (!string.Equals(request.ContentType?.Split(';')[0].Trim(), "application/json", StringComparison.OrdinalIgnoreCase))
+        {
+            await WriteErrorAsync(response, HttpStatusCode.UnsupportedMediaType, "Insights require application/json.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (!this.copilotSlot.Wait(0))
+        {
+            await WriteErrorAsync(response, HttpStatusCode.TooManyRequests, "A Copilot request is already running. Wait for it to finish.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        bool historySlot = false;
+        try
+        {
+            AnalyticsQuestion question;
+            using (JsonDocument body = await ReadSessionActionAsync(request, CopilotChat.MaximumRequestBytes, cancellationToken).ConfigureAwait(false))
+            {
+                try
+                {
+                    question = body.RootElement.Deserialize<AnalyticsQuestion>(ViewerConstants.JsonOptions) ?? throw new ArgumentException("An analytics question is required.");
+                }
+                catch (JsonException exception)
+                {
+                    throw new ArgumentException("The analytics request must contain valid JSON and supported value types.", exception);
+                }
+            }
+            CopilotChat.Validate(new(question.Question, []));
+            question.Graph?.Validate();
+            LogQuery query = LogQuery.Parse(request.QueryString);
+            historySlot = this.historySlots.Wait(0);
+            if (!historySlot)
+            {
+                await WriteErrorAsync(response, HttpStatusCode.TooManyRequests, "Too many history requests. Retry shortly.", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            string? selected = request.QueryString[ViewerConstants.SessionIdQuery];
+            LogAnalyticsSnapshot snapshot;
+            using (LogHistoryReader history = string.IsNullOrEmpty(selected) || selected == session.Catalog.Id ? session.Logs.OpenHistory() : session.Catalog.Open(selected))
+                snapshot = await Task.Run(() => LogAnalytics.Build(history, query, cancellationToken), cancellationToken).ConfigureAwait(false);
+            this.historySlots.Release();
+            historySlot = false;
+            AnalyticsInsight result = await this.copilot.AskAnalyticsAsync(question, snapshot, cancellationToken).ConfigureAwait(false);
+            await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(result, ViewerConstants.JsonOptions), ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+        }
+        catch (CopilotException exception)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.ServiceUnavailable, exception.Message, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HistoryClearedException exception)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.Conflict, exception.Message, cancellationToken).ConfigureAwait(false);
+        }
+        catch (RegexMatchTimeoutException exception)
+        {
+            this.diagnostics.WriteLine($"Log Studio analytics condition timed out: {exception.Message}");
+            await WriteErrorAsync(response, HttpStatusCode.RequestTimeout, "A regex condition exceeded its time budget. Simplify the pattern.", cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or JsonException ||
+            (exception is IOException && exception is not (FileNotFoundException or DirectoryNotFoundException)))
+        {
+            this.diagnostics.WriteLine($"Log Studio analytics failed: {exception}");
+            await WriteErrorAsync(response, HttpStatusCode.InternalServerError, "Could not read session analytics. Check local files and permissions.", cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (historySlot) this.historySlots.Release();
+            this.copilotSlot.Release();
+        }
+    }
+
     private async Task ReadHistoryAsync(HttpListenerContext context, ViewerSession session, string route, CancellationToken cancellationToken)
     {
         LogQuery query;
@@ -1250,6 +1337,13 @@ internal sealed class HttpLogServer : IAsyncDisposable
             string? selected = context.Request.QueryString[ViewerConstants.SessionIdQuery];
             using LogHistoryReader history = string.IsNullOrEmpty(selected) || selected == session.Catalog.Id ? session.Logs.OpenHistory() : session.Catalog.Open(selected);
             HttpListenerResponse response = context.Response;
+            if (route == "api/analytics")
+            {
+                LogAnalyticsSnapshot result = await Task.Run(() => LogAnalytics.Build(history, query, cancellationToken), cancellationToken).ConfigureAwait(false);
+                started = true;
+                await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(result, ViewerConstants.JsonOptions), ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+                return;
+            }
             if (route == ViewerConstants.SearchRoute)
             {
                 LogSearchResult result = await Task.Run(() => query.Search(history, cancellationToken), cancellationToken).ConfigureAwait(false);

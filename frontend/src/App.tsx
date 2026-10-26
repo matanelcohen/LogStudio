@@ -1,6 +1,6 @@
 import * as Oui from "@opensearch-project/oui";
 
-import { AlertCircle, ChevronDown, ChevronRight, Clock3, Compass, Database, FileUp, HardDrive, History, Logs, MessageSquare, Monitor, Moon, Pause, Play, Settings, Sun, X } from "lucide-react";
+import { AlertCircle, ChartNoAxesCombined, ChevronDown, ChevronRight, Clock3, Compass, Database, FileUp, HardDrive, History, Logs, MessageSquare, Monitor, Moon, Pause, Play, Settings, Sun, TrendingUp, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { ConditionDialog } from "./ConditionDialog";
 import { ClearHistoryDialog } from "./ClearHistoryDialog";
@@ -28,10 +28,13 @@ import { useSessionFilters } from "./useSessionFilters";
 import { useAppUpdate } from "./useAppUpdate";
 import { usePreferences } from "./usePreferences";
 import { DefaultTypography, type ExplorerPreferences } from "./preferences";
+import { AnalyticsWorkspace, type AnalyticsView } from "./AnalyticsWorkspace";
+import "./analytics.css";
 
 interface PauseSnapshot { maximumId: number; status: ViewerStatus | null; }
 
 export default function App() {
+  const [view, setView] = useState<"discover" | AnalyticsView>("discover");
   const [query, setQuery] = useState<QueryState>(defaultQuery);
   const [cursor, setCursor] = useState<PageCursor>({ before: null, after: null });
   const [pause, setPause] = useState<PauseSnapshot | null>(null);
@@ -190,11 +193,13 @@ export default function App() {
   return (
     <Oui.TooltipProvider delayDuration={400}>
       <div className="discover-shell">
-        <a className="skip-link" href="#workspace">Skip to log results</a>
+        <a className="skip-link" href="#workspace">Skip to {view === "discover" ? "log results" : view}</a>
         <nav className="discover-rail" aria-label="Workspace applications">
           <div className="rail-brand" aria-hidden="true"><span className="rail-brand-icon"><Logs size={21} /></span><span className="rail-wordmark">Log Studio</span></div>
           <span className="rail-label" aria-hidden="true">Workspace</span>
-          <Oui.Button variant="ghost" size="sm" className="rail-item active" aria-label="Discover logs" aria-current="page" title="Discover logs" onClick={() => searchRef.current?.focus()}><Compass size={20} /><span>Discover</span></Oui.Button>
+          <Oui.Button variant="ghost" size="sm" className={`rail-item${view === "discover" ? " active" : ""}`} aria-label="Discover logs" aria-current={view === "discover" ? "page" : undefined} title="Discover logs" onClick={() => { setView("discover"); searchRef.current?.focus(); }}><Compass size={20} /><span>Discover</span></Oui.Button>
+          <Oui.Button variant="ghost" size="sm" className={`rail-item${view === "trends" ? " active" : ""}`} aria-label="Trends" aria-current={view === "trends" ? "page" : undefined} title="Trends" onClick={() => setView("trends")}><TrendingUp size={20} /><span>Trends</span></Oui.Button>
+          <Oui.Button variant="ghost" size="sm" className={`rail-item${view === "graphs" ? " active" : ""}`} aria-label="Graphs" aria-current={view === "graphs" ? "page" : undefined} title="Graphs" onClick={() => setView("graphs")}><ChartNoAxesCombined size={20} /><span>Graphs</span></Oui.Button>
           <Oui.Button variant="ghost" size="sm" className="rail-item" aria-label="Browse sessions" title="Sessions" onClick={() => setSessionsOpen(true)}><History size={20} /><span>Sessions</span></Oui.Button>
           <div className="rail-footer"><Monitor size={17} aria-hidden="true" /><div><strong>On this device</strong><span>Local workspace</span></div></div>
         </nav>
@@ -252,7 +257,10 @@ export default function App() {
         </header>
         <div className="query-region">
           <div className="workspace-heading">
-            <div><span className="workspace-kicker">LOG EXPLORER</span><h2>Discover</h2><p>Search, filter, and inspect your session history.</p></div>
+            <div><span className="workspace-kicker">{view === "discover" ? "LOG EXPLORER" : "SESSION ANALYTICS"}</span>
+              <h2>{view === "discover" ? "Discover" : view === "trends" ? "Trends" : "Graphs"}</h2>
+              <p>{view === "discover" ? "Search, filter, and inspect your session history." : view === "trends" ?
+                "Spot patterns across your logs and turn observations into insights." : "Build, save, and explore graphs from your session data."}</p></div>
           </div>
           {live.status?.listenAll && !archived && <RunningApplicationPicker onListening={setApplicationListening} onAttached={() => {
             // The first attachment reuses the waiting history; later switches reset through the live status.
@@ -274,9 +282,14 @@ export default function App() {
             {live.error ? <Oui.Button variant="outline" size="sm" onClick={live.reconnect}>Reconnect</Oui.Button> : <Oui.Button variant="ghost" size="icon" className="icon-button" aria-label="Dismiss notification" onClick={() => setNotice(null)}><X size={14} /></Oui.Button>}
           </Oui.Alert>}
         </div>
-        <main id="workspace" className="workspace-region" tabIndex={-1} aria-label="Log exploration workspace">
+        <main id="workspace" className={`workspace-region${view !== "discover" ? " analytics-region" : ""}`} tabIndex={-1} aria-label={view === "discover" ? "Log exploration workspace" : `${view === "trends" ? "Trends" : "Graphs"} workspace`}>
           {chatOpen && <CopilotChatPanel key={query.sessionId} status={status} sessionId={query.sessionId}
             onClose={() => setChatOpen(false)} returnFocus={() => chatOpener.current?.focus()} />}
+          {view !== "discover" ? <AnalyticsWorkspace key={`${query.sessionId}:${historyDirectory}:${clearedThroughId}`}
+            view={view} onView={setView} query={query} onQuery={changeQuery}
+            maximumId={archived ? null : pause?.maximumId ?? null} paused={!archived && pause !== null}
+            historyDirectory={archived ? "" : historyDirectory} clearedThroughId={clearedThroughId}
+            savedGraphs={preferences.settings.savedGraphs} onSaveGraphs={savedGraphs => preferences.update({ savedGraphs })} saved={preferences.saved} graphsReady={preferences.ready} /> :
           <Oui.Card className="workspace" data-inspector={inspector} data-fields={fields} aria-busy={switchingHistory}>
           {switchingHistory && <div className="history-switch-status" role="status">Loading selected application history…</div>}
           <div className="workspace-layout" inert={switchingHistory}>
@@ -299,7 +312,7 @@ export default function App() {
           {inspector && <Inspector entry={visibleSelection} entries={activePage?.entries ?? []} status={status} onSelect={setSelected} onClose={() => setInspector(false)}
             onCondition={addCondition} onDraft={openEditor} onNotice={setNotice} />}
           </div>
-          </Oui.Card>
+          </Oui.Card>}
         </main>
         {!archived && !live.status?.listenAll && live.status?.canWriteInput && !live.status.isCompleted && <TerminalInput />}
         <footer className="app-footer"><span id="capacityNote"><HardDrive size={12} /> On disk · {status?.capacity ? `Limit ${NumberFormatter.format(status.capacity)}` : "Unlimited history"}
