@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { buildExportUrl, buildQueryParameters, buildSessionExportUrl, defaultQuery, importFormat, MaximumImportBytes, validateConditions, validateImportFile, type LogCondition } from "./model";
+import { buildExportUrl, buildQueryParameters, buildSessionExportUrl, defaultQuery, importFormat, MaximumImportBytes, validateConditions, validateImportFile, validateTimeRange, type LogCondition } from "./model";
 
 describe("disk query contracts", () => {
+  it("keeps exact bounds and snapshot filters identical in CSV exports", () => {
+    const query = { ...defaultQuery(), sessionId: "saved/id", since: "2026-10-11T18:00:00.123Z", until: "2026-10-11T18:01:00.456Z", search: "needle" };
+    const parameters = buildQueryParameters(query, { before: 80, after: null }, 100);
+    const exported = new URL(buildExportUrl(query, 100, "csv"), "http://localhost/");
+    expect(exported.searchParams.get("format")).toBe("csv");
+    for (const key of ["since", "until", "q", "sessionId", "maxId"]) expect(exported.searchParams.get(key)).toBe(parameters.get(key));
+    expect(exported.searchParams.has("before")).toBe(false);
+    expect(validateTimeRange(query.since, query.until)).toBeNull();
+    expect(validateTimeRange(query.until, query.since)).toContain("Start");
+    expect(validateTimeRange("invalid", "")).toContain("valid");
+    expect(validateTimeRange("", query.until)).toBeNull();
+    expect(validateTimeRange(query.since, query.since)).toBeNull();
+  });
   it("keeps search, conditions, snapshot bounds, and all/any semantics in exports", () => {
     const conditions: LogCondition[] = [
       { mode: "include", field: "message", operator: "regex", value: "^skill [0-9]+$" },

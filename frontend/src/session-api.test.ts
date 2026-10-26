@@ -109,6 +109,8 @@ describe("session transfer API", () => {
     { conditions: [{ mode: "include", field: "message", operator: "script", value: "x" }] },
     { conditions: [{ mode: "include", field: "message", operator: "contains", value: "" }] },
     { includeMode: "other" }, { timeWindow: -1 }, { timeWindow: 1 }, { matchCase: "true" },
+    { since: "invalid" }, { until: null }, { since: "2026-10-12T00:00:00Z", until: "2026-10-11T00:00:00Z" },
+    { timeWindow: 60000, until: "2026-10-11T00:00:00Z" },
     { category: "{}" }, { category: "not JSON" }, { category: JSON.stringify("x".repeat(513)) },
     { severity: "1" }, { stream: "other" }
   ])("rejects invalid saved filters %j", invalid => {

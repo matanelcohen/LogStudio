@@ -1106,9 +1106,16 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private async Task ReadHistoryAsync(HttpListenerContext context, ViewerSession session, string route, CancellationToken cancellationToken)
     {
         LogQuery query;
+        bool csv = false;
         try
         {
             query = LogQuery.Parse(route == ViewerConstants.BundleExportRoute ? new System.Collections.Specialized.NameValueCollection() : context.Request.QueryString);
+            if (route == ViewerConstants.ExportRoute)
+            {
+                string? format = context.Request.QueryString["format"];
+                if (format is not (null or "jsonl" or "csv")) throw new ArgumentException("Export format must be jsonl or csv.");
+                csv = format == "csv";
+            }
         }
         catch (ArgumentException exception)
         {
@@ -1148,14 +1155,19 @@ internal sealed class HttpLogServer : IAsyncDisposable
             }
             else if (route == ViewerConstants.ExportRoute)
             {
-                response.ContentType = ViewerConstants.JsonLinesContentType;
-                response.Headers[ViewerConstants.ContentDispositionHeader] = $"attachment; filename=\"log-studio-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.jsonl\"";
-                using StreamWriter writer = new(response.OutputStream, new UTF8Encoding(false), leaveOpen: true);
+                response.ContentType = csv ? "text/csv; charset=utf-8" : ViewerConstants.JsonLinesContentType;
+                response.Headers[ViewerConstants.ContentDispositionHeader] = $"attachment; filename=\"log-studio-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.{(csv ? "csv" : "jsonl")}\"";
+                using StreamWriter writer = new(response.OutputStream, new UTF8Encoding(csv), leaveOpen: true);
+                if (csv)
+                {
+                    writer.NewLine = "\r\n";
+                    await writer.WriteLineAsync(LogCsv.Header.AsMemory(), cancellationToken).ConfigureAwait(false);
+                }
                 int written = 0;
                 foreach (LogEntry entry in history.ReadEntries(query.MinimumId >= history.Status.LastId ? history.Status.LastId + 1 : query.MinimumId + 1, query.MaximumId, cancellationToken))
                 {
                     if (!query.Matches(entry)) continue;
-                    await writer.WriteLineAsync(JsonSerializer.Serialize(entry, ViewerConstants.JsonOptions).AsMemory(), cancellationToken).ConfigureAwait(false);
+                    await writer.WriteLineAsync((csv ? LogCsv.Record(entry) : JsonSerializer.Serialize(entry, ViewerConstants.JsonOptions)).AsMemory(), cancellationToken).ConfigureAwait(false);
                     if (++written % ViewerConstants.StreamBatchSize == 0) await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
                 }
 

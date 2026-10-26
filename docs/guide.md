@@ -76,7 +76,7 @@ Fonts use installed local fallbacks and do not require downloads.
 ### Settings persistence
 
 Theme, UI and log fonts, sizes and line spacing, page size, line wrapping, optional panels,
-and column visibility, widths and order autosave to the app's per-user `LogStudio/settings.json`
+column visibility, widths and order, and named saved searches autosave to the app's per-user `LogStudio/settings.json`
 file. Browser and desktop viewers on the same device and OS user share these preferences,
 independently of the localhost port or browser storage. New viewers load the latest saved
 preferences; already-open viewers keep their current choices. Session filters remain attached
@@ -604,7 +604,7 @@ was installed** are available; earlier deleted temporary histories cannot be rec
 Selecting a prior session routes search, paging, level selection and export to that history,
 without changing or stopping the current command. Clear logs affects only the selected session.
 Cleared saved sessions retain their name/date/parameter metadata with zero log entries.
-Search text, match case, selected levels, stream, category, time window, and include/exclude
+Search text, match case, selected levels, stream, category, relative or exact time range, and include/exclude
 conditions are saved automatically with each session. Reopening a session restores its filters;
 switching sessions keeps each run's filters separate. Older sessions without saved filters open
 with the defaults. Pause bounds, paging position, and **Clear view** are not saved.
@@ -631,6 +631,12 @@ Use the arrow beside **Export** to choose between:
 
 - **Matching records (.jsonl):** streams all records matching the current search, conditions,
   levels, stream, category, time window, and snapshot bounds—not just the visible page.
+- **Spreadsheet (.csv):** streams the same matching records with columns for ID, capture timestamp,
+  stream, severity, category, message, and partial-line state. UTF-8 with a BOM, CRLF records and
+  quoted cells preserve Unicode, commas, quotes, and multiline messages in spreadsheet applications.
+  Formula-like text is prefixed with an apostrophe for spreadsheet safety; JSONL remains the lossless
+  choice. CSV is for analysis, not session import. The API uses `api/export?format=csv` with the
+  same query and session parameters as JSONL.
 - **Portable session bundle (.zip):** streams the selected session's complete retained history,
   independent of search or page filters, plus its name, dates, exit state, command, redacted
   arguments, working directory, and saved filters. Session cards have the same bundle-export action.
@@ -995,6 +1001,28 @@ remove the reported folder if necessary. Download JSONL before closing if you wa
   Selected levels are OR-ed. All levels removes the level restriction; Deselect all shows
   no entries. Warning/error presets remain shortcuts, and export uses the same selection.
 - Ctrl/Cmd+K or `/` focuses search. Escape clears it.
+- **Date range** opens exact start/end controls in your local time zone, with millisecond precision.
+  Both bounds are inclusive; either can be left blank. Applying a range replaces the relative
+  time window, and choosing a relative window clears exact bounds. Search, JSONL/CSV export and
+  per-session saved filters use the same bounds. The API accepts ISO timestamps as `since` and
+  `until`, including explicit offsets, and rejects reversed ranges.
+- **Saved searches** stores named filter presets for reuse across current and saved sessions.
+  Save the current filters, apply a preset by name, or delete it from the dialog.
+  Presets include search, case, levels, stream, category, time range and include/exclude rules;
+  they never change the selected session or page size, and applying one restores entries hidden
+  by Clear view. Up to 10 names of 1–64 characters are supported, with case-insensitive uniqueness.
+  Presets share the app settings file across ports and restarts; all settings together must fit
+  within 32 KiB. Save failures stay visible with **Retry settings**. Filter text is not redacted.
+- In the **Inspector**, **Format JSON** toggles between the original message and an indented view
+  for JSON objects/arrays. Invalid JSON and plain text remain unchanged. **Copy message** always
+  copies the original text; **JSON** copies the complete entry, including metadata. Clipboard
+  permission failures are reported instead of claiming the copy succeeded.
+  Formatting preserves large numeric IDs, duplicate keys and string escapes; exceptionally deep
+  or oversized formatted messages stay raw to bound rendering cost.
+- The inspector's **Previous entry** and **Next entry** buttons move through the current visible
+  page, keep the selected row in view, and show its position. They stop at page boundaries.
+  If a selected entry moves off the page or expires, its details remain available, but navigation
+  is disabled until another visible row is selected. Older / Newer still load other pages.
 - The entire retained history is searched. **Rows/page** accepts any positive 32-bit integer
   (default 250). Press Enter or leave the input to apply it; invalid values show an error without
   changing the active size. Older / Newer use the selected size, while exports remain unlimited.

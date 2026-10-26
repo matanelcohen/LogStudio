@@ -539,6 +539,20 @@ kbd { font-size: var(--ui-font-size, 14px); white-space: nowrap; color: var(--cp
 .regex-guidance { display: flex; gap: 8px; align-items: center; color: var(--cp-secondary-text); font-size: var(--ui-font-size, 14px); margin: 16px 0; padding: 10px; background: var(--cp-surface-soft); border-radius: 6px; }
 .regex-guidance svg { flex-shrink: 0; }
 .dialog-footer { justify-content: flex-end; padding-top: 16px; border-top: 1px solid var(--cp-separator); }
+.time-range-popover { width: min(380px, calc(100vw - 32px)); }
+.time-range-popover form, .saved-searches-dialog form { display: flex; flex-direction: column; gap: 12px; }
+.time-range-popover label, .saved-searches-dialog label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.time-range-popover input { width: 100%; min-width: 0; }
+.saved-searches-dialog { width: min(600px, calc(100vw - 32px)); }
+.saved-searches-dialog > .dialog-footer, .saved-search-list { margin: 0 20px 20px; }
+.saved-search-list { display: flex; flex-direction: column; gap: 8px; }
+.saved-search-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.saved-search-row > button:first-child { flex: 1; min-width: 0; height: auto; white-space: normal; overflow-wrap: anywhere; justify-content: flex-start; }
+.inspector-navigation, .message-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.inspector-navigation { margin-bottom: 16px; }
+.inspector-navigation span { flex: 1; text-align: center; color: var(--cp-secondary-text); }
+.message-toolbar { margin-top: 16px; margin-bottom: 8px; }
+.selected-details .message-toolbar h3 { flex: 1; margin: 0; }
 .copilot-panel { flex: 1 1 clamp(340px, 30vw, 460px); height: 100%; min-width: 0; min-height: 360px; display: flex; flex-direction: column; overflow: auto; border: 1px solid var(--cp-material-border); border-radius: 16px; background: var(--cp-card-material); box-shadow: var(--cp-card-shadow); -webkit-backdrop-filter: blur(var(--cp-chrome-blur)); backdrop-filter: blur(var(--cp-chrome-blur)); }
 .copilot-modal { position: fixed; inset: 16px; top: 16px; left: 16px; translate: none; transform: none; width: auto; max-width: none; padding: 0; gap: 0; z-index: 51; height: calc(100dvh - 32px); overflow: hidden; }
 .copilot-fullscreen { height: 100%; min-height: 0; border: 0; border-radius: 0; background: var(--cp-panel-strong); }

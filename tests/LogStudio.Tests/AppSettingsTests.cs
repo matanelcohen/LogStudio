@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -64,6 +65,50 @@ public sealed class AppSettingsTests : IDisposable
         Assert.Equal(22, saved.Preferences.Typography.LogFontSize);
         Assert.True(saved.Preferences.Explorer.Timeline);
         Assert.Equal(new DesktopWindowSettings(1000, 650, false), saved.Window);
+    }
+
+    [Fact]
+    public void NamedSearchesPersistAcrossRestartsAndPreserveOtherPreferences()
+    {
+        SessionFilters filters = SessionFiltersTests.Filters() with { TimeWindow = 0, Until = "2026-10-11T18:00:00Z" };
+        this.Save(JsonSerializer.Serialize(new { savedSearches = new[] { new SavedSearch("Errors", filters) } }, ViewerConstants.JsonOptions));
+        this.Save("""{"appearance":"dark-modern"}""");
+        SavedSearch search = Assert.Single(this.Store.Read().Preferences!.SavedSearches);
+        Assert.Equal("Errors", search.Name);
+        SessionFiltersTests.AssertFilters(filters, search.Filters);
+        this.Save("""{"savedSearches":[]}""");
+        Assert.Empty(this.Store.Read().Preferences!.SavedSearches);
+        Assert.Equal("dark-modern", this.Store.Read().Preferences!.Appearance);
+    }
+
+    [Fact]
+    public void SavedSearchValidationAndStorageLimitsNeverReplaceValidSettings()
+    {
+        this.Save("""{"appearance":"dark"}""");
+        string before = File.ReadAllText(this.SettingsPath);
+        SavedSearch valid = new("Errors", SessionFiltersTests.Filters());
+        foreach (SavedSearch[] searches in new[]
+        {
+            new[] { valid, valid with { Name = "errors" } },
+            new[] { valid with { Name = " " } },
+            new[] { valid with { Name = new string('x', 65) } },
+            new[] { valid with { Name = "name\n" } },
+            new[] { valid with { Filters = valid.Filters with { Search = "\"unfinished" } } },
+            Enumerable.Range(0, 11).Select(index => valid with { Name = "Search " + index }).ToArray(),
+        })
+        {
+            Assert.Throws<ArgumentException>(() => this.Save(JsonSerializer.Serialize(new { savedSearches = searches }, ViewerConstants.JsonOptions)));
+            Assert.Equal(before, File.ReadAllText(this.SettingsPath));
+        }
+        SessionFilters large = valid.Filters with
+        {
+            Search = new string('x', 1024),
+            Conditions = Enumerable.Range(0, 10).Select(_ => new LogCondition("include", "message", "contains", new string('x', 256))).ToArray(),
+        };
+        SavedSearch[] oversized = Enumerable.Range(0, 10).Select(index => new SavedSearch("Search " + index, large)).ToArray();
+        Assert.Throws<ArgumentException>(() => this.Save(JsonSerializer.Serialize(new { savedSearches = oversized }, ViewerConstants.JsonOptions)));
+        Assert.Equal(before, File.ReadAllText(this.SettingsPath));
+        Assert.Empty(Directory.GetFiles(this.directory, "*.pending"));
     }
 
     [Theory]
