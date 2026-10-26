@@ -124,6 +124,31 @@ public sealed class AppSettingsTests : IDisposable
         Assert.Empty(Directory.GetFiles(this.directory, "*.pending"));
     }
 
+    [Fact]
+    public void GraphsPersistWithFiltersAcrossRestartsAndRejectInvalidDefinitionsWithoutReplacingSettings()
+    {
+        SavedGraph valid = new(new("Errors", "time", "errors", "line"), SessionFiltersTests.Filters());
+        this.Save(JsonSerializer.Serialize(new { savedGraphs = new[] { valid } }, ViewerConstants.JsonOptions));
+        this.Save("""{"appearance":"dark"}""");
+        SavedGraph restored = Assert.Single(this.Store.Read().Preferences!.SavedGraphs);
+        Assert.Equal(valid.Graph, restored.Graph);
+        SessionFiltersTests.AssertFilters(valid.Filters, restored.Filters);
+        string before = File.ReadAllText(this.SettingsPath);
+        foreach (SavedGraph[] graphs in new[]
+        {
+            new[] { valid, valid with { Graph = valid.Graph with { Name = "errors" } } },
+            new[] { valid with { Graph = valid.Graph with { Name = " " } } },
+            new[] { valid with { Graph = valid.Graph with { GroupBy = "category" } } },
+            new[] { valid with { Graph = valid.Graph with { Measure = "latency" } } },
+            new[] { valid with { Filters = valid.Filters with { Search = "\"unfinished" } } },
+            Enumerable.Range(0, 11).Select(index => valid with { Graph = valid.Graph with { Name = "Graph " + index } }).ToArray(),
+        })
+        {
+            Assert.Throws<ArgumentException>(() => this.Save(JsonSerializer.Serialize(new { savedGraphs = graphs }, ViewerConstants.JsonOptions)));
+            Assert.Equal(before, File.ReadAllText(this.SettingsPath));
+        }
+    }
+
     [Theory]
     [InlineData("{}")]
     [InlineData("null")]

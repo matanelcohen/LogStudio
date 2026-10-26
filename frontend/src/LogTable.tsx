@@ -76,6 +76,7 @@ export function LogTable({ page, loading, error, emptyState, selected, matchCase
   const setOrder = (value: string[] | ((current: string[]) => string[])) =>
     onPreferences({ columnOrder: typeof value === "function" ? value(order) : value });
   const [paneWidth, setPaneWidth] = useState(InitialTableWidth);
+  const [paneHeight, setPaneHeight] = useState(0);
   const scroll = useRef<HTMLDivElement>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -124,21 +125,24 @@ export function LogTable({ page, loading, error, emptyState, selected, matchCase
   useEffect(() => {
     if (follow && entries.length > 0 && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
   }, [entries, follow, typography]);
-  useEffect(() => {
+  function revealRow(row: Element | null) {
     const pane = scroll.current;
-    const row = selected && pane?.querySelector(`[data-log-id="${selected.id}"]`);
     if (!pane || !row) return;
     const bounds = pane.getBoundingClientRect();
     const entryBounds = row.getBoundingClientRect();
     const top = bounds.top + (pane.querySelector("thead")?.getBoundingClientRect().height ?? 0);
     if (entryBounds.top < top) pane.scrollTop += entryBounds.top - top;
     else if (entryBounds.bottom > bounds.bottom) pane.scrollTop += entryBounds.bottom - bounds.bottom;
-  }, [selected?.id]);
+  }
+  useEffect(() => {
+    revealRow(selected ? scroll.current?.querySelector(`[data-log-id="${selected.id}"]`) ?? null : null);
+  }, [selected?.id, paneWidth, paneHeight]);
   useEffect(() => {
     const pane = scroll.current;
     if (!pane) return;
-    setPaneWidth(pane.clientWidth);
-    const observer = new ResizeObserver(() => setPaneWidth(pane.clientWidth));
+    const resize = () => { setPaneWidth(pane.clientWidth); setPaneHeight(pane.clientHeight); };
+    resize();
+    const observer = new ResizeObserver(resize);
     observer.observe(pane);
     return () => observer.disconnect();
   }, []);
@@ -227,6 +231,7 @@ export function LogTable({ page, loading, error, emptyState, selected, matchCase
           <Oui.TableBody id="rows" data-loaded-entries={entries.length}>
             {table.getRowModel().rows.map(row => (
               <Oui.TableRow key={row.id} data-log-id={row.id} data-severity={row.original.severity} tabIndex={0} aria-selected={selected?.id === row.original.id} className={selected?.id === row.original.id ? "selected" : ""}
+                onFocus={event => revealRow(event.currentTarget)}
                 onClick={() => onSelect(row.original)} onKeyDown={event => {
                   if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(row.original); }
                   if (event.key === "ArrowDown" || event.key === "ArrowUp") {

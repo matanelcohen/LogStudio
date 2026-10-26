@@ -257,6 +257,7 @@ internal sealed class LogBuffer : IDisposable
         {
             if (this.disposed) return;
             this.disposed = true;
+            Interlocked.Increment(ref this.generation);
             if (this.settings.Input is not null) this.settings.Input.Changed -= this.InputChanged;
             this.changes.Pulse();
             try

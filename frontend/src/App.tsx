@@ -1,6 +1,6 @@
 import * as Oui from "@opensearch-project/oui";
 
-import { AlertCircle, ChevronDown, ChevronRight, CircleHelp, Clock3, Compass, Database, FileUp, HardDrive, History, Logs, MessageSquare, Monitor, Moon, Pause, Play, Settings, Sun, X } from "lucide-react";
+import { AlertCircle, ChartNoAxesCombined, ChevronDown, ChevronRight, CircleHelp, Clock3, Compass, Database, FileUp, HardDrive, History, Logs, MessageSquare, Monitor, Moon, Pause, Play, Settings, Sun, TrendingUp, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { ConditionDialog } from "./ConditionDialog";
 import { ClearHistoryDialog } from "./ClearHistoryDialog";
@@ -15,13 +15,14 @@ import { TerminalInput } from "./TerminalInput";
 import { DiscoverSidebar } from "./DiscoverSidebar";
 import { clearSessionLogs, fetchApplications, importSessionFile, selectApplication } from "./api";
 import { Inspector } from "./Inspector";
+import { SurroundingEntries } from "./SurroundingEntries";
 import { LogTable } from "./LogTable";
 import {
   defaultQuery, errorMessage, NumberFormatter, readChoice, TimeFormatter, validateConditions,
-  type LogCondition, type LogEntry, type Notice, type PageCursor, type QueryState, type RunningApplication, type RunningApplicationsState, type SessionInfo, type ViewerStatus
+  type EntryLocation, type LogCondition, type LogEntry, type Notice, type PageCursor, type QueryState, type RunningApplication, type RunningApplicationsState, type SessionInfo, type ViewerStatus
 } from "./model";
 import { QueryBar } from "./QueryBar";
-import { Hint } from "./ui";
+import { Hint, ResponsiveActions } from "./ui";
 import { AppearanceChoices, AppearanceOptions } from "./themes";
 import { useAppearance } from "./useAppearance";
 import { useTypography } from "./useTypography";
@@ -30,15 +31,21 @@ import { useSessionFilters } from "./useSessionFilters";
 import { useAppUpdate } from "./useAppUpdate";
 import { usePreferences } from "./usePreferences";
 import { DefaultTypography, type ExplorerPreferences } from "./preferences";
+import { AnalyticsWorkspace, type AnalyticsView } from "./AnalyticsWorkspace";
+import "./analytics.css";
 
 interface PauseSnapshot { maximumId: number; status: ViewerStatus | null; }
 
 export default function App() {
+  const [view, setView] = useState<"discover" | AnalyticsView>("discover");
   const [query, setQuery] = useState<QueryState>(defaultQuery);
   const [cursor, setCursor] = useState<PageCursor>({ before: null, after: null });
   const [pause, setPause] = useState<PauseSnapshot | null>(null);
   const [follow, setFollow] = useState(true);
   const [selected, setSelected] = useState<LogEntry | null>(null);
+  const selectionSession = useRef("");
+  const [context, setContext] = useState<(EntryLocation & { historyDirectory: string }) | null>(null);
+  const contextOpener = useRef<HTMLElement | null>(null);
   const [editor, setEditor] = useState<{ open: boolean; seed: LogCondition | null }>({ open: false, seed: null });
   const [notice, setNotice] = useState<Notice | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
@@ -68,6 +75,8 @@ export default function App() {
   const sessionsOpener = useRef<HTMLButtonElement>(null);
   const chatOpener = useRef<HTMLButtonElement>(null);
   const settingsOpener = useRef<HTMLButtonElement>(null);
+  const sessionActionsOpener = useRef<HTMLButtonElement>(null);
+  const queryActionsOpener = useRef<HTMLButtonElement>(null);
   const seenClear = useRef(0);
   const seenHistory = useRef<string | null>(null);
   const preferences = usePreferences();
@@ -82,7 +91,7 @@ export default function App() {
   const archived = !!query.sessionId;
   const historyDirectory = live.status?.listenAll ? live.status.historyDirectory : "";
   const clearedThroughId = archived ? 0 : live.status?.clearedThroughId ?? 0;
-  const history = useLogPage(query, cursor, archived ? null : pause?.maximumId ?? null, archived ? 0 : live.status?.revision ?? 0, archived || pause !== null, clearedThroughId, archived ? "" : historyDirectory);
+  const history = useLogPage(query, cursor, archived ? null : pause?.maximumId ?? null, archived ? 0 : live.status?.revision ?? 0, archived || pause !== null, clearedThroughId, archived ? "" : historyDirectory, context !== null);
   const status = archived ? history.page?.status ?? null : pause?.status && pause.status.clearedThroughId >= clearedThroughId && (!historyDirectory || pause.status.historyDirectory === historyDirectory) ?
     { ...pause.status, applicationName: live.status?.applicationName ?? pause.status.applicationName } :
     live.status ?? history.page?.status ?? null;
@@ -105,25 +114,27 @@ export default function App() {
     if (!previous || previous === historyDirectory || archived) return;
     seenClear.current = clearedThroughId;
     setQuery(query => ({ ...defaultQuery(), pageSize: query.pageSize }));
-    setCursor({ before: null, after: null }); setSelected(null); setPause(null); setFollow(true);
+    setCursor({ before: null, after: null }); setSelected(null); setPause(null); setFollow(context === null);
     setChatOpen(false); setClearOpen(false); setNotice(null);
   }, [historyDirectory, archived]);
   useEffect(() => {
     if (clearedThroughId <= seenClear.current) return;
     seenClear.current = clearedThroughId;
     setSelected(null);
+    if (context) return;
     setPause(null);
     setFollow(true);
     setCursor({ before: null, after: null });
     setQuery(query => ({ ...query, dismissedThrough: 0 }));
   }, [clearedThroughId]);
   useEffect(() => {
-    if (cursor.after === null || !history.page || history.loading) return;
+    if (context || cursor.after === null || !history.page || history.loading) return;
     const lastId = history.page.entries.at(-1)?.id ?? cursor.after;
     setCursor({ before: lastId + 1, after: null });
-  }, [cursor, history.page, history.loading]);
+  }, [cursor, history.page, history.loading, context]);
   useEffect(() => {
     function shortcut(event: KeyboardEvent) {
+      if (context) return;
       const target = event.target;
       const editing = target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable);
       if (((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") || (event.key === "/" && !editing)) {
@@ -139,7 +150,7 @@ export default function App() {
     }
     document.addEventListener("keydown", shortcut);
     return () => document.removeEventListener("keydown", shortcut);
-  }, [query]);
+  }, [query, context]);
 
   function changeQuery(query: QueryState, forceFilters = false) {
     setQuery(query);
@@ -149,6 +160,7 @@ export default function App() {
   }
 
   function selectSession(session: SessionInfo) {
+    setContext(null);
     setQuery({ ...defaultQuery(), ...filters.restore(session), pageSize: query.pageSize, sessionId: session.isCurrent ? "" : session.id });
     setCursor({ before: null, after: null }); setSelected(null); setPause(null); setFollow(true);
     setSessionsOpen(false); setImportOpen(false); setNotice(null);
@@ -178,12 +190,13 @@ export default function App() {
     setNotice({ tone: "info", message: "Loading bundled synthetic demo logs…" });
     try {
       const session = await importSessionFile(sampleLogsFile(), SampleSessionName, () => {});
+      setView("discover");
       selectSession(session);
       setNotice({ tone: "info", message: "Demo — synthetic logs. Try searching for timeout or filtering by level. Your capture history is unchanged." });
       searchRef.current?.focus();
     } catch (error) {
       setNotice({ tone: "danger", message: `Could not open sample logs: ${errorMessage(error)}` });
-      helpButton.current?.focus();
+      returnToSessionAction(helpButton.current);
     } finally {
       setSampleBusy(false);
     }
@@ -224,6 +237,20 @@ export default function App() {
   }
 
   const activePage = history.page;
+  function selectEntry(entry: LogEntry) {
+    selectionSession.current = activePage?.sessionId ?? query.sessionId;
+    setSelected(entry);
+  }
+
+  function showSurrounding() {
+    if (!visibleSelection) return;
+    if (!selectionSession.current) {
+      setNotice({ tone: "danger", message: "The selected entry's session is unavailable. Refresh the results and select it again." });
+      return;
+    }
+    contextOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setContext({ sessionId: selectionSession.current, entryId: visibleSelection.id, historyDirectory: status?.historyDirectory ?? "" });
+  }
   const switchingHistory = !archived && !!historyDirectory && !!activePage && activePage.status.historyDirectory !== historyDirectory;
   const connectionLabel = live.connection === "live" ? "Connected" : live.connection === "paused" ? "Paused" :
     live.connection === "reconnecting" ? "Reconnecting" : live.connection === "failed" ? "Disconnected" : "Connecting";
@@ -232,16 +259,28 @@ export default function App() {
     dismissed={!gettingStartedOpen && preferences.settings.onboardingDismissed} sampleBusy={sampleBusy}
     onChooseApp={() => onboardingAction(() => document.getElementById("runningApplication")?.focus())}
     onImport={() => onboardingAction(openImport)} onSample={() => onboardingAction(() => void trySample())}
-    onDismiss={gettingStartedOpen ? undefined : () => { preferences.update({ onboardingDismissed: true }); helpButton.current?.focus(); }} />;
+    onDismiss={gettingStartedOpen ? undefined : () => { preferences.update({ onboardingDismissed: true }); returnToSessionAction(helpButton.current); }} />;
+  function returnToSessionAction(opener: HTMLElement | null) {
+    if (opener?.isConnected) opener.focus();
+    else sessionActionsOpener.current?.focus();
+  }
+  function openCopilot() {
+    setChatOpen(true);
+    const panel = document.querySelector(".copilot-panel");
+    (panel?.querySelector<HTMLElement>("textarea:not(:disabled)") ??
+      panel?.querySelector<HTMLElement>("button:not(:disabled)"))?.focus();
+  }
 
   return (
     <Oui.TooltipProvider delayDuration={400}>
       <div className="discover-shell">
-        <a className="skip-link" href="#workspace">Skip to log results</a>
+        <a className="skip-link" href="#workspace">Skip to {view === "discover" ? "log results" : view}</a>
         <nav className="discover-rail" aria-label="Workspace applications">
           <div className="rail-brand" aria-hidden="true"><span className="rail-brand-icon"><Logs size={21} /></span><span className="rail-wordmark">Log Studio</span></div>
           <span className="rail-label" aria-hidden="true">Workspace</span>
-          <Oui.Button variant="ghost" size="sm" className="rail-item active" aria-label="Discover logs" aria-current="page" title="Discover logs" onClick={() => searchRef.current?.focus()}><Compass size={20} /><span>Discover</span></Oui.Button>
+          <Oui.Button variant="ghost" size="sm" className={`rail-item${view === "discover" ? " active" : ""}`} aria-label="Discover logs" aria-current={view === "discover" ? "page" : undefined} title="Discover logs" onClick={() => { setView("discover"); searchRef.current?.focus(); }}><Compass size={20} /><span>Discover</span></Oui.Button>
+          <Oui.Button variant="ghost" size="sm" className={`rail-item${view === "trends" ? " active" : ""}`} aria-label="Trends" aria-current={view === "trends" ? "page" : undefined} title="Trends" onClick={() => setView("trends")}><TrendingUp size={20} /><span>Trends</span></Oui.Button>
+          <Oui.Button variant="ghost" size="sm" className={`rail-item${view === "graphs" ? " active" : ""}`} aria-label="Graphs" aria-current={view === "graphs" ? "page" : undefined} title="Graphs" onClick={() => setView("graphs")}><ChartNoAxesCombined size={20} /><span>Graphs</span></Oui.Button>
           <Oui.Button variant="ghost" size="sm" className="rail-item" aria-label="Browse sessions" title="Sessions" onClick={() => setSessionsOpen(true)}><History size={20} /><span>Sessions</span></Oui.Button>
           <div className="rail-footer"><Monitor size={17} aria-hidden="true" /><div><strong>On this device</strong><span>Local workspace</span></div></div>
         </nav>
@@ -249,7 +288,7 @@ export default function App() {
         <header className="app-header">
           <div className="brand">
             <h1>Log Studio</h1><ChevronRight size={14} className="breadcrumb-separator" />
-            <Oui.Button variant="outline" size="sm" id="sessions" className="session-switcher" ref={sessionsOpener} aria-label="Sessions" onClick={() => setSessionsOpen(true)}>
+            <Oui.Button variant="outline" size="sm" id="sessions" className="session-switcher" ref={sessionsOpener} aria-label="Sessions" title={status?.applicationName} onClick={() => setSessionsOpen(true)}>
               <History size={14} /><span id="applicationName">{status?.applicationName ?? "Select a session"}</span><ChevronDown size={12} />
             </Oui.Button>
             <Oui.Badge variant="outline" id="runStatus" className={`run-state-badge ${status?.isCompleted ? status.exitCode ? "failed" : "finished" : "running"}`}>
@@ -258,16 +297,22 @@ export default function App() {
             </Oui.Badge>
           </div>
           <div className="header-actions">
-            {(updates.state?.updateAvailable || updates.state?.installedVersion || updates.error) && <Oui.Button variant="ghost" size="sm" className="ghost-button"
-              onClick={() => setSettingsOpen(true)}>{updates.state?.installedVersion ? "Restart required" : updates.error ? "Update check failed" : "Update available"}</Oui.Button>}
             <span id="connection" className={`connection ${live.connection}`} role="status">{archived ? "Saved session" : connectionLabel}</span>
-            <Oui.Button variant="ghost" size="sm" id="importLogs" className="ghost-button" onClick={openImport}><FileUp size={14} /> Import</Oui.Button>
-            <Oui.Button variant="ghost" size="sm" ref={helpButton} className="ghost-button" onClick={() => {
+            <Hint label={pause ? "Resume live updates and catch up from disk." : "Freeze this tab. The command keeps capturing."}>
+              <Oui.Button variant="outline" size="sm" id="pause" className={pause ? "paused-control" : "ghost-button"} disabled={archived} onClick={() => setPause(pause ? null : { maximumId: status?.lastId ?? 0, status })}>
+                {pause ? <Play size={14} /> : <Pause size={14} />}{pause ? "Resume" : "Pause"}
+              </Oui.Button>
+            </Hint>
+            <ResponsiveActions label="Session actions" className="secondary-actions" triggerRef={sessionActionsOpener}>
+            {(updates.state?.updateAvailable || updates.state?.installedVersion || updates.error) && <Oui.Button variant="ghost" size="sm" className="ghost-button"
+              data-disclosure-close onClick={() => setSettingsOpen(true)}>{updates.state?.installedVersion ? "Restart required" : updates.error ? "Update check failed" : "Update available"}</Oui.Button>}
+            <Oui.Button variant="ghost" size="sm" id="importLogs" className="ghost-button" data-disclosure-close onClick={openImport}><FileUp size={14} /> Import</Oui.Button>
+            <Oui.Button variant="ghost" size="sm" ref={helpButton} className="ghost-button" data-disclosure-close onClick={() => {
               helpOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : helpButton.current;
               setGettingStartedOpen(true);
             }}><CircleHelp size={14} />Help</Oui.Button>
-            <Oui.Button variant="ghost" size="sm" ref={chatOpener} className="ghost-button" aria-pressed={chatOpen} disabled={!status}
-              onClick={() => setChatOpen(true)}><MessageSquare size={14} /> Ask Copilot</Oui.Button>
+            <Oui.Button variant="ghost" size="sm" ref={chatOpener} className="ghost-button" aria-pressed={chatOpen} disabled={!status} data-disclosure-close
+              onClick={openCopilot}><MessageSquare size={14} /> Ask Copilot</Oui.Button>
             <Oui.Popover>
               <Oui.PopoverTrigger asChild><Oui.Button variant="ghost" size="icon" id="storageInfo" className="icon-button ghost-button" aria-label="Storage details"><HardDrive size={15} /></Oui.Button></Oui.PopoverTrigger>
               <Oui.PopoverContent className="popover storage-popover" sideOffset={8} align="end">
@@ -281,11 +326,6 @@ export default function App() {
                 <a href="third-party-notices.txt" target="_blank" rel="noreferrer">Third-party component licenses</a>
               </Oui.PopoverContent>
             </Oui.Popover>
-            <Hint label={pause ? "Resume live updates and catch up from disk." : "Freeze this tab. The command keeps capturing."}>
-              <Oui.Button variant="outline" size="sm" id="pause" className={pause ? "paused-control" : "ghost-button"} disabled={archived} onClick={() => setPause(pause ? null : { maximumId: status?.lastId ?? 0, status })}>
-                {pause ? <Play size={14} /> : <Pause size={14} />}{pause ? "Resume" : "Pause"}
-              </Oui.Button>
-            </Hint>
             <Oui.DropdownMenu>
               <Oui.DropdownMenuTrigger asChild><Oui.Button variant="ghost" size="icon" id="theme" className="icon-button ghost-button" aria-label="Appearance">{appearance.theme === "dark" ? <Moon size={15} /> : <Sun size={15} />}</Oui.Button></Oui.DropdownMenuTrigger>
               <Oui.DropdownMenuContent className="menu-content" sideOffset={7} align="end">
@@ -298,12 +338,16 @@ export default function App() {
                 </Oui.DropdownMenuRadioGroup>
               </Oui.DropdownMenuContent>
             </Oui.DropdownMenu>
-            <Oui.Button variant="ghost" size="icon" ref={settingsOpener} className="icon-button ghost-button" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={15} /></Oui.Button>
+            <Oui.Button variant="ghost" size="icon" ref={settingsOpener} className="icon-button ghost-button" aria-label="Settings" title="Settings" data-disclosure-close onClick={() => setSettingsOpen(true)}><Settings size={15} /></Oui.Button>
+            </ResponsiveActions>
           </div>
         </header>
         <div className="query-region">
           <div className="workspace-heading">
-            <div><span className="workspace-kicker">LOG EXPLORER</span><h2>Discover</h2><p>Search, filter, and inspect your session history.</p></div>
+            <div><span className="workspace-kicker">{view === "discover" ? "LOG EXPLORER" : "SESSION ANALYTICS"}</span>
+              <h2>{view === "discover" ? "Discover" : view === "trends" ? "Trends" : "Graphs"}</h2>
+              <p>{view === "discover" ? "Search, filter, and inspect your session history." : view === "trends" ?
+                "Spot patterns across your logs and turn observations into insights." : "Build, save, and explore graphs from your session data."}</p></div>
           </div>
           {live.status?.listenAll && !archived && <RunningApplicationPicker onListening={setApplicationListening} onAttached={() => {
             // The first attachment reuses the waiting history; later switches reset through the live status.
@@ -312,6 +356,7 @@ export default function App() {
             setCursor({ before: null, after: null }); setSelected(null); setPause(null); setFollow(true); setChatOpen(false);
           }} />}
           <QueryBar query={query} page={switchingHistory ? null : activePage} loading={history.loading} error={history.error} searchRef={searchRef}
+            actionsRef={queryActionsOpener}
             onSavedSearches={() => { savedSearchesOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setSavedSearchesOpen(true); }}
             maximumId={pause?.maximumId ?? null} onChange={changeQuery} onEdit={condition => openEditor(condition ?? null)}
             onReset={resetFilters}
@@ -325,13 +370,15 @@ export default function App() {
             {live.error ? <Oui.Button variant="outline" size="sm" onClick={live.reconnect}>Reconnect</Oui.Button> : <Oui.Button variant="ghost" size="icon" className="icon-button" aria-label="Dismiss notification" onClick={() => setNotice(null)}><X size={14} /></Oui.Button>}
           </Oui.Alert>}
         </div>
-        <main id="workspace" className="workspace-region" tabIndex={-1} aria-label="Log exploration workspace">
-          {chatOpen && <CopilotChatPanel key={query.sessionId} status={status} sessionId={query.sessionId}
-            onClose={() => setChatOpen(false)} returnFocus={() => chatOpener.current?.focus()} />}
+        <main id="workspace" className={`workspace-region${view !== "discover" ? " analytics-region" : ""}`} tabIndex={-1} aria-label={view === "discover" ? "Log exploration workspace" : `${view === "trends" ? "Trends" : "Graphs"} workspace`}>
+          {view !== "discover" ? <AnalyticsWorkspace key={`${query.sessionId}:${historyDirectory}:${clearedThroughId}`}
+            view={view} onView={setView} query={query} onQuery={changeQuery}
+            maximumId={archived ? null : pause?.maximumId ?? null} paused={!archived && pause !== null}
+            historyDirectory={archived ? "" : historyDirectory} clearedThroughId={clearedThroughId}
+            savedGraphs={preferences.settings.savedGraphs} onSaveGraphs={savedGraphs => preferences.update({ savedGraphs })} saved={preferences.saved} graphsReady={preferences.ready} /> :
           <Oui.Card className="workspace" data-inspector={inspector} data-fields={fields} aria-busy={switchingHistory}>
           {switchingHistory && <div className="history-switch-status" role="status">Loading selected application history…</div>}
           <div className="workspace-layout" inert={switchingHistory}>
-          {fields && <DiscoverSidebar page={activePage} onFilter={openEditor} />}
           <LogTable page={activePage} loading={history.loading} error={history.error} selected={visibleSelection}
             emptyState={activePage && <LogEmptyState status={activePage.status} archived={archived} listening={applicationListening} paused={pause !== null}
               matchCount={activePage.matchCount} gettingStarted={gettingStarted} onReset={resetFilters} onRefresh={history.refresh}
@@ -343,7 +390,7 @@ export default function App() {
             onSeverity={levels => changeQuery({ ...query, levels, severity: "all" })}
             onPageSize={pageSize => changeQuery({ ...query, pageSize })}
             onClearSession={() => { setClearError(null); setClearOpen(true); }} clearing={clearing} clearButtonRef={clearOpener}
-            onSelect={entry => { setSelected(entry); setInspector(true); }}
+            onSelect={entry => { selectEntry(entry); setInspector(true); }}
             onOlder={() => { const first = activePage?.entries[0]; if (first) { setFollow(false); setCursor({ before: first.id, after: null }); } }}
             onNewer={() => { const last = activePage?.entries.at(-1); if (last) { setFollow(false); setCursor({ before: null, after: last.id }); } }}
             onLive={() => { setFollow(true); setCursor({ before: null, after: null }); }}
@@ -351,10 +398,13 @@ export default function App() {
             onWrap={wrap => updateExplorer({ wrap })}
             onClear={() => { changeQuery({ ...query, dismissedThrough: status?.lastId ?? 0 }); setSelected(null); setNotice({ tone: "info", message: "Existing entries are hidden in this tab only. Reset restores disk history." }); }}
             onRetry={history.refresh} onInspector={() => setInspector(!inspector)} />
-          {inspector && <Inspector entry={visibleSelection} entries={activePage?.entries ?? []} status={status} onSelect={setSelected} onClose={() => setInspector(false)}
-            onCondition={addCondition} onDraft={openEditor} onNotice={setNotice} />}
+          {fields && <DiscoverSidebar page={activePage} onFilter={openEditor} />}
+          {inspector && <Inspector entry={visibleSelection} entries={activePage?.entries ?? []} status={status} onSelect={selectEntry} onClose={() => setInspector(false)}
+            onCondition={addCondition} onDraft={openEditor} onNotice={setNotice} onSurrounding={showSurrounding} />}
           </div>
-          </Oui.Card>
+          </Oui.Card>}
+          {chatOpen && <CopilotChatPanel key={query.sessionId} status={status} sessionId={query.sessionId}
+            onClose={() => setChatOpen(false)} returnFocus={() => returnToSessionAction(chatOpener.current)} />}
         </main>
         {!archived && !live.status?.listenAll && live.status?.canWriteInput && !live.status.isCompleted && <TerminalInput />}
         <footer className="app-footer"><span id="capacityNote"><HardDrive size={12} /> On disk · {status?.capacity ? `Limit ${NumberFormatter.format(status.capacity)}` : "Unlimited history"}
@@ -389,7 +439,7 @@ export default function App() {
         <SessionImportDialog open={importOpen} onClose={() => setImportOpen(false)} onImported={selectSession}
           returnFocus={() => {
             if (importReturnFocus.current?.isConnected) importReturnFocus.current.focus();
-            else searchRef.current?.focus();
+            else returnToSessionAction(null);
           }} />
         <Oui.Dialog open={gettingStartedOpen} onOpenChange={setGettingStartedOpen}>
           <Oui.DialogContent className="sessions-dialog" showCloseButton={false} onCloseAutoFocus={event => {
@@ -397,8 +447,7 @@ export default function App() {
             const action = afterHelp.current;
             afterHelp.current = null;
             if (action) action();
-            else if (helpOpener.current?.isConnected) helpOpener.current.focus();
-            else helpButton.current?.focus();
+            else returnToSessionAction(helpOpener.current);
           }}>
             <div className="dialog-titlebar"><div><Oui.DialogTitle>Getting started</Oui.DialogTitle>
               <Oui.DialogDescription>Choose how logs enter your local workspace.</Oui.DialogDescription></div>
@@ -410,15 +459,22 @@ export default function App() {
           appearance={appearance.appearance} onAppearance={appearance.setAppearance}
           onChange={changes => preferences.update({ typography: changes })}
           onReset={() => preferences.update({ typography: { ...DefaultTypography } })} onClose={() => setSettingsOpen(false)}
-          returnFocus={() => settingsOpener.current?.focus()} />
+          returnFocus={() => returnToSessionAction(settingsOpener.current)} />
         <SavedSearchesDialog open={savedSearchesOpen} query={query} searches={preferences.settings.savedSearches}
           saved={preferences.saved} saveError={preferences.error} onRetry={preferences.retry}
           onChange={savedSearches => preferences.update({ savedSearches })}
           onApply={filters => changeQuery({ ...query, ...filters, dismissedThrough: 0 }, true)}
           onClose={() => setSavedSearchesOpen(false)} returnFocus={() => {
             if (savedSearchesOpener.current?.isConnected) savedSearchesOpener.current.focus();
-            else searchRef.current?.focus();
+            else (queryActionsOpener.current ?? searchRef.current)?.focus();
           }} />
+        {context && <SurroundingEntries location={context}
+          unavailable={!archived && historyDirectory && context.historyDirectory !== historyDirectory ?
+            "The active application changed. This context has not been replaced with another session's entries. Return to results to inspect the selected application." : null}
+          onClose={() => setContext(null)} returnFocus={() => {
+            if (contextOpener.current?.isConnected) contextOpener.current.focus();
+            else searchRef.current?.focus();
+          }} />}
       </div>
       </div>
     </Oui.TooltipProvider>
@@ -507,7 +563,7 @@ function RunningApplicationPicker({ onAttached, onListening }: { onAttached(): v
     <div className="application-picker-controls">
       <label htmlFor="runningApplication">Running app</label>
       <Oui.Select value={selected ? identity(selected) : ""} disabled={busy || !state} onValueChange={value => void choose(value)}>
-        <Oui.SelectTrigger id="runningApplication" className="select-trigger" aria-label="Running app" aria-describedby="applicationCaptureHelp">
+        <Oui.SelectTrigger id="runningApplication" className="select-trigger" aria-label="Running app" aria-describedby="applicationCaptureStatus">
           <Oui.SelectValue placeholder={state && applications.length === 0 ? "No running .NET apps found" : "Choose a running app"}>{selected ? applicationLabel(selected) : undefined}</Oui.SelectValue>
 
         </Oui.SelectTrigger>
@@ -525,7 +581,7 @@ function RunningApplicationPicker({ onAttached, onListening }: { onAttached(): v
 
       </Oui.Select>
       {selected && (selectionError || state?.error) && <Oui.Button variant="outline" size="sm" disabled={busy} onClick={() => void choose(identity(selected))}>Retry app</Oui.Button>}
-      <span role="status">{busy ? "Connecting to application…" : selected?.groupId && processes(selected).length === 0 ?
+      <span id="applicationCaptureStatus" role="status">{busy ? "Connecting to application…" : selected?.groupId && processes(selected).length === 0 ?
         `Connecting to ${selected.name}…` : selected ?
         `Listening to ${selected.name}${selected.groupId ? ` · ${processes(selected).length} ${processes(selected).length === 1 ? "process" : "processes"}` : ""}` :
         "Waiting for you to choose an app."}</span>
@@ -536,7 +592,9 @@ function RunningApplicationPicker({ onAttached, onListening }: { onAttached(): v
         <strong>PID {process.processId}</strong> · {process.name}<span>{process.path ?? "Path unavailable"}</span>
       </li>)}</ul>
     </details>}
-    <p id="applicationCaptureHelp" className="muted">Apps are grouped by launch or entrypoint path. Selecting an app captures its processes together and follows new members while the group is running. Merged logs include the PID. Captures new .NET ILogger events only, requires the .NET logging EventSource provider (Microsoft-Extensions-Logging), and cannot recover historical stdout/stderr. Each app keeps its own history; switching back restores its captured logs. Only the selected app is captured.</p>
+    <ResponsiveActions label="Capture details" className="application-capture-help">
+      <p id="applicationCaptureHelp" className="muted">Apps are grouped by launch or entrypoint path. Selecting an app captures its processes together and follows new members while the group is running. Merged logs include the PID. Captures new .NET ILogger events only, requires the .NET logging EventSource provider (Microsoft-Extensions-Logging), and cannot recover historical stdout/stderr. Each app keeps its own history; switching back restores its captured logs. Only the selected app is captured.</p>
+    </ResponsiveActions>
     {state && !selected && !applications.length && !error && !state.error && <div className="application-empty">
       <p>No apps found. Start a .NET app yourself with diagnostics and the logging EventSource provider enabled, then check again. Or use Import or Try sample logs to explore existing records.</p>
       <Oui.Button variant="outline" size="sm" disabled={busy} onClick={() => setRefreshKey(value => value + 1)}>Refresh apps</Oui.Button>

@@ -55,6 +55,11 @@ internal sealed record SessionFilters(
             foreach (string level in this.Levels)
                 if (!IsEnumName<LogSeverity>(level)) throw new ArgumentException("Each selected level must be a supported level name.");
 
+        _ = this.ToQuery();
+    }
+
+    internal LogQuery ToQuery()
+    {
         NameValueCollection parameters = new()
         {
             [ViewerConstants.SearchQuery] = this.Search,
@@ -68,7 +73,7 @@ internal sealed record SessionFilters(
         if (this.Category.Length > 0) parameters[ViewerConstants.CategoryQuery] = this.Category;
         if (this.Since.Length > 0) parameters[ViewerConstants.SinceQuery] = this.Since;
         if (this.Until.Length > 0) parameters[ViewerConstants.UntilQuery] = this.Until;
-        _ = LogQuery.Parse(parameters);
+        return LogQuery.Parse(parameters);
     }
 
     private string ConditionsJson()

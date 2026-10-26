@@ -63,10 +63,11 @@ internal sealed record AppPreferences
     public TypographyPreferences Typography { get; init; } = new();
     public ExplorerPreferences Explorer { get; init; } = new();
     public SavedSearch[] SavedSearches { get; init; } = [];
+    public SavedGraph[] SavedGraphs { get; init; } = [];
 
     internal void Validate()
     {
-        if (!Appearances.Contains(this.Appearance, StringComparer.Ordinal) || this.Typography is null || this.Explorer is null || this.SavedSearches is null)
+        if (!Appearances.Contains(this.Appearance, StringComparer.Ordinal) || this.Typography is null || this.Explorer is null || this.SavedSearches is null || this.SavedGraphs is null)
             throw new ArgumentException("Choose a supported appearance and valid preferences.");
         this.Typography.Validate();
         this.Explorer.Validate();
@@ -78,6 +79,15 @@ internal sealed record AppPreferences
                 search.Name != search.Name.Trim() || search.Name.Any(char.IsControl) || !names.Add(search.Name) || search.Filters is null)
                 throw new ArgumentException("Saved searches need unique names containing 1-64 characters and valid filters.");
             search.Filters.Validate();
+        }
+        if (this.SavedGraphs.Length > 10) throw new ArgumentException("Save no more than 10 graphs.");
+        names.Clear();
+        foreach (SavedGraph saved in this.SavedGraphs)
+        {
+            if (saved?.Graph is null || saved.Filters is null || !names.Add(saved.Graph.Name))
+                throw new ArgumentException("Saved graphs need unique names and valid filters.");
+            saved.Graph.Validate();
+            saved.Filters.Validate();
         }
     }
 }
@@ -142,9 +152,9 @@ internal sealed class AppSettingsStore
         HashSet<string> seen = new(StringComparer.Ordinal);
         foreach (JsonProperty property in patch.EnumerateObject())
         {
-            if (property.Name is not ("appearance" or "typography" or "explorer" or "savedSearches" or "onboardingDismissed") ||
+            if (property.Name is not ("appearance" or "typography" or "explorer" or "savedSearches" or "savedGraphs" or "onboardingDismissed") ||
                 property.Value.ValueKind == JsonValueKind.Null || !seen.Add(property.Name))
-                throw new ArgumentException("Settings must contain appearance, typography, explorer, savedSearches or onboardingDismissed preferences without duplicates.");
+                throw new ArgumentException("Settings must contain appearance, typography, explorer, savedSearches, savedGraphs or onboardingDismissed preferences without duplicates.");
         }
         if (seen.Count == 0) throw new ArgumentException("Choose at least one setting to save.");
         return this.Update(current =>
@@ -223,7 +233,7 @@ internal sealed class AppSettingsStore
                 using (FileStream file = new(pending, options))
                 {
                     JsonSerializer.Serialize(file, updated, JsonOptions);
-                    if (file.Position > MaximumBytes) throw new ArgumentException("App settings, including saved searches, must fit within 32 KiB. Remove a search or shorten its filters.");
+                    if (file.Position > MaximumBytes) throw new ArgumentException("App settings, including saved searches and graphs, must fit within 32 KiB. Remove a saved item or shorten its filters.");
                     file.Flush(flushToDisk: true);
                 }
                 File.Move(pending, this.path, overwrite: true);

@@ -48,12 +48,21 @@ internal sealed class LogHistoryReader : IDisposable
         return this.ReadEntriesCore(Math.Max(this.Status.FirstId, firstId), lastId, cancellationToken);
     }
 
-    internal IEnumerable<LogEntry> ReadSessionEntries(CancellationToken cancellationToken = default)
+    internal IEnumerable<LogEntry> ReadSessionEntries(CancellationToken cancellationToken = default, int? maximumLineCharacters = null)
     {
-        return this.ReadEntriesCore(this.Status.ClearedThroughId + 1, null, cancellationToken);
+        return this.ReadEntriesCore(this.Status.ClearedThroughId + 1, null, cancellationToken, maximumLineCharacters);
     }
 
-    private IEnumerable<LogEntry> ReadEntriesCore(long firstId, long? lastId, CancellationToken cancellationToken)
+    internal void EnsureCompleteSessionRead()
+    {
+        this.EnsureCurrent();
+        if (this.index.Length != checked((this.Status.LastId - this.Status.ClearedThroughId) * sizeof(long)) ||
+            this.journal.Peek() != -1)
+            throw new InvalidDataException("The saved journal contains records outside its completed metadata; no partial results are available.");
+        this.EnsureCurrent();
+    }
+
+    private IEnumerable<LogEntry> ReadEntriesCore(long firstId, long? lastId, CancellationToken cancellationToken, int? maximumLineCharacters = null)
     {
         this.EnsureCurrent();
         long first = Math.Max(this.Status.ClearedThroughId + 1, firstId);
@@ -62,32 +71,52 @@ internal sealed class LogHistoryReader : IDisposable
         long position = this.GetPosition(first);
         this.journal.DiscardBufferedData();
         this.journal.BaseStream.Seek(position, SeekOrigin.Begin);
-        for (long id = first; id <= last; id++)
+        for (long id = first; ; id++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            yield return this.ReadEntry(id);
+            yield return this.ReadEntry(id, maximumLineCharacters);
+            if (id == last) break;
         }
     }
 
-    private LogEntry ReadEntry(long id)
+    private LogEntry ReadEntry(long id, int? maximumLineCharacters)
     {
         this.EnsureCurrent();
         try
         {
-            string line = this.journal.ReadLine() ?? throw new InvalidDataException($"The temporary journal is missing entry {id}.");
+            string line = this.ReadLine(maximumLineCharacters) ?? throw new InvalidDataException($"The temporary journal is missing entry {id}.");
             LogEntry entry = JsonSerializer.Deserialize<LogEntry>(line, ViewerConstants.JsonOptions) ??
                 throw new InvalidDataException($"The temporary journal contains an invalid entry at {id}.");
             this.EnsureCurrent();
             if (entry.Id != id) throw new InvalidDataException($"The temporary journal index does not match entry {id}.");
             return entry;
         }
-        catch (Exception exception) when (!this.isCurrent() && exception is IOException or JsonException)
+        catch (Exception exception) when (!this.isCurrent() && exception is IOException or JsonException or InvalidDataException)
         {
             throw new HistoryClearedException(exception);
         }
     }
 
-    private void EnsureCurrent()
+    private string? ReadLine(int? maximumCharacters)
+    {
+        if (!maximumCharacters.HasValue) return this.journal.ReadLine();
+        StringBuilder line = new();
+        int value;
+        while ((value = this.journal.Read()) >= 0)
+        {
+            if (value is '\r' or '\n')
+            {
+                if (value == '\r' && this.journal.Peek() == '\n') this.journal.Read();
+                return line.ToString();
+            }
+            if (line.Length >= maximumCharacters.Value)
+                throw new InvalidDataException("A comparison journal line exceeds its supported size; no partial results are available.");
+            line.Append((char)value);
+        }
+        return line.Length == 0 ? null : line.ToString();
+    }
+
+    internal void EnsureCurrent()
     {
         if (!this.isCurrent()) throw new HistoryClearedException();
     }
@@ -117,7 +146,7 @@ internal sealed class LogHistoryReader : IDisposable
             if (position < 0 || position >= this.journal.BaseStream.Length) throw new InvalidDataException("The temporary journal contains an invalid seek offset.");
             return position;
         }
-        catch (IOException exception) when (!this.isCurrent())
+        catch (Exception exception) when (!this.isCurrent() && exception is IOException or InvalidDataException)
         {
             throw new HistoryClearedException(exception);
         }
