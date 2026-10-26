@@ -3,7 +3,7 @@
 [Installation and logs screenshot](../README.md)
 
 Run the commands in this guide from the repository root unless stated otherwise.
-The browser exposes the log explorer and session manager only. Metrics, traces, and
+The browser exposes Discover, Trends, Graphs, and the session manager. Metrics, traces, and
 telemetry source configuration are not exposed in the UI; existing in-process
 telemetry capture and APIs remain available.
 
@@ -17,7 +17,7 @@ All browser assets are embedded and work offline.
 
 The workspace follows the **OpenSearch Dashboards Discover** interaction model: compact application
 chrome, a session switcher, query/filter bar, document results, and optional field browser,
-timeline, and inspector. The distribution is explicitly **visible-page-only**, not a fabricated full-history
+timeline, and inspector. Discover's optional distribution is explicitly **visible-page-only**, not a fabricated full-history
 histogram. It uses the compatible React 19 stack, not a copied OpenSearch Dashboards server.
 `@opensearch-project/opensearch` is a Node client, not UI components, and is not required.
 The frontend uses **React + TypeScript** and the **OpenSearch UI Framework (OUI)** for
@@ -76,7 +76,7 @@ Fonts use installed local fallbacks and do not require downloads.
 ### Settings persistence
 
 Theme, UI and log fonts, sizes and line spacing, page size, line wrapping, optional panels,
-column visibility, widths and order, and named saved searches autosave to the app's per-user `LogStudio/settings.json`
+column visibility, widths and order, named saved searches, and saved graph definitions with their filters autosave to the app's per-user `LogStudio/settings.json`
 file. Browser and desktop viewers on the same device and OS user share these preferences,
 independently of the localhost port or browser storage. New viewers load the latest saved
 preferences; already-open viewers keep their current choices. Session filters remain attached
@@ -496,6 +496,72 @@ not change that tagged commit. For an unpublished release, recreate the tag on t
 corrected commit before running the workflow again; for an already published release,
 commit a new package version and create a new matching tag instead.
 
+## Trends and Graphs
+
+Choose **Trends** in the workspace rail to analyze all matching, non-deleted disk records in the
+selected live, saved, or imported session. Search, levels, categories, include/exclude conditions,
+and time filters above the page are shared with Discover. Analytics is not limited by the visible
+page, page cursor, or the optional in-memory/history capacity window. Deleted logs are unavailable.
+The server aggregates disk records with bounded memory; the browser receives counts, not all messages.
+Refresh runs every five seconds after the previous request finishes. **Pause** freezes the live
+sequence-ID bound and stops automatic analytics refresh; **Refresh analytics** retries explicitly.
+
+The summary shows matching records, errors (error + critical), warnings, and error percentage.
+The volume graph uses 32 equal-duration capture-time intervals, including intervals with no output.
+Level and category bars have exact data tables; **Discover logs** in a categorical table narrows
+the current query to that group. Descriptive observations identify the busiest interval and compare
+equal-duration halves when timestamps span time. These are not anomaly detection, historical
+baselines, request rates, or root-cause diagnoses.
+
+Use **Create graph**, **Customize**, or **Graphs** to choose:
+
+| Setting | Choices |
+| --- | --- |
+| Measure | Log records, error records, warning records, error percentage |
+| Grouping | Time, log level, category, stream |
+| Chart | Line or bar for time; bars for categorical comparisons |
+
+Error percentage is `(error + critical records) / matching records * 100` within each group, not
+the percentage of failing requests. No latency or numeric values are inferred from message text.
+Category panels track the first 64 distinct named categories, plus uncategorized records; all
+remaining categories are combined as **Other categories (combined)**. Totals remain exact.
+The combined group cannot be used as a categorical drill-down.
+
+Give a graph a unique name and choose **Save graph**. Up to ten graph definitions and their current
+search/time filters persist in the shared per-user settings file, across viewer restarts, browsers,
+and ports. Graphs do not copy logs, pin a session, or retain deleted data. Reopening a graph applies
+its saved filters to the currently selected session; relative time windows remain relative.
+Use **Update graph** to replace an existing definition or **Delete graph** to remove it.
+All settings, saved searches, and graphs share the existing 32 KiB storage limit; save failures
+remain visible in the settings warning and can be retried.
+
+### Copilot-assisted analytics
+
+In either analytics page, choose **Connect Copilot** to use the same local CLI and signed-in account
+as **Ask Copilot**, with the same model and reasoning-capability discovery. No separate account,
+API key, or backend AI service is configured. Copilot is optional; charts and observations work offline.
+
+Choose **Explain these trends**, **Graph errors by category**, or enter your own question.
+Only explicit requests send the matching aggregate counts, capture intervals, category names,
+application name, current graph definition, and question through the local CLI to GitHub Copilot's
+service. **Log messages and the chat transcript are not sent by analytics**; category names and
+application names can still contain sensitive information. Local CLI does not mean local inference.
+The analytics CLI request has tools disabled and uses the existing isolated authentication setup.
+Model output is validated against the supported graph schema, never executed as code or queries.
+
+The explanation is labeled with its matching-record count and sequence-ID checkpoint, and remains
+a snapshot even as new logs arrive. Use **Open in Graphs** on a recommendation to preview and edit
+it, then save it yourself; Copilot never silently changes saved graphs or log data. Suggestions and
+explanations may be incorrect, and model, CLI, authentication, invalid-output, or history errors
+are surfaced explicitly. Analytics does not append to the log-chat transcript. Only one Copilot
+request can run at a time across analytics, chat, and other Copilot features.
+
+`GET api/analytics` accepts the existing search/filter/session parameters and returns bounded
+full-session aggregates. `POST api/analytics/copilot` uses the same parameters plus a JSON body
+with `question`, optional `graph`, `model`, and `reasoningEffort`; it requires
+`X-Log-Studio-Action: copilot-analytics`. Both use the existing loopback, same-origin, and Fetch
+Metadata checks. Copilot analysis is pinned to the displayed snapshot's filter time and maximum ID.
+
 ## Optional Copilot log chat
 
 Click **Ask Copilot** in the header to open a chat panel on the left, alongside the log results.
@@ -634,6 +700,49 @@ histories are cleared or deleted through the session manager.
 
 Library attachment is ephemeral by default. Set `SaveSession=true`, `SessionsDirectory`,
 `RunCommand`, `RunArguments`, and `RunWorkingDirectory` on `ConsoleLogViewerOptions` to opt in.
+
+### Compare two saved runs
+
+Open **Sessions → Compare saved runs** and explicitly choose a **Baseline** and **Candidate**.
+Only completed saved or imported sessions are eligible; the current run and sessions still
+running are excluded. Comparison is read-only and does not switch the explorer's session,
+change its filters, or resume live follow.
+
+The side-by-side summary shows each run's name, start/completion timestamps, duration,
+stored entry count, available saved events, matching events, and filter scope.
+**All saved events** includes every record still on disk since the last clear, including
+records outside the explorer's capacity-limited retained page. Alternatively, compare
+each run's **saved filters**, captured independently when comparison starts. Search,
+levels, stream, category, include/exclude conditions, and inclusive exact time bounds
+use the same matching rules as the explorer. A saved relative time window is anchored
+to that run's completion time and displayed as frozen exact bounds, not evaluated
+against today's clock. Missing saved filters mean all saved events.
+
+Compare severity counts, category counts, or message groups. Message groups include
+severity and category as well as the message signature. The displayed normalization
+rule replaces ISO-8601 timestamps, GUIDs, hexadecimal literals, and decimal numeric
+tokens with typed placeholders, preserving case and whitespace. Normalization can
+combine distinct raw messages, so choose **Raw messages** to investigate collisions. Counts and
+candidate-minus-baseline deltas describe **observed log events**, not proof of a
+root cause or a regression. Durations may differ: these are absolute counts, not
+duration-normalized rates. **Newly observed**, **Resolved**, and **Count changed**
+separate groups absent from the baseline, absent from the candidate, and present
+in both with unequal counts; unchanged groups are also available.
+
+Open evidence for either side to read the original, unmodified records supporting
+that count, in bounded pages. Each evidence request includes the comparison, group,
+and side; sequence IDs are local to a session and are never matched across runs.
+Returning to comparison preserves its group selection and result page without
+changing the active investigation.
+
+Processing happens locally with bounded in-memory sorting and private disk-backed
+intermediates, not by loading whole journals into the browser. Progress reports
+scanned events and the processing phase; **Cancel** stops the comparison. Closing
+the comparison releases its job. Clear or delete either source and the comparison
+is invalidated, including open evidence; start a new comparison against valid
+sessions. Storage, resource-limit, or read failures are reported explicitly rather
+than returning partial results. No network service, production analytics, telemetry,
+or Copilot connection is required.
 
 ## Import and export
 

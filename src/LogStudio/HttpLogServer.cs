@@ -60,6 +60,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
     private readonly TimeSpan copilotTimeout;
     private readonly ConcurrentDictionary<Task, byte> requests = new();
     private readonly Task acceptTask;
+    private readonly SessionComparisons comparisons;
 
     internal HttpLogServer(ViewerSettings settings, LogBuffer logs, TextWriter diagnostics, Func<LogClearResult> clearLogs, SessionCatalog sessions, Func<string, SessionInfo> renameSession, CopilotCliClient? copilot = null, TelemetryRecorder? telemetry = null, TimeSpan? copilotTimeout = null)
         : this(settings, () => new ViewerSession(logs, sessions, clearLogs, renameSession), diagnostics, copilot, telemetry, copilotTimeout)
@@ -84,6 +85,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
         (this.listener, int port) = Bind(settings.Port);
         this.authority = $"http://{ViewerConstants.LoopbackHost}:{port}";
         this.Url = new Uri(this.authority + "/");
+        this.comparisons = new SessionComparisons(this.shutdown.Token);
         this.acceptTask = this.AcceptAsync();
     }
 
@@ -98,6 +100,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
         this.listener.Close();
         await this.acceptTask.ConfigureAwait(false);
         await Task.WhenAll(this.requests.Keys).ConfigureAwait(false);
+        await this.comparisons.DisposeAsync().ConfigureAwait(false);
         this.streamSlots.Dispose();
         this.historySlots.Dispose();
         this.copilotSlot.Dispose();
@@ -233,6 +236,15 @@ internal sealed class HttpLogServer : IAsyncDisposable
             }
 
             string route = request.Url.AbsolutePath[1..];
+            if (route == "api/analytics/copilot")
+            {
+                await this.AnalyticsInsightAsync(context, session, cancellationToken).ConfigureAwait(false);
+            }            
+            if (route is "api/comparison" or "api/comparison/groups" or "api/comparison/evidence")
+            {
+                await this.ComparisonAsync(context, session, route, cancellationToken).ConfigureAwait(false);
+                return;
+            }
             if (route == "api/settings")
             {
                 await this.AppSettingsAsync(context, cancellationToken).ConfigureAwait(false);
@@ -462,7 +474,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
                 await this.ReadHistoryAsync(context, session, route, cancellationToken).ConfigureAwait(false);
             }
             else if (route == ViewerConstants.SearchRoute || route == ViewerConstants.ContextRoute ||
-                route == ViewerConstants.ExportRoute || route == ViewerConstants.BundleExportRoute)
+                route == ViewerConstants.ExportRoute || route == ViewerConstants.BundleExportRoute || route == "api/analytics")
             {
                 await this.ReadHistoryAsync(context, session, route, cancellationToken).ConfigureAwait(false);
             }
@@ -512,6 +524,113 @@ internal sealed class HttpLogServer : IAsyncDisposable
         {
             response.Close();
         }
+    }
+
+    private async Task ComparisonAsync(HttpListenerContext context, ViewerSession session, string route, CancellationToken cancellationToken)
+    {
+        HttpListenerRequest request = context.Request;
+        HttpListenerResponse response = context.Response;
+        bool post = request.HttpMethod == ViewerConstants.PostMethod;
+        if (request.HttpMethod != ViewerConstants.GetMethod && (!post || route != "api/comparison"))
+        {
+            await WriteErrorAsync(response, HttpStatusCode.MethodNotAllowed, "Use GET to read comparisons or POST with an explicit action to create or cancel one.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        string? id = request.QueryString["id"];
+        if (post)
+        {
+            string action = string.IsNullOrEmpty(id) ? "compare" : "cancel-comparison";
+            if (request.Headers[ViewerConstants.ClearRequestHeader] != action)
+            {
+                await WriteErrorAsync(response, HttpStatusCode.Forbidden, "An explicit " + action + " action header is required.", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            if (action == "compare")
+            {
+                if (!MediaTypeHeaderValue.TryParse(request.ContentType, out MediaTypeHeaderValue? contentType) ||
+                    !string.Equals(contentType.MediaType, "application/json", StringComparison.OrdinalIgnoreCase))
+                {
+                    await WriteErrorAsync(response, HttpStatusCode.UnsupportedMediaType, "Comparisons require application/json.", cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                if (request.ContentLength64 == 0 || request.ContentLength64 > 2048)
+                {
+                    await WriteErrorAsync(response, HttpStatusCode.RequestEntityTooLarge, "Comparison requests require 1–2048 bytes.", cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+            }
+            else if (request.HasEntityBody)
+            {
+                throw new ArgumentException("Cancel a comparison without a request body.");
+            }
+        }
+        if (!this.historySlots.Wait(0))
+        {
+            await WriteErrorAsync(response, HttpStatusCode.TooManyRequests, "Wait for current history requests before requesting comparison data.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        try
+        {
+            object result;
+            if (post && string.IsNullOrEmpty(id))
+            {
+                using JsonDocument body = await ReadSessionActionAsync(request, 2048, cancellationToken).ConfigureAwait(false);
+                if (body.RootElement.ValueKind != JsonValueKind.Object) throw new ArgumentException("A comparison request object is required.");
+                HashSet<string> properties = new(StringComparer.Ordinal);
+                foreach (JsonProperty property in body.RootElement.EnumerateObject())
+                    if (property.Name is not ("baselineId" or "candidateId" or "grouping" or "filterScope") || !properties.Add(property.Name))
+                        throw new ArgumentException("Comparison requests require exactly baselineId, candidateId, grouping and filterScope.");
+                ComparisonRequest value;
+                try
+                {
+                    value = body.RootElement.Deserialize<ComparisonRequest>(ViewerConstants.JsonOptions) ??
+                        throw new ArgumentException("A comparison request is required.");
+                }
+                catch (JsonException exception) { throw new ArgumentException("Comparison requests require four string fields.", exception); }
+                result = this.comparisons.Start(session.Catalog, value);
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(id)) throw new ArgumentException("Choose a comparison id.");
+                if (post) result = this.comparisons.Cancel(id);
+                else if (route == "api/comparison") result = this.comparisons.Snapshot(id);
+                else if (route == "api/comparison/groups")
+                    result = await Task.Run(() => this.comparisons.Groups(id, request.QueryString["kind"] ?? "message",
+                        request.QueryString["change"] ?? "all", ComparisonCursor(request.QueryString["offset"], "offset"), cancellationToken), cancellationToken).ConfigureAwait(false);
+                else
+                    result = await Task.Run(() => this.comparisons.Evidence(id, request.QueryString["groupId"] ?? string.Empty,
+                        request.QueryString["side"] ?? string.Empty, ComparisonCursor(request.QueryString["after"], "after"), cancellationToken), cancellationToken).ConfigureAwait(false);
+            }
+            await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(result, ViewerConstants.JsonOptions),
+                ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ComparisonCapacityException exception)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.TooManyRequests, exception.Message, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ComparisonUnavailableException exception)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.Conflict, exception.Message, cancellationToken).ConfigureAwait(false);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.RequestTimeout, "A comparison filter exceeded its regex time budget. Simplify the saved conditions.", cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException ||
+            (exception is IOException && exception is not (FileNotFoundException or DirectoryNotFoundException)))
+        {
+            this.diagnostics.WriteLine($"Log Studio comparison failed: {exception}");
+            await WriteErrorAsync(response, HttpStatusCode.InternalServerError, "Comparison files could not be read or written. Check local disk space and permissions.", cancellationToken).ConfigureAwait(false);
+        }
+        finally { this.historySlots.Release(); }
+    }
+
+    private static long ComparisonCursor(string? value, string name)
+    {
+        if (value is null) return 0;
+        if (!long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out long cursor))
+            throw new ArgumentException(name + " must be a non-negative integer.");
+        return cursor;
     }
 
     private async Task AppSettingsAsync(HttpListenerContext context, CancellationToken cancellationToken)
@@ -1104,6 +1223,89 @@ internal sealed class HttpLogServer : IAsyncDisposable
         await response.OutputStream.FlushAsync(cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    private async Task AnalyticsInsightAsync(HttpListenerContext context, ViewerSession session, CancellationToken cancellationToken)
+    {
+        HttpListenerRequest request = context.Request;
+        HttpListenerResponse response = context.Response;
+        if (request.HttpMethod != ViewerConstants.PostMethod)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.MethodNotAllowed, "Copilot insights require POST.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (request.Headers[ViewerConstants.ClearRequestHeader] != "copilot-analytics")
+        {
+            await WriteErrorAsync(response, HttpStatusCode.Forbidden, "An explicit Copilot analytics action header is required.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (!string.Equals(request.ContentType?.Split(';')[0].Trim(), "application/json", StringComparison.OrdinalIgnoreCase))
+        {
+            await WriteErrorAsync(response, HttpStatusCode.UnsupportedMediaType, "Insights require application/json.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        if (!this.copilotSlot.Wait(0))
+        {
+            await WriteErrorAsync(response, HttpStatusCode.TooManyRequests, "A Copilot request is already running. Wait for it to finish.", cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        bool historySlot = false;
+        try
+        {
+            AnalyticsQuestion question;
+            using (JsonDocument body = await ReadSessionActionAsync(request, CopilotChat.MaximumRequestBytes, cancellationToken).ConfigureAwait(false))
+            {
+                try
+                {
+                    question = body.RootElement.Deserialize<AnalyticsQuestion>(ViewerConstants.JsonOptions) ?? throw new ArgumentException("An analytics question is required.");
+                }
+                catch (JsonException exception)
+                {
+                    throw new ArgumentException("The analytics request must contain valid JSON and supported value types.", exception);
+                }
+            }
+            CopilotChat.Validate(new(question.Question, []));
+            question.Graph?.Validate();
+            LogQuery query = LogQuery.Parse(request.QueryString);
+            historySlot = this.historySlots.Wait(0);
+            if (!historySlot)
+            {
+                await WriteErrorAsync(response, HttpStatusCode.TooManyRequests, "Too many history requests. Retry shortly.", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            string? selected = request.QueryString[ViewerConstants.SessionIdQuery];
+            LogAnalyticsSnapshot snapshot;
+            using (LogHistoryReader history = string.IsNullOrEmpty(selected) || selected == session.Catalog.Id ? session.Logs.OpenHistory() : session.Catalog.Open(selected))
+                snapshot = await Task.Run(() => LogAnalytics.Build(history, query, cancellationToken), cancellationToken).ConfigureAwait(false);
+            this.historySlots.Release();
+            historySlot = false;
+            AnalyticsInsight result = await this.copilot.AskAnalyticsAsync(question, snapshot, cancellationToken).ConfigureAwait(false);
+            await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(result, ViewerConstants.JsonOptions), ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+        }
+        catch (CopilotException exception)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.ServiceUnavailable, exception.Message, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HistoryClearedException exception)
+        {
+            await WriteErrorAsync(response, HttpStatusCode.Conflict, exception.Message, cancellationToken).ConfigureAwait(false);
+        }
+        catch (RegexMatchTimeoutException exception)
+        {
+            this.diagnostics.WriteLine($"Log Studio analytics condition timed out: {exception.Message}");
+            await WriteErrorAsync(response, HttpStatusCode.RequestTimeout, "A regex condition exceeded its time budget. Simplify the pattern.", cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or JsonException ||
+            (exception is IOException && exception is not (FileNotFoundException or DirectoryNotFoundException)))
+        {
+            this.diagnostics.WriteLine($"Log Studio analytics failed: {exception}");
+            await WriteErrorAsync(response, HttpStatusCode.InternalServerError, "Could not read session analytics. Check local files and permissions.", cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (historySlot) this.historySlots.Release();
+            this.copilotSlot.Release();
+        }
+    }
+
     private async Task ReadHistoryAsync(HttpListenerContext context, ViewerSession session, string route, CancellationToken cancellationToken)
     {
         LogQuery? query = null;
@@ -1148,6 +1350,13 @@ internal sealed class HttpLogServer : IAsyncDisposable
                 history.EnsureCurrent();
                 started = true;
                 await WriteBytesAsync(response, bytes, ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            if (route == "api/analytics")
+            {
+                LogAnalyticsSnapshot result = await Task.Run(() => LogAnalytics.Build(history, query!, cancellationToken), cancellationToken).ConfigureAwait(false);
+                started = true;
+                await WriteBytesAsync(response, JsonSerializer.SerializeToUtf8Bytes(result, ViewerConstants.JsonOptions), ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
                 return;
             }
             if (route == ViewerConstants.SearchRoute)
