@@ -44,6 +44,7 @@ beforeEach(() => {
 
 describe("first useful log", () => {
   it("offers three explicit paths without attaching, clearing history, or starting a command", async () => {
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(900);
     render(<App />);
     expect(screen.getByRole("heading", { name: "Get your first useful log" })).toBeDefined();
     const choose = screen.getByRole("button", { name: "Choose running app" });
@@ -57,6 +58,7 @@ describe("first useful log", () => {
     expect(api.selectApplication).not.toHaveBeenCalled();
     expect(api.clearSessionLogs).not.toHaveBeenCalled();
     expect(api.sendInput).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Scrollable log entries").scrollTop).toBe(0);
   });
 
   it("persists dismissal, reopens from Help, and returns keyboard focus after Escape", async () => {
@@ -204,6 +206,18 @@ describe("first useful log", () => {
     expect(vi.mocked(useLogPage).mock.lastCall?.[0].dismissedThrough).toBe(0);
     expect(screen.getByRole("row", { name: /Hello/ })).toBeDefined();
     expect(api.clearSessionLogs).not.toHaveBeenCalled();
+  });
+
+  it("preserves empty-state keyboard focus while refreshing a valid page", async () => {
+    vi.mocked(useLogPage).mockReturnValue({ page: { ...emptyPage, status: Status }, loading: false, error: null, refresh });
+    const view = render(<App />);
+    const reset = screen.getByRole("button", { name: "Reset filters" });
+    reset.focus();
+    vi.mocked(useLogPage).mockReturnValue({ page: { ...emptyPage, status: Status }, loading: true, error: null, refresh });
+    view.rerender(<App />);
+    expect(screen.getByRole("button", { name: "Reset filters" })).toBe(reset);
+    expect(document.activeElement).toBe(reset);
+    await act(async () => undefined);
   });
 
   it.each([

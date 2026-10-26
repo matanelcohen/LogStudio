@@ -122,7 +122,7 @@ export function LogTable({ page, loading, error, emptyState, selected, matchCase
   });
 
   useEffect(() => {
-    if (follow && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
+    if (follow && entries.length > 0 && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
   }, [entries, follow, typography]);
   useEffect(() => {
     const pane = scroll.current;
@@ -243,7 +243,7 @@ export function LogTable({ page, loading, error, emptyState, selected, matchCase
         </DndContext>
         {entries.length === 0 && <div id="emptyState" className="empty-state">
           <Search size={28} />
-          {!error && !loading && emptyState ? emptyState : <>
+          {!error && (!loading || page) && emptyState ? emptyState : <>
           <h3>{error ? "Couldn’t load history" : loading ? "Searching disk history…" : page?.status.retainedCount ? "No matching entries" : "Waiting for output"}</h3>
           <p>{error ?? (loading ? "Only the current page is loaded into memory." : "Change your query or conditions. Reset restores entries hidden by Clear view.")}</p>
           {error && <Oui.Button variant="outline" size="sm" onClick={onRetry}>Retry request</Oui.Button>}
