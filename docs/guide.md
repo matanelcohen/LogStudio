@@ -701,6 +701,49 @@ histories are cleared or deleted through the session manager.
 Library attachment is ephemeral by default. Set `SaveSession=true`, `SessionsDirectory`,
 `RunCommand`, `RunArguments`, and `RunWorkingDirectory` on `ConsoleLogViewerOptions` to opt in.
 
+### Compare two saved runs
+
+Open **Sessions → Compare saved runs** and explicitly choose a **Baseline** and **Candidate**.
+Only completed saved or imported sessions are eligible; the current run and sessions still
+running are excluded. Comparison is read-only and does not switch the explorer's session,
+change its filters, or resume live follow.
+
+The side-by-side summary shows each run's name, start/completion timestamps, duration,
+stored entry count, available saved events, matching events, and filter scope.
+**All saved events** includes every record still on disk since the last clear, including
+records outside the explorer's capacity-limited retained page. Alternatively, compare
+each run's **saved filters**, captured independently when comparison starts. Search,
+levels, stream, category, include/exclude conditions, and inclusive exact time bounds
+use the same matching rules as the explorer. A saved relative time window is anchored
+to that run's completion time and displayed as frozen exact bounds, not evaluated
+against today's clock. Missing saved filters mean all saved events.
+
+Compare severity counts, category counts, or message groups. Message groups include
+severity and category as well as the message signature. The displayed normalization
+rule replaces ISO-8601 timestamps, GUIDs, hexadecimal literals, and decimal numeric
+tokens with typed placeholders, preserving case and whitespace. Normalization can
+combine distinct raw messages, so choose **Raw messages** to investigate collisions. Counts and
+candidate-minus-baseline deltas describe **observed log events**, not proof of a
+root cause or a regression. Durations may differ: these are absolute counts, not
+duration-normalized rates. **Newly observed**, **Resolved**, and **Count changed**
+separate groups absent from the baseline, absent from the candidate, and present
+in both with unequal counts; unchanged groups are also available.
+
+Open evidence for either side to read the original, unmodified records supporting
+that count, in bounded pages. Each evidence request includes the comparison, group,
+and side; sequence IDs are local to a session and are never matched across runs.
+Returning to comparison preserves its group selection and result page without
+changing the active investigation.
+
+Processing happens locally with bounded in-memory sorting and private disk-backed
+intermediates, not by loading whole journals into the browser. Progress reports
+scanned events and the processing phase; **Cancel** stops the comparison. Closing
+the comparison releases its job. Clear or delete either source and the comparison
+is invalidated, including open evidence; start a new comparison against valid
+sessions. Storage, resource-limit, or read failures are reported explicitly rather
+than returning partial results. No network service, production analytics, telemetry,
+or Copilot connection is required.
+
 ## Import and export
 
 Use the arrow beside **Export** to choose between:
