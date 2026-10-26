@@ -877,6 +877,15 @@ mark { background: var(--cp-highlight); color: var(--cp-text); border-radius: 2p
   .workspace-heading { margin-bottom: 12px; }
   .workspace-heading h2 { font-size: calc(23px * var(--ui-font-scale, 1)); }
 }
+.surrounding-dialog { width: min(1200px, calc(100vw - 24px)); max-width: none; max-height: calc(100dvh - 24px); display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+.surrounding-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.surrounding-toolbar .muted { overflow-wrap: anywhere; }
+.surrounding-scroll { flex: 1; min-height: 0; overflow: auto; }
+.surrounding-scroll td { font-family: var(--log-font-family, monospace); vertical-align: top; }
+.context-message { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 200px; font-family: var(--log-font-family, monospace); font-size: var(--log-font-size, 14px); line-height: var(--log-line-height, 1.6); }
+.surrounding-scroll .context-anchor { background: var(--cp-native-selection); outline: 2px solid var(--cp-native-accent); outline-offset: -2px; }
+.context-anchor-label { display: block; }
+
 @media (max-width: 1200px) {
   .discover-shell { grid-template-columns: 64px minmax(0, 1fr); }
   .discover-rail { padding: 24px 8px 16px; }

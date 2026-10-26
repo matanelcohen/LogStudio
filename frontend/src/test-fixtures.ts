@@ -16,6 +16,7 @@ export const Entry: LogEntry = {
 
 export function fixturePage(entry: LogEntry = Entry): LogPage {
   return {
+    sessionId: "11111111111111111111111111111111",
     entries: [entry], status: Status, matchCount: 1, errorCount: 0, warningCount: 0,
     olderCount: 0, newerCount: 0, categories: [null, "App.Skill"], highlightTerms: ["alpha", "beta"], pageSize: 250
   };

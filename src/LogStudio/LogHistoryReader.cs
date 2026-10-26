@@ -62,10 +62,11 @@ internal sealed class LogHistoryReader : IDisposable
         long position = this.GetPosition(first);
         this.journal.DiscardBufferedData();
         this.journal.BaseStream.Seek(position, SeekOrigin.Begin);
-        for (long id = first; id <= last; id++)
+        for (long id = first; ; id++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             yield return this.ReadEntry(id);
+            if (id == last) break;
         }
     }
 
@@ -81,13 +82,13 @@ internal sealed class LogHistoryReader : IDisposable
             if (entry.Id != id) throw new InvalidDataException($"The temporary journal index does not match entry {id}.");
             return entry;
         }
-        catch (Exception exception) when (!this.isCurrent() && exception is IOException or JsonException)
+        catch (Exception exception) when (!this.isCurrent() && exception is IOException or JsonException or InvalidDataException)
         {
             throw new HistoryClearedException(exception);
         }
     }
 
-    private void EnsureCurrent()
+    internal void EnsureCurrent()
     {
         if (!this.isCurrent()) throw new HistoryClearedException();
     }
@@ -117,7 +118,7 @@ internal sealed class LogHistoryReader : IDisposable
             if (position < 0 || position >= this.journal.BaseStream.Length) throw new InvalidDataException("The temporary journal contains an invalid seek offset.");
             return position;
         }
-        catch (IOException exception) when (!this.isCurrent())
+        catch (Exception exception) when (!this.isCurrent() && exception is IOException or InvalidDataException)
         {
             throw new HistoryClearedException(exception);
         }

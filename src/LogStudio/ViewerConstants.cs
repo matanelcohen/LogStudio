@@ -40,6 +40,7 @@ internal static class ViewerConstants
     internal const string EventsRoute = "api/events";
     internal const string UpdatesRoute = "api/updates";
     internal const string SearchRoute = "api/search";
+    internal const string ContextRoute = "api/context";
     internal const string ExportRoute = "api/export";
     internal const string ClearRoute = "api/clear";
     internal const string SessionsRoute = "api/sessions";

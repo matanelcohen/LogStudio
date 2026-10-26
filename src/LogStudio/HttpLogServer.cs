@@ -461,7 +461,8 @@ internal sealed class HttpLogServer : IAsyncDisposable
             {
                 await this.ReadHistoryAsync(context, session, route, cancellationToken).ConfigureAwait(false);
             }
-            else if (route == ViewerConstants.SearchRoute || route == ViewerConstants.ExportRoute || route == ViewerConstants.BundleExportRoute)
+            else if (route == ViewerConstants.SearchRoute || route == ViewerConstants.ContextRoute ||
+                route == ViewerConstants.ExportRoute || route == ViewerConstants.BundleExportRoute)
             {
                 await this.ReadHistoryAsync(context, session, route, cancellationToken).ConfigureAwait(false);
             }
@@ -1105,11 +1106,15 @@ internal sealed class HttpLogServer : IAsyncDisposable
 
     private async Task ReadHistoryAsync(HttpListenerContext context, ViewerSession session, string route, CancellationToken cancellationToken)
     {
-        LogQuery query;
+        LogQuery? query = null;
+        LogContextQuery? contextQuery = null;
         bool csv = false;
         try
         {
-            query = LogQuery.Parse(route == ViewerConstants.BundleExportRoute ? new System.Collections.Specialized.NameValueCollection() : context.Request.QueryString);
+            if (route == ViewerConstants.ContextRoute)
+                contextQuery = LogContextQuery.Parse(context.Request.QueryString);
+            else
+                query = LogQuery.Parse(route == ViewerConstants.BundleExportRoute ? new System.Collections.Specialized.NameValueCollection() : context.Request.QueryString);
             if (route == ViewerConstants.ExportRoute)
             {
                 string? format = context.Request.QueryString["format"];
@@ -1132,12 +1137,23 @@ internal sealed class HttpLogServer : IAsyncDisposable
         bool started = false;
         try
         {
-            string? selected = context.Request.QueryString[ViewerConstants.SessionIdQuery];
+            string? selected = contextQuery?.SessionId ?? context.Request.QueryString[ViewerConstants.SessionIdQuery];
+            string sessionId = string.IsNullOrEmpty(selected) ? session.Catalog.Id : selected;
             using LogHistoryReader history = string.IsNullOrEmpty(selected) || selected == session.Catalog.Id ? session.Logs.OpenHistory() : session.Catalog.Open(selected);
             HttpListenerResponse response = context.Response;
+            if (contextQuery is not null)
+            {
+                LogContextResult result = await Task.Run(() => contextQuery.Read(history, cancellationToken), cancellationToken).ConfigureAwait(false);
+                byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(result, ViewerConstants.JsonOptions);
+                history.EnsureCurrent();
+                started = true;
+                await WriteBytesAsync(response, bytes, ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
+                return;
+            }
             if (route == ViewerConstants.SearchRoute)
             {
-                LogSearchResult result = await Task.Run(() => query.Search(history, cancellationToken), cancellationToken).ConfigureAwait(false);
+                LogSearchResult result = await Task.Run(() => query!.Search(history, cancellationToken), cancellationToken).ConfigureAwait(false);
+                result = result with { SessionId = sessionId };
                 byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(result, ViewerConstants.JsonOptions);
                 started = true;
                 await WriteBytesAsync(response, bytes, ViewerConstants.JsonContentType, cancellationToken).ConfigureAwait(false);
@@ -1164,7 +1180,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
                     await writer.WriteLineAsync(LogCsv.Header.AsMemory(), cancellationToken).ConfigureAwait(false);
                 }
                 int written = 0;
-                foreach (LogEntry entry in history.ReadEntries(query.MinimumId >= history.Status.LastId ? history.Status.LastId + 1 : query.MinimumId + 1, query.MaximumId, cancellationToken))
+                foreach (LogEntry entry in history.ReadEntries(query!.MinimumId >= history.Status.LastId ? history.Status.LastId + 1 : query.MinimumId + 1, query.MaximumId, cancellationToken))
                 {
                     if (!query.Matches(entry)) continue;
                     await writer.WriteLineAsync((csv ? LogCsv.Record(entry) : JsonSerializer.Serialize(entry, ViewerConstants.JsonOptions)).AsMemory(), cancellationToken).ConfigureAwait(false);
@@ -1193,6 +1209,10 @@ internal sealed class HttpLogServer : IAsyncDisposable
                 await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
         }
+        catch (LogAnchorUnavailableException exception)
+        {
+            await WriteErrorAsync(context.Response, exception.Expired ? HttpStatusCode.Gone : HttpStatusCode.NotFound, exception.Message, cancellationToken).ConfigureAwait(false);
+        }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
             if (!started)
@@ -1207,6 +1227,13 @@ internal sealed class HttpLogServer : IAsyncDisposable
             else
                 context.Response.Abort();
         }
+        catch (ObjectDisposedException) when (contextQuery is not null && !cancellationToken.IsCancellationRequested)
+        {
+            if (!started)
+                await WriteErrorAsync(context.Response, HttpStatusCode.Conflict, "Session history became unavailable during this request.", cancellationToken).ConfigureAwait(false);
+            else
+                context.Response.Abort();
+        }
         catch (RegexMatchTimeoutException exception)
         {
             this.diagnostics.WriteLine($"Log Studio regex condition timed out: {exception.Message}");
@@ -1215,7 +1242,7 @@ internal sealed class HttpLogServer : IAsyncDisposable
             else
                 context.Response.Abort();
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
         {
             this.diagnostics.WriteLine($"Log Studio history request failed: {exception}");
             if (!started)

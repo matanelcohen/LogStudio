@@ -13,10 +13,11 @@ import { TerminalInput } from "./TerminalInput";
 import { DiscoverSidebar } from "./DiscoverSidebar";
 import { clearSessionLogs, fetchApplications, selectApplication } from "./api";
 import { Inspector } from "./Inspector";
+import { SurroundingEntries } from "./SurroundingEntries";
 import { LogTable } from "./LogTable";
 import {
   defaultQuery, errorMessage, NumberFormatter, readChoice, TimeFormatter, validateConditions,
-  type LogCondition, type LogEntry, type Notice, type PageCursor, type QueryState, type RunningApplication, type RunningApplicationsState, type SessionInfo, type ViewerStatus
+  type EntryLocation, type LogCondition, type LogEntry, type Notice, type PageCursor, type QueryState, type RunningApplication, type RunningApplicationsState, type SessionInfo, type ViewerStatus
 } from "./model";
 import { QueryBar } from "./QueryBar";
 import { Hint } from "./ui";
@@ -37,6 +38,9 @@ export default function App() {
   const [pause, setPause] = useState<PauseSnapshot | null>(null);
   const [follow, setFollow] = useState(true);
   const [selected, setSelected] = useState<LogEntry | null>(null);
+  const selectionSession = useRef("");
+  const [context, setContext] = useState<(EntryLocation & { historyDirectory: string }) | null>(null);
+  const contextOpener = useRef<HTMLElement | null>(null);
   const [editor, setEditor] = useState<{ open: boolean; seed: LogCondition | null }>({ open: false, seed: null });
   const [notice, setNotice] = useState<Notice | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
@@ -75,7 +79,7 @@ export default function App() {
   const archived = !!query.sessionId;
   const historyDirectory = live.status?.listenAll ? live.status.historyDirectory : "";
   const clearedThroughId = archived ? 0 : live.status?.clearedThroughId ?? 0;
-  const history = useLogPage(query, cursor, archived ? null : pause?.maximumId ?? null, archived ? 0 : live.status?.revision ?? 0, archived || pause !== null, clearedThroughId, archived ? "" : historyDirectory);
+  const history = useLogPage(query, cursor, archived ? null : pause?.maximumId ?? null, archived ? 0 : live.status?.revision ?? 0, archived || pause !== null, clearedThroughId, archived ? "" : historyDirectory, context !== null);
   const status = archived ? history.page?.status ?? null : pause?.status && pause.status.clearedThroughId >= clearedThroughId && (!historyDirectory || pause.status.historyDirectory === historyDirectory) ?
     { ...pause.status, applicationName: live.status?.applicationName ?? pause.status.applicationName } :
     live.status ?? history.page?.status ?? null;
@@ -98,25 +102,27 @@ export default function App() {
     if (!previous || previous === historyDirectory || archived) return;
     seenClear.current = clearedThroughId;
     setQuery(query => ({ ...defaultQuery(), pageSize: query.pageSize }));
-    setCursor({ before: null, after: null }); setSelected(null); setPause(null); setFollow(true);
+    setCursor({ before: null, after: null }); setSelected(null); setPause(null); setFollow(context === null);
     setChatOpen(false); setClearOpen(false); setNotice(null);
   }, [historyDirectory, archived]);
   useEffect(() => {
     if (clearedThroughId <= seenClear.current) return;
     seenClear.current = clearedThroughId;
     setSelected(null);
+    if (context) return;
     setPause(null);
     setFollow(true);
     setCursor({ before: null, after: null });
     setQuery(query => ({ ...query, dismissedThrough: 0 }));
   }, [clearedThroughId]);
   useEffect(() => {
-    if (cursor.after === null || !history.page || history.loading) return;
+    if (context || cursor.after === null || !history.page || history.loading) return;
     const lastId = history.page.entries.at(-1)?.id ?? cursor.after;
     setCursor({ before: lastId + 1, after: null });
-  }, [cursor, history.page, history.loading]);
+  }, [cursor, history.page, history.loading, context]);
   useEffect(() => {
     function shortcut(event: KeyboardEvent) {
+      if (context) return;
       const target = event.target;
       const editing = target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable);
       if (((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") || (event.key === "/" && !editing)) {
@@ -132,7 +138,7 @@ export default function App() {
     }
     document.addEventListener("keydown", shortcut);
     return () => document.removeEventListener("keydown", shortcut);
-  }, [query]);
+  }, [query, context]);
 
   function changeQuery(query: QueryState, forceFilters = false) {
     setQuery(query);
@@ -142,6 +148,7 @@ export default function App() {
   }
 
   function selectSession(session: SessionInfo) {
+    setContext(null);
     setQuery({ ...defaultQuery(), ...filters.restore(session), pageSize: query.pageSize, sessionId: session.isCurrent ? "" : session.id });
     setCursor({ before: null, after: null }); setSelected(null); setPause(null); setFollow(true);
     setSessionsOpen(false); setImportOpen(false); setNotice(null);
@@ -182,6 +189,20 @@ export default function App() {
   }
 
   const activePage = history.page;
+  function selectEntry(entry: LogEntry) {
+    selectionSession.current = activePage?.sessionId ?? query.sessionId;
+    setSelected(entry);
+  }
+
+  function showSurrounding() {
+    if (!visibleSelection) return;
+    if (!selectionSession.current) {
+      setNotice({ tone: "danger", message: "The selected entry's session is unavailable. Refresh the results and select it again." });
+      return;
+    }
+    contextOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setContext({ sessionId: selectionSession.current, entryId: visibleSelection.id, historyDirectory: status?.historyDirectory ?? "" });
+  }
   const switchingHistory = !archived && !!historyDirectory && !!activePage && activePage.status.historyDirectory !== historyDirectory;
   const connectionLabel = live.connection === "live" ? "Connected" : live.connection === "paused" ? "Paused" :
     live.connection === "reconnecting" ? "Reconnecting" : live.connection === "failed" ? "Disconnected" : "Connecting";
@@ -288,7 +309,7 @@ export default function App() {
             onSeverity={levels => changeQuery({ ...query, levels, severity: "all" })}
             onPageSize={pageSize => changeQuery({ ...query, pageSize })}
             onClearSession={() => { setClearError(null); setClearOpen(true); }} clearing={clearing} clearButtonRef={clearOpener}
-            onSelect={entry => { setSelected(entry); setInspector(true); }}
+            onSelect={entry => { selectEntry(entry); setInspector(true); }}
             onOlder={() => { const first = activePage?.entries[0]; if (first) { setFollow(false); setCursor({ before: first.id, after: null }); } }}
             onNewer={() => { const last = activePage?.entries.at(-1); if (last) { setFollow(false); setCursor({ before: null, after: last.id }); } }}
             onLive={() => { setFollow(true); setCursor({ before: null, after: null }); }}
@@ -296,8 +317,8 @@ export default function App() {
             onWrap={wrap => updateExplorer({ wrap })}
             onClear={() => { changeQuery({ ...query, dismissedThrough: status?.lastId ?? 0 }); setSelected(null); setNotice({ tone: "info", message: "Existing entries are hidden in this tab only. Reset restores disk history." }); }}
             onRetry={history.refresh} onInspector={() => setInspector(!inspector)} />
-          {inspector && <Inspector entry={visibleSelection} entries={activePage?.entries ?? []} status={status} onSelect={setSelected} onClose={() => setInspector(false)}
-            onCondition={addCondition} onDraft={openEditor} onNotice={setNotice} />}
+          {inspector && <Inspector entry={visibleSelection} entries={activePage?.entries ?? []} status={status} onSelect={selectEntry} onClose={() => setInspector(false)}
+            onCondition={addCondition} onDraft={openEditor} onNotice={setNotice} onSurrounding={showSurrounding} />}
           </div>
           </Oui.Card>
         </main>
@@ -346,6 +367,13 @@ export default function App() {
             if (savedSearchesOpener.current?.isConnected) savedSearchesOpener.current.focus();
             else searchRef.current?.focus();
           }} />
+        {context && <SurroundingEntries location={context}
+          unavailable={!archived && historyDirectory && context.historyDirectory !== historyDirectory ?
+            "The active application changed. This context has not been replaced with another session's entries. Return to results to inspect the selected application." : null}
+          onClose={() => setContext(null)} returnFocus={() => {
+            if (contextOpener.current?.isConnected) contextOpener.current.focus();
+            else searchRef.current?.focus();
+          }} />}
       </div>
       </div>
     </Oui.TooltipProvider>

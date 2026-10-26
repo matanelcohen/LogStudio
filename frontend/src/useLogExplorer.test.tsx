@@ -25,6 +25,29 @@ class EventSourceFixture {
 }
 
 describe("bounded single-page requests", () => {
+  it("preserves results while context suspends requests and resumes with the original cursor", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-26T10:00:00Z"));
+    const request = vi.fn().mockImplementation(async () => new Response(JSON.stringify(fixturePage())));
+    vi.stubGlobal("fetch", request);
+    const query = { ...defaultQuery(), search: "error", timeWindow: 60000 };
+    const cursor = { before: 1001, after: null };
+    const hook = renderHook(({ suspended, revision }) => useLogPage(query, cursor, 20000, revision, true, 0, "", suspended),
+      { initialProps: { suspended: false, revision: 1 } });
+    await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+    const original = hook.result.current.page;
+    hook.rerender({ suspended: true, revision: 2 });
+    await act(() => vi.advanceTimersByTimeAsync(120000));
+    expect(request).toHaveBeenCalledOnce();
+    expect(hook.result.current.page).toBe(original);
+    hook.rerender({ suspended: false, revision: 3 });
+    await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls[1]![0]).toContain("before=1001");
+    expect(request.mock.calls[1]![0]).toContain("maxId=20000");
+    expect(new URL(request.mock.calls[1]![0], "http://localhost").searchParams.get("since")).toBe("2026-10-26T09:59:00.000Z");
+  });
+
   it("coalesces live updates without concurrent requests or retained old pages", async () => {
     vi.useFakeTimers();
     let resolve: ((response: Response) => void) | undefined;

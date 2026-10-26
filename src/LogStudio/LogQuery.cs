@@ -21,7 +21,10 @@ internal sealed record LogSearchResult(
     long NewerCount,
     string?[] Categories,
     string[] HighlightTerms,
-    int PageSize);
+    int PageSize)
+{
+    public string SessionId { get; init; } = string.Empty;
+}
 
 internal sealed class LogQuery
 {
