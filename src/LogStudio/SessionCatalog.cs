@@ -13,6 +13,8 @@ internal sealed record SessionInfo(
 
 internal sealed record SavedSession(SessionInfo Session, ViewerStatus Status, string?[] Categories, ChatMessage[]? ChatHistory = null);
 
+internal sealed record ComparisonSource(SessionInfo Session, long Generation, long ExpectedEntries);
+
 internal sealed class SessionCatalog
 {
     private const string MetadataFile = "session.json";
@@ -39,6 +41,50 @@ internal sealed class SessionCatalog
     }
 
     internal string Id { get; }
+
+    internal event Action<string>? HistoryInvalidated;
+
+    internal ComparisonSource CaptureComparison(string id)
+    {
+        lock (this.gate)
+        {
+            if (id == this.Id) throw new ArgumentException("Comparisons require two completed, non-current sessions.");
+            SavedSession saved = this.Read(id);
+            if (saved.Session.IsCurrent || !saved.Status.IsCompleted || !saved.Session.CompletedAt.HasValue ||
+                !saved.Status.CompletedAt.HasValue || saved.Status.PendingEntries != 0 ||
+                saved.Session.CompletedAt < saved.Session.StartedAt)
+                throw new ArgumentException("Comparisons require completed sessions with no active journal writer.");
+            return new(saved.Session with { IsCurrent = false, Filters = saved.Session.Filters?.Snapshot() },
+                this.generations.GetValueOrDefault(id), checked(saved.Status.LastId - saved.Status.ClearedThroughId));
+        }
+    }
+
+    internal bool IsComparisonCurrent(ComparisonSource source)
+    {
+        lock (this.gate)
+            return this.generations.GetValueOrDefault(source.Session.Id) == source.Generation &&
+                File.Exists(Path.Combine(this.DirectoryFor(source.Session.Id), MetadataFile));
+    }
+
+    internal LogHistoryReader OpenComparison(ComparisonSource source)
+    {
+        lock (this.gate)
+        {
+            if (!this.IsComparisonCurrent(source)) throw new HistoryClearedException();
+            return this.Open(source.Session.Id);
+        }
+    }
+
+    internal string CreateComparisonStorage(string id)
+    {
+        lock (this.gate)
+        {
+            MakePrivateDirectory(this.settings.SessionsDirectory);
+            string directory = Path.Combine(this.settings.SessionsDirectory, ".comparison-" + id);
+            MakePrivateDirectory(directory);
+            return directory;
+        }
+    }
 
     internal static string GenerateName(string sessionsDirectory) => SessionNameGenerator.Generate(sessionsDirectory);
 
@@ -140,6 +186,7 @@ internal sealed class SessionCatalog
             foreach (string file in SessionFiles) File.Delete(Path.Combine(directory, file));
             Directory.Delete(directory);
         }
+        this.HistoryInvalidated?.Invoke(id);
     }
 
     internal SessionInfo Describe(ViewerStatus status, bool current = true)
@@ -225,6 +272,7 @@ internal sealed class SessionCatalog
 
     internal LogClearResult Clear(string id)
     {
+        LogClearResult result;
         lock (this.gate)
         {
             SavedSession saved = this.Read(id);
@@ -250,8 +298,10 @@ internal sealed class SessionCatalog
                 Revision = saved.Status.Revision + 1,
             };
             this.Write(directory, saved with { Session = saved.Session with { EntryCount = 0 }, Status = status, Categories = Array.Empty<string?>() });
-            return new LogClearResult(deleted, status);
+            result = new LogClearResult(deleted, status);
         }
+        this.HistoryInvalidated?.Invoke(id);
+        return result;
     }
 
     internal static string[] RedactArguments(string[] source)
