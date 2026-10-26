@@ -13,7 +13,8 @@ internal sealed record SessionInfo(
 
 internal sealed record SavedSession(SessionInfo Session, ViewerStatus Status, string?[] Categories, ChatMessage[]? ChatHistory = null);
 
-internal sealed record ComparisonSource(SessionInfo Session, long Generation, long ExpectedEntries);
+internal sealed record ComparisonSource(SessionInfo Session, long Generation, long ExpectedEntries,
+    long JournalLength, DateTime JournalWriteTime, long IndexLength, DateTime IndexWriteTime);
 
 internal sealed class SessionCatalog
 {
@@ -42,7 +43,9 @@ internal sealed class SessionCatalog
 
     internal string Id { get; }
 
-    internal event Action<string>? HistoryInvalidated;
+    // Switching the current run can route later clear/delete requests through a different catalog.
+    internal static event Action<string, string>? HistoryInvalidated;
+    internal string StorageDirectory => Path.TrimEndingDirectorySeparator(Path.GetFullPath(this.settings.SessionsDirectory));
 
     internal ComparisonSource CaptureComparison(string id)
     {
@@ -52,18 +55,30 @@ internal sealed class SessionCatalog
             SavedSession saved = this.Read(id);
             if (saved.Session.IsCurrent || !saved.Status.IsCompleted || !saved.Session.CompletedAt.HasValue ||
                 !saved.Status.CompletedAt.HasValue || saved.Status.PendingEntries != 0 ||
-                saved.Session.CompletedAt < saved.Session.StartedAt)
+                saved.Status.CompletedAt != saved.Session.CompletedAt || saved.Status.StartedAt != saved.Session.StartedAt ||
+                saved.Status.ClearedThroughId < 0 || saved.Status.LastId < saved.Status.ClearedThroughId ||
+                saved.Status.LastId == long.MaxValue || saved.Session.CompletedAt < saved.Session.StartedAt)
                 throw new ArgumentException("Comparisons require completed sessions with no active journal writer.");
+            FileInfo journal = new(Path.Combine(this.DirectoryFor(id), JournalFile));
+            FileInfo index = new(Path.Combine(this.DirectoryFor(id), IndexFile));
             return new(saved.Session with { IsCurrent = false, Filters = saved.Session.Filters?.Snapshot() },
-                this.generations.GetValueOrDefault(id), checked(saved.Status.LastId - saved.Status.ClearedThroughId));
+                this.generations.GetValueOrDefault(id), checked(saved.Status.LastId - saved.Status.ClearedThroughId),
+                journal.Length, journal.LastWriteTimeUtc, index.Length, index.LastWriteTimeUtc);
         }
     }
 
     internal bool IsComparisonCurrent(ComparisonSource source)
     {
         lock (this.gate)
+        {
+            string directory = this.DirectoryFor(source.Session.Id);
+            FileInfo journal = new(Path.Combine(directory, JournalFile));
+            FileInfo index = new(Path.Combine(directory, IndexFile));
             return this.generations.GetValueOrDefault(source.Session.Id) == source.Generation &&
-                File.Exists(Path.Combine(this.DirectoryFor(source.Session.Id), MetadataFile));
+                File.Exists(Path.Combine(directory, MetadataFile)) && journal.Exists && index.Exists &&
+                journal.Length == source.JournalLength && journal.LastWriteTimeUtc == source.JournalWriteTime &&
+                index.Length == source.IndexLength && index.LastWriteTimeUtc == source.IndexWriteTime;
+        }
     }
 
     internal LogHistoryReader OpenComparison(ComparisonSource source)
@@ -186,7 +201,7 @@ internal sealed class SessionCatalog
             foreach (string file in SessionFiles) File.Delete(Path.Combine(directory, file));
             Directory.Delete(directory);
         }
-        this.HistoryInvalidated?.Invoke(id);
+        HistoryInvalidated?.Invoke(this.StorageDirectory, id);
     }
 
     internal SessionInfo Describe(ViewerStatus status, bool current = true)
@@ -300,7 +315,7 @@ internal sealed class SessionCatalog
             this.Write(directory, saved with { Session = saved.Session with { EntryCount = 0 }, Status = status, Categories = Array.Empty<string?>() });
             result = new LogClearResult(deleted, status);
         }
-        this.HistoryInvalidated?.Invoke(id);
+        HistoryInvalidated?.Invoke(this.StorageDirectory, id);
         return result;
     }
 

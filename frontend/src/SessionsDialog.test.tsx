@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SessionsDialog } from "./SessionsDialog";
 import type { SessionInfo } from "./model";
+import { comparisonGroup, comparisonSessions, comparisonSnapshot } from "./comparison-test-fixtures";
 
 const Sessions: SessionInfo[] = [
   { id: "current", name: "Current run", startedAt: "2026-10-12T08:00:00Z", completedAt: null, exitCode: null, entryCount: 10, command: "dotnet", arguments: ["run"], workingDirectory: "/current", isCurrent: true },
@@ -98,5 +99,66 @@ describe("session browser", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
     expect(screen.getByRole("heading", { name: "Import a session" })).toBeDefined();
+  });
+
+  it("compares without selecting a session and returns from evidence to the existing result view", async () => {
+    const select = vi.fn();
+    const fetcher = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "api/sessions") return new Response(JSON.stringify(comparisonSessions));
+      if (url.includes("/groups?")) return new Response(JSON.stringify({ groups: [comparisonGroup()], total: 1, offset: 0, pageSize: 50 }));
+      if (url.includes("/evidence?")) return new Response(JSON.stringify({ sessionId: "baseline", entries: [
+        { id: 1, timestamp: "2026-10-11T08:00:01Z", severity: "error", category: "Worker", stream: "stderr", message: "Unchanged explorer evidence", isPartial: false }
+      ], nextAfter: null }));
+      return new Response(JSON.stringify(comparisonSnapshot({ state: init?.headers && "X-Log-Studio-Action" in init.headers &&
+        init.headers["X-Log-Studio-Action"] === "cancel-comparison" ? "cancelled" : "completed" })));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    render(<SessionsDialog open selected="baseline" onClose={vi.fn()} onSelect={select} returnFocus={vi.fn()} />);
+    await screen.findByText("Before run");
+    fireEvent.click(screen.getByRole("button", { name: "Compare saved runs" }));
+    for (const [label, name] of [["Baseline session", /Before run/], ["Candidate session", /After run/]] as const) {
+      fireEvent.keyDown(screen.getByRole("combobox", { name: label }), { key: "Enter" });
+      fireEvent.keyDown(screen.getByRole("option", { name }), { key: "Enter" });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Compare runs" }));
+    fireEvent.click(await screen.findByRole("button", { name: "View baseline evidence for Request <number> failed" }));
+    await screen.findByText("Unchanged explorer evidence");
+    fireEvent.click(screen.getByRole("button", { name: "Back to comparison results" }));
+    expect(screen.getByRole("cell", { name: "+3" })).toBeDefined();
+    expect(select).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Close comparison" }));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledWith("api/comparison?id=comparison%2Fone", expect.objectContaining({
+      method: "POST", headers: { "X-Log-Studio-Action": "cancel-comparison" }
+    })));
+    expect(screen.getByRole("heading", { name: "Sessions" })).toBeDefined();
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it("releases the running comparison when its parent closes and also releases late creation on unmount", async () => {
+    let complete!: (response: Response) => void;
+    const pending = new Promise<Response>(resolve => { complete = resolve; });
+    const fetcher = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "api/sessions") return new Response(JSON.stringify(comparisonSessions));
+      if (url === "api/comparison" && init?.method === "POST") return pending;
+      return new Response(JSON.stringify(comparisonSnapshot({ state: "cancelled" })));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const props = { open: true, selected: "", onClose: vi.fn(), onSelect: vi.fn(), returnFocus: vi.fn() };
+    const { rerender } = render(<SessionsDialog {...props} />);
+    await screen.findByText("Before run");
+    fireEvent.click(screen.getByRole("button", { name: "Compare saved runs" }));
+    for (const [label, name] of [["Baseline session", /Before run/], ["Candidate session", /After run/]] as const) {
+      fireEvent.keyDown(screen.getByRole("combobox", { name: label }), { key: "Enter" });
+      fireEvent.keyDown(screen.getByRole("option", { name }), { key: "Enter" });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Compare runs" }));
+    expect(screen.getByText("Starting comparison…")).toBeDefined();
+    rerender(<SessionsDialog {...props} open={false} />);
+    complete(new Response(JSON.stringify(comparisonSnapshot({ state: "running", phase: "candidate", processedEntries: 100 }))));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledWith("api/comparison?id=comparison%2Fone", expect.objectContaining({
+      method: "POST", headers: { "X-Log-Studio-Action": "cancel-comparison" }
+    })));
+    expect(screen.queryByRole("region", { name: "Comparison results" })).toBeNull();
+    expect(props.onSelect).not.toHaveBeenCalled();
   });
 });

@@ -654,8 +654,9 @@ against today's clock. Missing saved filters mean all saved events.
 
 Compare severity counts, category counts, or message groups. Message groups include
 severity and category as well as the message signature. The displayed normalization
-rule explains which parameters are replaced; normalization can combine distinct raw
-messages, so choose **Raw messages** to investigate collisions. Counts and
+rule replaces ISO-8601 timestamps, GUIDs, hexadecimal literals, and decimal numeric
+tokens with typed placeholders, preserving case and whitespace. Normalization can
+combine distinct raw messages, so choose **Raw messages** to investigate collisions. Counts and
 candidate-minus-baseline deltas describe **observed log events**, not proof of a
 root cause or a regression. Durations may differ: these are absolute counts, not
 duration-normalized rates. **Newly observed**, **Resolved**, and **Count changed**
