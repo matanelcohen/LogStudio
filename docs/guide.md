@@ -1142,6 +1142,21 @@ remove the reported folder if necessary. Download JSONL before closing if you wa
   page, keep the selected row in view, and show its position. They stop at page boundaries.
   If a selected entry moves off the page or expires, its details remain available, but navigation
   is disabled until another visible row is selected. Older / Newer still load other pages.
+- **Show surrounding entries** in the Inspector opens the selected entry's own session history,
+  with up to **25 retained entries before and after** it, even when the anchor is outside the first
+  results page. The anchor is highlighted, and the view explicitly **bypasses active filters**
+  (including search, time, level, and Clear view). Current, saved, and imported sessions work alike.
+  **Load 25 older/newer entries** replaces the context page instead of accumulating the journal in
+  browser memory; **Back to anchor** restores the centered page. Tab to a row and use Up/Down to
+  navigate. All reads are local, indexed, and bounded.
+  **Return to results** (or Escape) restores the original query, page cursor, selection, and
+  follow/pause state; it never turns follow on or resumes a paused investigation.
+  Missing, cleared, expired, or deleted anchors/sessions show an explicit error and stale context
+  is removed. Context is rechecked every two seconds while open. Entry IDs are scoped to their
+  session; switching the active application never substitutes another session's matching ID.
+  A deleted selection cannot be restored; an externally switched application resets its results
+  without enabling follow. From a selected error, open context, read its preceding event, and
+  return in two button actions.
 - The entire retained history is searched. **Rows/page** accepts any positive 32-bit integer
   (default 250). Press Enter or leave the input to apply it; invalid values show an error without
   changing the active size. Older / Newer use the selected size, while exports remain unlimited.
@@ -1438,11 +1453,18 @@ startup-hook viewer ends with its host process; inspect telemetry while that pro
   redacted command details. `sessionId=<id>` selects saved history for search/export/clear;
   missing or path-like IDs are rejected.
 - GET `<session-url>api/search` returns up to `pageSize` entries (a positive 32-bit integer, default 250),
-  the chosen `pageSize`, whole-history match/severity counts,
+  the resolved `sessionId`, chosen `pageSize`, whole-history match/severity counts,
   older/newer counts, bounded category suggestions, and literal highlight terms.
   Query parameters include `q`, `matchCase`, legacy `severity`, JSON `levels` (for example
   `["information","error"]`), `stream`, JSON `category`, UTC `since`,
   `minId` / `maxId`, `before` / `after`, `pageSize`, JSON `filters`, and `includeMode=all|any`.
+- GET `<session-url>api/context?sessionId=<id>&entryId=<id>` requires an explicit session and
+  anchor. It returns `{ sessionId, anchorId, entries, before, after, status, filtersBypassed: true }`,
+  with at most 51 retained entries initially (25 on either side plus the anchor). Optional exclusive
+  `before` or `after` cursors return at most 25 entries, regardless of search page size or filters.
+  Every page revalidates the original anchor. Missing sessions/anchors return 404, cleared/expired
+  anchors return 410, and concurrent destructive changes return 409. No request selects another
+  session or changes persisted filters.
 - GET `<session-url>api/export` streams matching JSONL records using the same filters.
   Download cursors use a snapshot upper ID; records captured later do not change the download.
 - POST `<session-url>api/clear` requires

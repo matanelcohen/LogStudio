@@ -13,6 +13,12 @@ internal sealed record SessionInfo(
 
 internal sealed record SavedSession(SessionInfo Session, ViewerStatus Status, string?[] Categories, ChatMessage[]? ChatHistory = null);
 
+internal sealed class SessionCatalogMutations
+{
+    internal object Gate { get; } = new();
+    internal Dictionary<string, long> Generations { get; } = new(StringComparer.Ordinal);
+}
+
 internal sealed record ComparisonSource(SessionInfo Session, long Generation, long ExpectedEntries,
     long JournalLength, DateTime JournalWriteTime, long IndexLength, DateTime IndexWriteTime);
 
@@ -27,15 +33,18 @@ internal sealed class SessionCatalog
     private const UnixFileMode FilePermissions = UnixFileMode.UserRead | UnixFileMode.UserWrite;
     private static readonly string[] SensitiveTerms = { "password", "passwd", "secret", "token", "api-key", "apikey", "authorization", "credential" };
     private static readonly string[] SessionFiles = { JournalFile, IndexFile, MetadataFile, PendingMetadataFile };
-    private readonly object gate = new();
+    private readonly object gate;
     private readonly ViewerSettings settings;
-    private readonly Dictionary<string, long> generations = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> generations;
     private readonly string[] arguments;
     private SessionFilters? filters;
     private ChatMessage[] chatHistory = Array.Empty<ChatMessage>();
 
-    internal SessionCatalog(ViewerSettings settings)
+    internal SessionCatalog(ViewerSettings settings, SessionCatalogMutations? mutations = null)
     {
+        mutations ??= new SessionCatalogMutations();
+        this.gate = mutations.Gate;
+        this.generations = mutations.Generations;
         this.settings = settings;
         this.Id = Guid.NewGuid().ToString("N");
         this.arguments = RedactArguments(settings.RunArguments);
@@ -263,6 +272,7 @@ internal sealed class SessionCatalog
             string destination = this.DirectoryFor(this.Id);
             MakePrivateDirectory(destination);
             using LogHistoryReader history = logs.OpenHistory();
+            this.generations[this.Id] = this.generations.GetValueOrDefault(this.Id) + 1;
             logs.CopyJournal(destination);
             foreach (string file in new[] { JournalFile, IndexFile })
                 if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(Path.Combine(destination, file), FilePermissions);

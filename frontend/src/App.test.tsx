@@ -47,6 +47,100 @@ vi.mock("./useLogExplorer", async () => {
 });
 
 describe("log-first workspace", () => {
+  it.each([false, true])("restores a paged investigation without changing its follow or pause state (paused=%s)", async paused => {
+    const anchor = { ...Entry, id: 1000, message: "isolated failure" };
+    const page = { ...fixturePage(anchor), olderCount: 999 };
+    vi.mocked(useLogPage).mockReturnValue({ page, loading: false, error: null, refresh: vi.fn() });
+    const fetchContext = vi.spyOn(api, "fetchContext").mockResolvedValue({
+      sessionId: page.sessionId!, anchorId: anchor.id, entries: [{ ...Entry, id: 999, message: "preceding event" }, anchor],
+      before: 999, after: 1000, status: Status, filtersBypassed: true
+    });
+    try {
+      render(<App />);
+      fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "id:1000" } });
+      fireEvent.click(screen.getByRole("button", { name: "Older" }));
+      if (paused) fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      fireEvent.click(screen.getByRole("row", { name: /isolated failure/ }));
+      const original = vi.mocked(useLogPage).mock.lastCall!.slice(0, 5);
+      const opener = screen.getByRole("button", { name: "Show surrounding entries" });
+      opener.focus();
+      fireEvent.click(opener);
+      await screen.findByText("preceding event");
+      expect(fetchContext).toHaveBeenCalledWith({ sessionId: page.sessionId, entryId: 1000 }, { before: null, after: null }, expect.any(AbortSignal));
+      expect(vi.mocked(useLogPage).mock.lastCall?.[7]).toBe(true);
+      fireEvent.click(screen.getByRole("button", { name: "Return to results" }));
+      expect(vi.mocked(useLogPage).mock.lastCall?.slice(0, 5)).toEqual(original);
+      expect(vi.mocked(useLogPage).mock.lastCall?.[7]).toBe(false);
+      expect((screen.getByLabelText("Search logs") as HTMLInputElement).value).toBe("id:1000");
+      expect(document.getElementById("detailId")?.textContent).toBe("1000");
+      expect(screen.getByRole("button", { name: /Latest/ })).toBeTruthy();
+      expect(screen.getByRole("button", { name: paused ? "Resume" : "Pause" })).toBeTruthy();
+      await waitFor(() => expect(document.activeElement).toBe(opener));
+    } finally {
+      vi.mocked(useLogPage).mockReturnValue({ page: fixturePage(), loading: false, error: null, refresh: vi.fn() });
+    }
+  });
+
+  it("keeps pause and cursor after a clear during context inspection rather than resuming follow", async () => {
+    const page = { ...fixturePage(), olderCount: 1 };
+    vi.mocked(useLogPage).mockReturnValue({ page, loading: false, error: null, refresh: vi.fn() });
+    vi.spyOn(api, "fetchContext").mockResolvedValue({
+      sessionId: page.sessionId!, anchorId: 1, entries: [Entry], before: null, after: 1, status: Status, filtersBypassed: true
+    });
+    try {
+      const view = render(<App />);
+      fireEvent.click(screen.getByRole("button", { name: "Older" }));
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      fireEvent.click(screen.getByRole("row", { name: /Hello/ }));
+      const original = vi.mocked(useLogPage).mock.lastCall!.slice(0, 5);
+      fireEvent.click(screen.getByRole("button", { name: "Show surrounding entries" }));
+      await screen.findByRole("table", { name: "Surrounding logs" });
+      vi.mocked(useLiveStatus).mockReturnValue({
+        status: { ...Status, clearedThroughId: 20000, retainedCount: 0, firstId: 0, revision: 20002 },
+        connection: "paused", error: null, gap: null, reconnect, applyStatus: vi.fn()
+      });
+      view.rerender(<App />);
+      fireEvent.click(screen.getByRole("button", { name: "Return to results" }));
+      expect(vi.mocked(useLogPage).mock.lastCall?.slice(0, 3)).toEqual(original.slice(0, 3));
+      expect(vi.mocked(useLogPage).mock.lastCall?.[4]).toBe(true);
+      expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Latest/ })).toBeTruthy();
+      expect(screen.queryByText("Entry #1")).toBeNull();
+    } finally {
+      vi.mocked(useLiveStatus).mockReturnValue({ status: Status, connection: "live", error: null, gap: null, reconnect, applyStatus: vi.fn() });
+      vi.mocked(useLogPage).mockReturnValue({ page: fixturePage(), loading: false, error: null, refresh: vi.fn() });
+    }
+  });
+
+  it.each(["Saved", "Imported"])("pins duplicate entry IDs to the selected %s session after a session change", async name => {
+    const id = "22222222222222222222222222222222";
+    vi.mocked(api.fetchSessions).mockResolvedValue([{
+      id, name, startedAt: Status.startedAt, completedAt: Status.completedAt, exitCode: 0, entryCount: 1,
+      command: null, arguments: [], workingDirectory: "", isCurrent: false
+    }]);
+    vi.mocked(useLogPage).mockImplementation(query => ({
+      page: { ...fixturePage(), sessionId: query.sessionId || fixturePage().sessionId }, loading: false, error: null, refresh: vi.fn()
+    }));
+    const fetchContext = vi.spyOn(api, "fetchContext").mockResolvedValue({
+      sessionId: id, anchorId: 1, entries: [Entry], before: null, after: null, status: Status, filtersBypassed: true
+    });
+    try {
+      render(<App />);
+      fireEvent.click(screen.getByRole("row", { name: /Hello/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+      fireEvent.click(await screen.findByRole("button", { name: "View session" }));
+      expect(screen.queryByText("Entry #1")).toBeNull();
+      fireEvent.click(screen.getByRole("row", { name: /Hello/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Show surrounding entries" }));
+      await screen.findByRole("table", { name: "Surrounding logs" });
+      expect(fetchContext).toHaveBeenCalledWith({ sessionId: id, entryId: 1 }, { before: null, after: null }, expect.any(AbortSignal));
+      fireEvent.click(screen.getByRole("button", { name: "Return to results" }));
+      expect(vi.mocked(useLogPage).mock.lastCall?.[0].sessionId).toBe(id);
+    } finally {
+      vi.mocked(useLogPage).mockReturnValue({ page: fixturePage(), loading: false, error: null, refresh: vi.fn() });
+    }
+  });
+
   it("persists named searches across viewer reloads and applies filters without adopting another session or page size", async () => {
     const first = render(<App />);
     fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "timeout" } });
@@ -510,7 +604,7 @@ describe("log-first workspace", () => {
       rerender(<App />);
       expect(screen.getByRole("button", { name: "Pause" })).toBeDefined();
       expect((screen.getByLabelText("Search logs") as HTMLInputElement).value).toBe("");
-      expect(vi.mocked(useLogPage).mock.calls.at(-1)?.slice(2)).toEqual([
+      expect(vi.mocked(useLogPage).mock.calls.at(-1)?.slice(2, 7)).toEqual([
         null, first.revision + 1, false, 0, "/private/temp/another-app"
       ]);
       fireEvent.click(screen.getByRole("button", { name: "Pause" }));

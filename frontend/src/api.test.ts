@@ -1,8 +1,38 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchApplications, readPage, readStatus, selectApplication, sendInput } from "./api";
+import { fetchApplications, fetchContext, readPage, readStatus, selectApplication, sendInput } from "./api";
 import { Entry, fixturePage, Status } from "./test-fixtures";
 
 describe("typed server payloads", () => {
+  const location = { sessionId: "11111111111111111111111111111111", entryId: 1 };
+  const context = { sessionId: location.sessionId, anchorId: 1, entries: [Entry], status: Status, before: null, after: 1, filtersBypassed: true };
+
+  it("pins context to an explicit session and anchor without forwarding search filters", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(context)));
+    vi.stubGlobal("fetch", fetch);
+    const signal = new AbortController().signal;
+    expect(await fetchContext(location, { before: null, after: null }, signal)).toEqual({ ...context, status: readStatus(Status) });
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(`api/context?sessionId=${location.sessionId}&entryId=1`, { signal });
+  });
+
+  it.each([
+    { sessionId: "22222222222222222222222222222222" }, { anchorId: 2 }, { filtersBypassed: false },
+    { entries: Array.from({ length: 52 }, () => Entry) }, { entries: [] },
+    { status: { ...Status, clearedThroughId: 1 } }, { before: 2 },
+    { entries: [Entry, Entry] }
+  ])("rejects invalid, cross-session or stale context: %j", async changes => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...context, ...changes }))));
+    await expect(fetchContext(location, { before: null, after: null }, new AbortController().signal)).rejects.toThrow(/context/);
+  });
+
+  it("bounds continuation pages and propagates explicit anchor failures", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ ...context, entries: Array.from({ length: 26 }, (_, index) => ({ ...Entry, id: index + 2 })) })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "The anchor expired." }), { status: 410 }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(fetchContext(location, { before: null, after: 1 }, new AbortController().signal)).rejects.toThrow("invalid surrounding context");
+    await expect(fetchContext(location, { before: null, after: null }, new AbortController().signal)).rejects.toThrow("anchor expired");
+    expect(fetch.mock.calls[0]![0]).toContain("&after=1");
+  });
+
   it("reads input availability while remaining compatible with saved statuses", () => {
     expect(readStatus(Status).canWriteInput).toBe(false);
     expect(readStatus({ ...Status, canWriteInput: true }).canWriteInput).toBe(true);

@@ -1,7 +1,7 @@
 import {
   ApiRoutes, ClearActionHeader, ClearActionValue, CopilotChatActionValue, CopilotClearHistoryActionValue, CopilotConnectActionValue, DeleteSessionActionValue, ImportActionValue, importFormat, MaximumCategorySuggestions, MaximumChatAnswerLength, MaximumChatRequestBytes, MaximumHighlights, MaximumPageSize, PageSize, QueryKeys, RenameActionValue, SaveFiltersActionValue, Severities, Streams, UploadContentType, validateImportFile,
   InputActionValue, MaximumInputLength, SelectApplicationActionValue, type RunningApplication, type RunningApplicationProcess, type RunningApplicationsState,
-  type ChatMessage, type ChatOptions, type ChatResponse, type CopilotConnection, type ClearResult, type LogEntry, type LogPage, type SessionFilters, type SessionInfo, type ViewerStatus
+  type ChatMessage, type ChatOptions, type ChatResponse, type CopilotConnection, type ClearResult, type ContextPage, type EntryLocation, type PageCursor, type LogEntry, type LogPage, type SessionFilters, type SessionInfo, type ViewerStatus
 } from "./model";
 import { readPreferences, type PreferencesChanges } from "./preferences";
 import { boolean, count, nullableText, object, text, timestamp } from "./apiValues";
@@ -190,6 +190,7 @@ export function readPage(value: unknown, requestedPageSize = PageSize): LogPage 
   if (!Array.isArray(data.highlightTerms) || data.highlightTerms.length > MaximumHighlights)
     throw new Error("The server returned invalid highlight terms.");
   return {
+    ...(data.sessionId === undefined ? {} : { sessionId: text(data.sessionId, "session ID") }),
     entries: data.entries.map(readEntry),
     status: readStatus(data.status),
     matchCount: count(data.matchCount, "match count"),
@@ -211,6 +212,33 @@ export async function fetchPage(parameters: URLSearchParams, signal: AbortSignal
     throw new ApiError(text(data.error, "query error"), response.status);
   }
   return readPage(value, Number(parameters.get(QueryKeys.PageSize) ?? PageSize));
+}
+
+export async function fetchContext(location: EntryLocation, cursor: PageCursor, signal: AbortSignal): Promise<ContextPage> {
+  const parameters = new URLSearchParams({ sessionId: location.sessionId, entryId: String(location.entryId) });
+  if (cursor.before !== null) parameters.set("before", String(cursor.before));
+  if (cursor.after !== null) parameters.set("after", String(cursor.after));
+  const response = await fetch(`${ApiRoutes.Context}?${parameters}`, { signal });
+  const data = object(await response.json());
+  if (!response.ok) throw new ApiError(text(data.error, "context error"), response.status);
+  const sessionId = text(data.sessionId, "context session ID");
+  const anchorId = count(data.anchorId, "anchor ID");
+  const limit = cursor.before === null && cursor.after === null ? 51 : 25;
+  if (sessionId !== location.sessionId || anchorId !== location.entryId || data.filtersBypassed !== true ||
+      !Array.isArray(data.entries) || data.entries.length > limit)
+    throw new Error("The server returned invalid surrounding context.");
+  const entries = data.entries.map(readEntry);
+  const before = data.before === null ? null : count(data.before, "context before cursor");
+  const after = data.after === null ? null : count(data.after, "context after cursor");
+  const status = readStatus(data.status);
+  if (entries.some((entry, index) => entry.id < status.firstId || entry.id > status.lastId ||
+      entry.id <= status.clearedThroughId || (index > 0 && entry.id <= entries[index - 1]!.id) ||
+      (cursor.before !== null && entry.id >= cursor.before) || (cursor.after !== null && entry.id <= cursor.after)) ||
+      anchorId < status.firstId || anchorId > status.lastId || anchorId <= status.clearedThroughId ||
+      (limit === 51 && !entries.some(entry => entry.id === anchorId)) ||
+      (before !== null && before !== entries[0]?.id) || (after !== null && after !== entries.at(-1)?.id))
+    throw new Error("The server returned stale or invalid surrounding context.");
+  return { sessionId, anchorId, entries, before, after, status, filtersBypassed: true };
 }
 
 export async function clearSessionLogs(sessionId = ""): Promise<ClearResult> {
