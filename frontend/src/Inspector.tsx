@@ -35,7 +35,7 @@ function formatMessage(message: string): string | null {
   return result;
 }
 
-export function Inspector({ entry, entries, status, onSelect, onClose, onCondition, onDraft, onNotice }: {
+export function Inspector({ entry, entries, status, onSelect, onClose, onCondition, onDraft, onNotice, onSurrounding }: {
   entry: LogEntry | null;
   entries: LogEntry[];
   status: ViewerStatus | null;
@@ -44,6 +44,7 @@ export function Inspector({ entry, entries, status, onSelect, onClose, onConditi
   onCondition(condition: LogCondition): void;
   onDraft(condition: LogCondition): void;
   onNotice(notice: Notice): void;
+  onSurrounding?(): void;
 }) {
   const [formatJson, setFormatJson] = useState(false);
   const formatted = useMemo(() => entry ? formatMessage(entry.message) : null, [entry?.message]);
@@ -89,6 +90,7 @@ export function Inspector({ entry, entries, status, onSelect, onClose, onConditi
             <Oui.Button variant="outline" size="icon" aria-label="Next entry" disabled={!next} onClick={() => { if (next) onSelect(next); }}><ArrowDown size={14} /></Oui.Button>
           </div>
           <div className="entry-title"><Oui.Badge variant="outline" className={`severity-badge ${entry.severity}`}>{SeverityLabels[entry.severity]}</Oui.Badge><span>Entry #{entry.id}</span></div>
+          {onSurrounding && <Oui.Button variant="outline" size="sm" onClick={onSurrounding}>Show surrounding entries</Oui.Button>}
           <dl className="metadata">
             <dt>Sequence</dt><dd id="detailId">{entry.id}</dd>
             <dt>Captured (UTC)</dt><dd id="detailTime">{entry.timestamp.replace("T", "\n").replace(/(?:\+00:00|Z)$/, " UTC")}</dd>

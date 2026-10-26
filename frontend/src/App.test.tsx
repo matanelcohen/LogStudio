@@ -4,11 +4,12 @@ import { fileURLToPath } from "node:url";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { Entry, fixturePage, Status } from "./test-fixtures";
+import { Entry, fixtureAnalytics, fixturePage, Status } from "./test-fixtures";
 import { useLiveStatus, useLogPage } from "./useLogExplorer";
 import { DefaultTypography, LogFonts, TypographyStorageKey, UiFonts } from "./useTypography";
 import { AppearanceOptions, ColorThemes } from "./themes";
 import * as api from "./api";
+import * as analyticsApi from "./analytics-api";
 import { defaultQuery, sessionFilters, type ChatResponse, type LogEntry, type RunningApplicationsState } from "./model";
 import { DefaultPreferences, mergePreferences } from "./preferences";
 
@@ -46,6 +47,100 @@ vi.mock("./useLogExplorer", async () => {
 });
 
 describe("log-first workspace", () => {
+  it.each([false, true])("restores a paged investigation without changing its follow or pause state (paused=%s)", async paused => {
+    const anchor = { ...Entry, id: 1000, message: "isolated failure" };
+    const page = { ...fixturePage(anchor), olderCount: 999 };
+    vi.mocked(useLogPage).mockReturnValue({ page, loading: false, error: null, refresh: vi.fn() });
+    const fetchContext = vi.spyOn(api, "fetchContext").mockResolvedValue({
+      sessionId: page.sessionId!, anchorId: anchor.id, entries: [{ ...Entry, id: 999, message: "preceding event" }, anchor],
+      before: 999, after: 1000, status: Status, filtersBypassed: true
+    });
+    try {
+      render(<App />);
+      fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "id:1000" } });
+      fireEvent.click(screen.getByRole("button", { name: "Older" }));
+      if (paused) fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      fireEvent.click(screen.getByRole("row", { name: /isolated failure/ }));
+      const original = vi.mocked(useLogPage).mock.lastCall!.slice(0, 5);
+      const opener = screen.getByRole("button", { name: "Show surrounding entries" });
+      opener.focus();
+      fireEvent.click(opener);
+      await screen.findByText("preceding event");
+      expect(fetchContext).toHaveBeenCalledWith({ sessionId: page.sessionId, entryId: 1000 }, { before: null, after: null }, expect.any(AbortSignal));
+      expect(vi.mocked(useLogPage).mock.lastCall?.[7]).toBe(true);
+      fireEvent.click(screen.getByRole("button", { name: "Return to results" }));
+      expect(vi.mocked(useLogPage).mock.lastCall?.slice(0, 5)).toEqual(original);
+      expect(vi.mocked(useLogPage).mock.lastCall?.[7]).toBe(false);
+      expect((screen.getByLabelText("Search logs") as HTMLInputElement).value).toBe("id:1000");
+      expect(document.getElementById("detailId")?.textContent).toBe("1000");
+      expect(screen.getByRole("button", { name: /Latest/ })).toBeTruthy();
+      expect(screen.getByRole("button", { name: paused ? "Resume" : "Pause" })).toBeTruthy();
+      await waitFor(() => expect(document.activeElement).toBe(opener));
+    } finally {
+      vi.mocked(useLogPage).mockReturnValue({ page: fixturePage(), loading: false, error: null, refresh: vi.fn() });
+    }
+  });
+
+  it("keeps pause and cursor after a clear during context inspection rather than resuming follow", async () => {
+    const page = { ...fixturePage(), olderCount: 1 };
+    vi.mocked(useLogPage).mockReturnValue({ page, loading: false, error: null, refresh: vi.fn() });
+    vi.spyOn(api, "fetchContext").mockResolvedValue({
+      sessionId: page.sessionId!, anchorId: 1, entries: [Entry], before: null, after: 1, status: Status, filtersBypassed: true
+    });
+    try {
+      const view = render(<App />);
+      fireEvent.click(screen.getByRole("button", { name: "Older" }));
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      fireEvent.click(screen.getByRole("row", { name: /Hello/ }));
+      const original = vi.mocked(useLogPage).mock.lastCall!.slice(0, 5);
+      fireEvent.click(screen.getByRole("button", { name: "Show surrounding entries" }));
+      await screen.findByRole("table", { name: "Surrounding logs" });
+      vi.mocked(useLiveStatus).mockReturnValue({
+        status: { ...Status, clearedThroughId: 20000, retainedCount: 0, firstId: 0, revision: 20002 },
+        connection: "paused", error: null, gap: null, reconnect, applyStatus: vi.fn()
+      });
+      view.rerender(<App />);
+      fireEvent.click(screen.getByRole("button", { name: "Return to results" }));
+      expect(vi.mocked(useLogPage).mock.lastCall?.slice(0, 3)).toEqual(original.slice(0, 3));
+      expect(vi.mocked(useLogPage).mock.lastCall?.[4]).toBe(true);
+      expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: /Latest/ })).toBeTruthy();
+      expect(screen.queryByText("Entry #1")).toBeNull();
+    } finally {
+      vi.mocked(useLiveStatus).mockReturnValue({ status: Status, connection: "live", error: null, gap: null, reconnect, applyStatus: vi.fn() });
+      vi.mocked(useLogPage).mockReturnValue({ page: fixturePage(), loading: false, error: null, refresh: vi.fn() });
+    }
+  });
+
+  it.each(["Saved", "Imported"])("pins duplicate entry IDs to the selected %s session after a session change", async name => {
+    const id = "22222222222222222222222222222222";
+    vi.mocked(api.fetchSessions).mockResolvedValue([{
+      id, name, startedAt: Status.startedAt, completedAt: Status.completedAt, exitCode: 0, entryCount: 1,
+      command: null, arguments: [], workingDirectory: "", isCurrent: false
+    }]);
+    vi.mocked(useLogPage).mockImplementation(query => ({
+      page: { ...fixturePage(), sessionId: query.sessionId || fixturePage().sessionId }, loading: false, error: null, refresh: vi.fn()
+    }));
+    const fetchContext = vi.spyOn(api, "fetchContext").mockResolvedValue({
+      sessionId: id, anchorId: 1, entries: [Entry], before: null, after: null, status: Status, filtersBypassed: true
+    });
+    try {
+      render(<App />);
+      fireEvent.click(screen.getByRole("row", { name: /Hello/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+      fireEvent.click(await screen.findByRole("button", { name: "View session" }));
+      expect(screen.queryByText("Entry #1")).toBeNull();
+      fireEvent.click(screen.getByRole("row", { name: /Hello/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Show surrounding entries" }));
+      await screen.findByRole("table", { name: "Surrounding logs" });
+      expect(fetchContext).toHaveBeenCalledWith({ sessionId: id, entryId: 1 }, { before: null, after: null }, expect.any(AbortSignal));
+      fireEvent.click(screen.getByRole("button", { name: "Return to results" }));
+      expect(vi.mocked(useLogPage).mock.lastCall?.[0].sessionId).toBe(id);
+    } finally {
+      vi.mocked(useLogPage).mockReturnValue({ page: fixturePage(), loading: false, error: null, refresh: vi.fn() });
+    }
+  });
+
   it("persists named searches across viewer reloads and applies filters without adopting another session or page size", async () => {
     const first = render(<App />);
     fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "timeout" } });
@@ -509,7 +604,7 @@ describe("log-first workspace", () => {
       rerender(<App />);
       expect(screen.getByRole("button", { name: "Pause" })).toBeDefined();
       expect((screen.getByLabelText("Search logs") as HTMLInputElement).value).toBe("");
-      expect(vi.mocked(useLogPage).mock.calls.at(-1)?.slice(2)).toEqual([
+      expect(vi.mocked(useLogPage).mock.calls.at(-1)?.slice(2, 7)).toEqual([
         null, first.revision + 1, false, 0, "/private/temp/another-app"
       ]);
       fireEvent.click(screen.getByRole("button", { name: "Pause" }));
@@ -660,13 +755,13 @@ describe("log-first workspace", () => {
     expect(screen.getByRole("button", { name: "Close Copilot chat" }).hasAttribute("disabled")).toBe(false);
   });
 
-  it("exposes only logs and sessions without requesting telemetry", () => {
+  it("exposes log analytics and sessions without requesting telemetry or loading analytics by default", () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
     render(<App />);
     const navigation = screen.getByRole("navigation", { name: "Workspace applications" });
     expect(within(navigation).getAllByRole("button").map(button => button.getAttribute("aria-label")))
-      .toEqual(["Discover logs", "Browse sessions"]);
+      .toEqual(["Discover logs", "Trends", "Graphs", "Browse sessions"]);
     expect(screen.queryByRole("button", { name: "Metrics" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Traces" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Configure sources" })).toBeNull();
@@ -678,6 +773,57 @@ describe("log-first workspace", () => {
     expect(screen.queryByRole("searchbox", { name: "Search metrics" })).toBeNull();
     expect(screen.queryByRole("searchbox", { name: "Search traces" })).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
+  });
+  it("opens Trends and Graphs with shared filters and pause bounds while keeping Discover as the default", async () => {
+    const analytics = vi.spyOn(analyticsApi, "fetchAnalytics").mockResolvedValue(fixtureAnalytics());
+    render(<App />);
+    expect(analytics).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "timeout" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    fireEvent.click(screen.getByRole("button", { name: "Trends" }));
+    expect(await screen.findByLabelText("Filtered session summary")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Trends" }).getAttribute("aria-current")).toBe("page");
+    const parameters = analytics.mock.calls.at(-1)![0];
+    expect(parameters.get("q")).toBe("timeout");
+    expect(parameters.get("maxId")).toBe("20000");
+    expect(parameters.has("pageSize")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Create graph" }));
+    expect(screen.getByRole("heading", { name: "Graphs" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Discover logs" }));
+    expect(screen.getByRole("main", { name: "Log exploration workspace" })).toBeTruthy();
+    expect((screen.getByLabelText("Search logs") as HTMLInputElement).value).toBe("timeout");
+  });
+  it("saves graph definitions and filters in app settings and restores them after viewer reload", async () => {
+    vi.spyOn(analyticsApi, "fetchAnalytics").mockResolvedValue(fixtureAnalytics());
+    const first = render(<App />);
+    await waitFor(() => expect(api.appSettings).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "saved graph filter" } });
+    fireEvent.click(screen.getByRole("button", { name: "Graphs" }));
+    fireEvent.change(screen.getByLabelText("Graph name"), { target: { value: "My volume graph" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save graph" }));
+    await waitFor(() => expect(savedPreferences.savedGraphs).toEqual([{
+      graph: { name: "My volume graph", groupBy: "time", measure: "count", chartType: "line" },
+      filters: sessionFilters({ ...defaultQuery(), search: "saved graph filter" })
+    }]));
+    first.unmount();
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Graphs" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open graph My volume graph" }));
+    expect((screen.getByLabelText("Graph name") as HTMLInputElement).value).toBe("My volume graph");
+    expect((screen.getByLabelText("Search logs") as HTMLInputElement).value).toBe("saved graph filter");
+    expect(vi.mocked(useLogPage).mock.lastCall?.[0].sessionId).toBe("");
+  });
+  it("waits for graph settings to restore before allowing a new save to replace the library", async () => {
+    vi.spyOn(analyticsApi, "fetchAnalytics").mockResolvedValue(fixtureAnalytics());
+    let restore!: (result: Awaited<ReturnType<typeof api.appSettings>>) => void;
+    vi.mocked(api.appSettings).mockImplementationOnce(() => new Promise(resolve => { restore = resolve; }));
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Graphs" }));
+    expect((screen.getByRole("button", { name: "Save graph" }) as HTMLButtonElement).disabled).toBe(true);
+    const existing = { graph: { name: "Existing graph", groupBy: "time" as const, measure: "count" as const, chartType: "line" as const }, filters: sessionFilters(defaultQuery()) };
+    await act(async () => restore({ preferences: { ...DefaultPreferences, savedGraphs: [existing] }, hasPreferences: true }));
+    expect(await screen.findByRole("button", { name: "Open graph Existing graph" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Save graph" }) as HTMLButtonElement).disabled).toBe(false);
   });
   it("keeps the summary, field browser, timeline, and empty inspector out of the default layout", () => {
     const { container } = render(<App />);
@@ -771,6 +917,56 @@ describe("log-first workspace", () => {
       } : matchMedia(query));
       return (value: boolean) => act(() => { compact = value; listeners.forEach(listener => listener()); });
     }
+
+    it("keeps analytics navigation and the shared Copilot panel working with compact actions", async () => {
+      compactViewport();
+      vi.spyOn(analyticsApi, "fetchAnalytics").mockResolvedValue(fixtureAnalytics());
+      vi.spyOn(api, "connectCopilot").mockResolvedValue({ version: "test CLI", models: [] });
+      render(<App />);
+      fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "alpha" } });
+      fireEvent.click(screen.getByRole("row", { name: /Hello/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Session actions" }));
+      fireEvent.click(screen.getByRole("button", { name: "Ask Copilot" }));
+      const chat = screen.getByRole("complementary", { name: "Ask Copilot about logs" });
+      fireEvent.change(screen.getByLabelText("Message Copilot"), { target: { value: "Investigation draft" } });
+
+      for (const name of ["Trends", "Graphs"]) {
+        fireEvent.click(screen.getByRole("button", { name }));
+        const workspace = screen.getByRole("main", { name: `${name} workspace` });
+        expect(workspace.contains(chat)).toBe(true);
+        expect(workspace.firstElementChild?.classList.contains("analytics-workspace")).toBe(true);
+        expect(screen.getByRole("complementary", { name: "Ask Copilot about logs" })).toBe(chat);
+        expect((screen.getByLabelText("Search logs") as HTMLInputElement).value).toBe("alpha");
+        await screen.findByLabelText("Filtered session summary");
+      }
+
+      fireEvent.click(screen.getByRole("button", { name: "Discover logs" }));
+      expect(screen.getByRole("row", { name: /Hello/ }).getAttribute("aria-selected")).toBe("true");
+      expect(chat.previousElementSibling?.classList.contains("workspace")).toBe(true);
+      expect((screen.getByLabelText("Message Copilot") as HTMLTextAreaElement).value).toBe("Investigation draft");
+    });
+
+    it("opens surrounding entries from a compact investigation and restores its selection and focus", async () => {
+      compactViewport();
+      const page = fixturePage();
+      const fetchContext = vi.spyOn(api, "fetchContext").mockResolvedValue({
+        sessionId: page.sessionId!, anchorId: Entry.id, entries: [Entry],
+        before: null, after: null, status: Status, filtersBypassed: true
+      });
+      render(<App />);
+      fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "alpha" } });
+      fireEvent.keyDown(screen.getByRole("row", { name: /Hello/ }), { key: "Enter" });
+      const opener = screen.getByRole("button", { name: "Show surrounding entries" });
+      opener.focus();
+      fireEvent.click(opener);
+      await screen.findByRole("table", { name: "Surrounding logs" });
+      expect(fetchContext).toHaveBeenCalledWith({ sessionId: page.sessionId, entryId: Entry.id },
+        { before: null, after: null }, expect.any(AbortSignal));
+      fireEvent.click(screen.getByRole("button", { name: "Return to results" }));
+      await waitFor(() => expect(document.activeElement).toBe(opener));
+      expect(screen.getByRole("row", { name: /Hello/ }).getAttribute("aria-selected")).toBe("true");
+      expect((screen.getByLabelText("Search logs") as HTMLInputElement).value).toBe("alpha");
+    });
 
     it("keeps session identity, pause, import, settings and export reachable with focus restoration", async () => {
       compactViewport();

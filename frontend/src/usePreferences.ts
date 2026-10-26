@@ -77,7 +77,7 @@ export function usePreferences() {
   }, [flush]);
 
   return {
-    settings, saved, error, update,
+    settings, saved, error, update, ready: loaded.current,
     retry: () => { if (loaded.current) void flush(); else setAttempt(value => value + 1); }
   };
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchPage, readStatus } from "./api";
 import {
   ApiRoutes, buildQueryParameters, errorMessage, LiveStatusEvent, QueryDelayMs,
@@ -76,13 +76,15 @@ export function useLiveStatus(paused: boolean) {
   return { status, connection, error, gap, reconnect, applyStatus };
 }
 
-export function useLogPage(query: QueryState, cursor: PageCursor, maximumId: number | null, revision: number, paused: boolean, clearedThroughId = 0, historyDirectory = "") {
+export function useLogPage(query: QueryState, cursor: PageCursor, maximumId: number | null, revision: number, paused: boolean, clearedThroughId = 0, historyDirectory = "", suspended = false) {
   const key = JSON.stringify({ query, cursor, maximumId, clearedThroughId, historyDirectory });
+  const snapshotTime = useMemo(() => maximumId === null ? null : Date.now(), [maximumId, historyDirectory]);
   const [response, setResponse] = useState<{ key: string; historyDirectory: string; page: LogPage | null; error: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
   const refreshRef = useRef<() => void>(() => undefined);
   useEffect(() => {
+    if (suspended) { setLoading(false); return; }
     let active = true;
     let inFlight = false;
     let requested = false;
@@ -97,7 +99,7 @@ export function useLogPage(query: QueryState, cursor: PageCursor, maximumId: num
       controller = new AbortController();
       setLoading(true);
       try {
-        const result = await fetchPage(buildQueryParameters(query, cursor, maximumId), controller.signal);
+        const result = await fetchPage(buildQueryParameters(query, cursor, maximumId, snapshotTime ?? Date.now()), controller.signal);
         if (!active) return;
         if (historyDirectory && result.status.historyDirectory !== historyDirectory) throw new Error("The selected application changed. Refresh the current history.");
         if (result.status.clearedThroughId < clearedThroughId) throw new Error("Session history changed during the request. Refresh the current history.");
@@ -127,19 +129,19 @@ export function useLogPage(query: QueryState, cursor: PageCursor, maximumId: num
       controller?.abort();
       refreshRef.current = () => undefined;
     };
-  }, [key, retry]);
+  }, [key, retry, suspended, snapshotTime]);
 
   useEffect(() => refreshRef.current(), [revision]);
   useEffect(() => {
-    if (paused || query.timeWindow === 0) return;
+    if (suspended || paused || query.timeWindow === 0) return;
     const timer = setInterval(() => refreshRef.current(), 1000);
     return () => clearInterval(timer);
-  }, [paused, query.timeWindow]);
+  }, [paused, query.timeWindow, suspended]);
   useEffect(() => {
-    if (!query.sessionId) return;
+    if (suspended || !query.sessionId) return;
     const timer = setInterval(() => refreshRef.current(), 2000);
     return () => clearInterval(timer);
-  }, [query.sessionId]);
+  }, [query.sessionId, suspended]);
   const refresh = useCallback(() => setRetry(value => value + 1), []);
   const current = response?.key === key ? response : null;
   const previous = !current && historyDirectory && response?.historyDirectory && response.historyDirectory !== historyDirectory ? response.page : null;

@@ -1,6 +1,6 @@
 import * as Oui from "@opensearch-project/oui";
 
-import { AlertCircle, ChevronDown, ChevronRight, Clock3, Compass, Database, FileUp, HardDrive, History, Logs, MessageSquare, Monitor, Moon, Pause, Play, Settings, Sun, X } from "lucide-react";
+import { AlertCircle, ChartNoAxesCombined, ChevronDown, ChevronRight, Clock3, Compass, Database, FileUp, HardDrive, History, Logs, MessageSquare, Monitor, Moon, Pause, Play, Settings, Sun, TrendingUp, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { ConditionDialog } from "./ConditionDialog";
 import { ClearHistoryDialog } from "./ClearHistoryDialog";
@@ -13,10 +13,11 @@ import { TerminalInput } from "./TerminalInput";
 import { DiscoverSidebar } from "./DiscoverSidebar";
 import { clearSessionLogs, fetchApplications, selectApplication } from "./api";
 import { Inspector } from "./Inspector";
+import { SurroundingEntries } from "./SurroundingEntries";
 import { LogTable } from "./LogTable";
 import {
   defaultQuery, errorMessage, NumberFormatter, readChoice, TimeFormatter, validateConditions,
-  type LogCondition, type LogEntry, type Notice, type PageCursor, type QueryState, type RunningApplication, type RunningApplicationsState, type SessionInfo, type ViewerStatus
+  type EntryLocation, type LogCondition, type LogEntry, type Notice, type PageCursor, type QueryState, type RunningApplication, type RunningApplicationsState, type SessionInfo, type ViewerStatus
 } from "./model";
 import { QueryBar } from "./QueryBar";
 import { Hint, ResponsiveActions } from "./ui";
@@ -28,15 +29,21 @@ import { useSessionFilters } from "./useSessionFilters";
 import { useAppUpdate } from "./useAppUpdate";
 import { usePreferences } from "./usePreferences";
 import { DefaultTypography, type ExplorerPreferences } from "./preferences";
+import { AnalyticsWorkspace, type AnalyticsView } from "./AnalyticsWorkspace";
+import "./analytics.css";
 
 interface PauseSnapshot { maximumId: number; status: ViewerStatus | null; }
 
 export default function App() {
+  const [view, setView] = useState<"discover" | AnalyticsView>("discover");
   const [query, setQuery] = useState<QueryState>(defaultQuery);
   const [cursor, setCursor] = useState<PageCursor>({ before: null, after: null });
   const [pause, setPause] = useState<PauseSnapshot | null>(null);
   const [follow, setFollow] = useState(true);
   const [selected, setSelected] = useState<LogEntry | null>(null);
+  const selectionSession = useRef("");
+  const [context, setContext] = useState<(EntryLocation & { historyDirectory: string }) | null>(null);
+  const contextOpener = useRef<HTMLElement | null>(null);
   const [editor, setEditor] = useState<{ open: boolean; seed: LogCondition | null }>({ open: false, seed: null });
   const [notice, setNotice] = useState<Notice | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
@@ -77,7 +84,7 @@ export default function App() {
   const archived = !!query.sessionId;
   const historyDirectory = live.status?.listenAll ? live.status.historyDirectory : "";
   const clearedThroughId = archived ? 0 : live.status?.clearedThroughId ?? 0;
-  const history = useLogPage(query, cursor, archived ? null : pause?.maximumId ?? null, archived ? 0 : live.status?.revision ?? 0, archived || pause !== null, clearedThroughId, archived ? "" : historyDirectory);
+  const history = useLogPage(query, cursor, archived ? null : pause?.maximumId ?? null, archived ? 0 : live.status?.revision ?? 0, archived || pause !== null, clearedThroughId, archived ? "" : historyDirectory, context !== null);
   const status = archived ? history.page?.status ?? null : pause?.status && pause.status.clearedThroughId >= clearedThroughId && (!historyDirectory || pause.status.historyDirectory === historyDirectory) ?
     { ...pause.status, applicationName: live.status?.applicationName ?? pause.status.applicationName } :
     live.status ?? history.page?.status ?? null;
@@ -100,25 +107,27 @@ export default function App() {
     if (!previous || previous === historyDirectory || archived) return;
     seenClear.current = clearedThroughId;
     setQuery(query => ({ ...defaultQuery(), pageSize: query.pageSize }));
-    setCursor({ before: null, after: null }); setSelected(null); setPause(null); setFollow(true);
+    setCursor({ before: null, after: null }); setSelected(null); setPause(null); setFollow(context === null);
     setChatOpen(false); setClearOpen(false); setNotice(null);
   }, [historyDirectory, archived]);
   useEffect(() => {
     if (clearedThroughId <= seenClear.current) return;
     seenClear.current = clearedThroughId;
     setSelected(null);
+    if (context) return;
     setPause(null);
     setFollow(true);
     setCursor({ before: null, after: null });
     setQuery(query => ({ ...query, dismissedThrough: 0 }));
   }, [clearedThroughId]);
   useEffect(() => {
-    if (cursor.after === null || !history.page || history.loading) return;
+    if (context || cursor.after === null || !history.page || history.loading) return;
     const lastId = history.page.entries.at(-1)?.id ?? cursor.after;
     setCursor({ before: lastId + 1, after: null });
-  }, [cursor, history.page, history.loading]);
+  }, [cursor, history.page, history.loading, context]);
   useEffect(() => {
     function shortcut(event: KeyboardEvent) {
+      if (context) return;
       const target = event.target;
       const editing = target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable);
       if (((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") || (event.key === "/" && !editing)) {
@@ -134,7 +143,7 @@ export default function App() {
     }
     document.addEventListener("keydown", shortcut);
     return () => document.removeEventListener("keydown", shortcut);
-  }, [query]);
+  }, [query, context]);
 
   function changeQuery(query: QueryState, forceFilters = false) {
     setQuery(query);
@@ -144,6 +153,7 @@ export default function App() {
   }
 
   function selectSession(session: SessionInfo) {
+    setContext(null);
     setQuery({ ...defaultQuery(), ...filters.restore(session), pageSize: query.pageSize, sessionId: session.isCurrent ? "" : session.id });
     setCursor({ before: null, after: null }); setSelected(null); setPause(null); setFollow(true);
     setSessionsOpen(false); setImportOpen(false); setNotice(null);
@@ -184,6 +194,20 @@ export default function App() {
   }
 
   const activePage = history.page;
+  function selectEntry(entry: LogEntry) {
+    selectionSession.current = activePage?.sessionId ?? query.sessionId;
+    setSelected(entry);
+  }
+
+  function showSurrounding() {
+    if (!visibleSelection) return;
+    if (!selectionSession.current) {
+      setNotice({ tone: "danger", message: "The selected entry's session is unavailable. Refresh the results and select it again." });
+      return;
+    }
+    contextOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setContext({ sessionId: selectionSession.current, entryId: visibleSelection.id, historyDirectory: status?.historyDirectory ?? "" });
+  }
   const switchingHistory = !archived && !!historyDirectory && !!activePage && activePage.status.historyDirectory !== historyDirectory;
   const connectionLabel = live.connection === "live" ? "Connected" : live.connection === "paused" ? "Paused" :
     live.connection === "reconnecting" ? "Reconnecting" : live.connection === "failed" ? "Disconnected" : "Connecting";
@@ -202,11 +226,13 @@ export default function App() {
   return (
     <Oui.TooltipProvider delayDuration={400}>
       <div className="discover-shell">
-        <a className="skip-link" href="#workspace">Skip to log results</a>
+        <a className="skip-link" href="#workspace">Skip to {view === "discover" ? "log results" : view}</a>
         <nav className="discover-rail" aria-label="Workspace applications">
           <div className="rail-brand" aria-hidden="true"><span className="rail-brand-icon"><Logs size={21} /></span><span className="rail-wordmark">Log Studio</span></div>
           <span className="rail-label" aria-hidden="true">Workspace</span>
-          <Oui.Button variant="ghost" size="sm" className="rail-item active" aria-label="Discover logs" aria-current="page" title="Discover logs" onClick={() => searchRef.current?.focus()}><Compass size={20} /><span>Discover</span></Oui.Button>
+          <Oui.Button variant="ghost" size="sm" className={`rail-item${view === "discover" ? " active" : ""}`} aria-label="Discover logs" aria-current={view === "discover" ? "page" : undefined} title="Discover logs" onClick={() => { setView("discover"); searchRef.current?.focus(); }}><Compass size={20} /><span>Discover</span></Oui.Button>
+          <Oui.Button variant="ghost" size="sm" className={`rail-item${view === "trends" ? " active" : ""}`} aria-label="Trends" aria-current={view === "trends" ? "page" : undefined} title="Trends" onClick={() => setView("trends")}><TrendingUp size={20} /><span>Trends</span></Oui.Button>
+          <Oui.Button variant="ghost" size="sm" className={`rail-item${view === "graphs" ? " active" : ""}`} aria-label="Graphs" aria-current={view === "graphs" ? "page" : undefined} title="Graphs" onClick={() => setView("graphs")}><ChartNoAxesCombined size={20} /><span>Graphs</span></Oui.Button>
           <Oui.Button variant="ghost" size="sm" className="rail-item" aria-label="Browse sessions" title="Sessions" onClick={() => setSessionsOpen(true)}><History size={20} /><span>Sessions</span></Oui.Button>
           <div className="rail-footer"><Monitor size={17} aria-hidden="true" /><div><strong>On this device</strong><span>Local workspace</span></div></div>
         </nav>
@@ -266,7 +292,10 @@ export default function App() {
         </header>
         <div className="query-region">
           <div className="workspace-heading">
-            <div><span className="workspace-kicker">LOG EXPLORER</span><h2>Discover</h2><p>Search, filter, and inspect your session history.</p></div>
+            <div><span className="workspace-kicker">{view === "discover" ? "LOG EXPLORER" : "SESSION ANALYTICS"}</span>
+              <h2>{view === "discover" ? "Discover" : view === "trends" ? "Trends" : "Graphs"}</h2>
+              <p>{view === "discover" ? "Search, filter, and inspect your session history." : view === "trends" ?
+                "Spot patterns across your logs and turn observations into insights." : "Build, save, and explore graphs from your session data."}</p></div>
           </div>
           {live.status?.listenAll && !archived && <RunningApplicationPicker onListening={setApplicationListening} onAttached={() => {
             // The first attachment reuses the waiting history; later switches reset through the live status.
@@ -289,7 +318,12 @@ export default function App() {
             {live.error ? <Oui.Button variant="outline" size="sm" onClick={live.reconnect}>Reconnect</Oui.Button> : <Oui.Button variant="ghost" size="icon" className="icon-button" aria-label="Dismiss notification" onClick={() => setNotice(null)}><X size={14} /></Oui.Button>}
           </Oui.Alert>}
         </div>
-        <main id="workspace" className="workspace-region" tabIndex={-1} aria-label="Log exploration workspace">
+        <main id="workspace" className={`workspace-region${view !== "discover" ? " analytics-region" : ""}`} tabIndex={-1} aria-label={view === "discover" ? "Log exploration workspace" : `${view === "trends" ? "Trends" : "Graphs"} workspace`}>
+          {view !== "discover" ? <AnalyticsWorkspace key={`${query.sessionId}:${historyDirectory}:${clearedThroughId}`}
+            view={view} onView={setView} query={query} onQuery={changeQuery}
+            maximumId={archived ? null : pause?.maximumId ?? null} paused={!archived && pause !== null}
+            historyDirectory={archived ? "" : historyDirectory} clearedThroughId={clearedThroughId}
+            savedGraphs={preferences.settings.savedGraphs} onSaveGraphs={savedGraphs => preferences.update({ savedGraphs })} saved={preferences.saved} graphsReady={preferences.ready} /> :
           <Oui.Card className="workspace" data-inspector={inspector} data-fields={fields} aria-busy={switchingHistory}>
           {switchingHistory && <div className="history-switch-status" role="status">Loading selected application history…</div>}
           <div className="workspace-layout" inert={switchingHistory}>
@@ -300,7 +334,7 @@ export default function App() {
             onSeverity={levels => changeQuery({ ...query, levels, severity: "all" })}
             onPageSize={pageSize => changeQuery({ ...query, pageSize })}
             onClearSession={() => { setClearError(null); setClearOpen(true); }} clearing={clearing} clearButtonRef={clearOpener}
-            onSelect={entry => { setSelected(entry); setInspector(true); }}
+            onSelect={entry => { selectEntry(entry); setInspector(true); }}
             onOlder={() => { const first = activePage?.entries[0]; if (first) { setFollow(false); setCursor({ before: first.id, after: null }); } }}
             onNewer={() => { const last = activePage?.entries.at(-1); if (last) { setFollow(false); setCursor({ before: null, after: last.id }); } }}
             onLive={() => { setFollow(true); setCursor({ before: null, after: null }); }}
@@ -309,10 +343,10 @@ export default function App() {
             onClear={() => { changeQuery({ ...query, dismissedThrough: status?.lastId ?? 0 }); setSelected(null); setNotice({ tone: "info", message: "Existing entries are hidden in this tab only. Reset restores disk history." }); }}
             onRetry={history.refresh} onInspector={() => setInspector(!inspector)} />
           {fields && <DiscoverSidebar page={activePage} onFilter={openEditor} />}
-          {inspector && <Inspector entry={visibleSelection} entries={activePage?.entries ?? []} status={status} onSelect={setSelected} onClose={() => setInspector(false)}
-            onCondition={addCondition} onDraft={openEditor} onNotice={setNotice} />}
+          {inspector && <Inspector entry={visibleSelection} entries={activePage?.entries ?? []} status={status} onSelect={selectEntry} onClose={() => setInspector(false)}
+            onCondition={addCondition} onDraft={openEditor} onNotice={setNotice} onSurrounding={showSurrounding} />}
           </div>
-          </Oui.Card>
+          </Oui.Card>}
           {chatOpen && <CopilotChatPanel key={query.sessionId} status={status} sessionId={query.sessionId}
             onClose={() => setChatOpen(false)} returnFocus={() => returnToSessionAction(chatOpener.current)} />}
         </main>
@@ -361,6 +395,13 @@ export default function App() {
             if (savedSearchesOpener.current?.isConnected) savedSearchesOpener.current.focus();
             else (queryActionsOpener.current ?? searchRef.current)?.focus();
           }} />
+        {context && <SurroundingEntries location={context}
+          unavailable={!archived && historyDirectory && context.historyDirectory !== historyDirectory ?
+            "The active application changed. This context has not been replaced with another session's entries. Return to results to inspect the selected application." : null}
+          onClose={() => setContext(null)} returnFocus={() => {
+            if (contextOpener.current?.isConnected) contextOpener.current.focus();
+            else searchRef.current?.focus();
+          }} />}
       </div>
       </div>
     </Oui.TooltipProvider>

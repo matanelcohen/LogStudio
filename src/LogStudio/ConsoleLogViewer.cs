@@ -19,6 +19,7 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
     private readonly List<CapturingTextWriter> writers = new();
     private readonly ViewerSettings settings;
     private readonly LogChangeSignal changes = new();
+    private readonly SessionCatalogMutations sessionMutations = new();
     private readonly Dictionary<string, ViewerSession> applicationSessions = new(StringComparer.Ordinal);
     private readonly List<ViewerSession> histories = new();
     private ViewerSession currentSession;
@@ -217,7 +218,7 @@ public sealed class ConsoleLogViewer : IDisposable, IAsyncDisposable
     private ViewerSession CreateSession(string name)
     {
         LogBuffer logs = new(this.settings with { ApplicationName = name }, this.changes);
-        SessionCatalog catalog = new(this.settings);
+        SessionCatalog catalog = new(this.settings, this.sessionMutations);
         ViewerSession session = new(logs, catalog, () => this.ClearCore(logs), value => this.RenameCore(logs, catalog, value));
         try
         {
