@@ -182,6 +182,7 @@ export default function App() {
   }
 
   const activePage = history.page;
+  const switchingHistory = !archived && !!historyDirectory && !!activePage && activePage.status.historyDirectory !== historyDirectory;
   const connectionLabel = live.connection === "live" ? "Connected" : live.connection === "paused" ? "Paused" :
     live.connection === "reconnecting" ? "Reconnecting" : live.connection === "failed" ? "Disconnected" : "Connecting";
   const elapsed = status ? Math.max(0, Math.floor(((status.completedAt ? Date.parse(status.completedAt) : now) - Date.parse(status.startedAt)) / 1000)) : 0;
@@ -254,11 +255,12 @@ export default function App() {
             <div><span className="workspace-kicker">LOG EXPLORER</span><h2>Discover</h2><p>Search, filter, and inspect your session history.</p></div>
           </div>
           {live.status?.listenAll && !archived && <RunningApplicationPicker onListening={setApplicationListening} onAttached={() => {
+            // The first attachment reuses the waiting history; later switches reset through the live status.
+            if (applicationListening) return;
             changeQuery({ ...defaultQuery(), pageSize: query.pageSize });
             setCursor({ before: null, after: null }); setSelected(null); setPause(null); setFollow(true); setChatOpen(false);
-            history.refresh(); live.reconnect();
           }} />}
-          <QueryBar query={query} page={activePage} loading={history.loading} error={history.error} searchRef={searchRef}
+          <QueryBar query={query} page={switchingHistory ? null : activePage} loading={history.loading} error={history.error} searchRef={searchRef}
             maximumId={pause?.maximumId ?? null} onChange={changeQuery} onEdit={condition => openEditor(condition ?? null)}
             onReset={() => { changeQuery({ ...defaultQuery(), pageSize: query.pageSize, sessionId: query.sessionId }, true); setNotice(null); }}
             onNotice={message => setNotice({ message, tone: "info" })} />
@@ -274,8 +276,9 @@ export default function App() {
         <main id="workspace" className="workspace-region" tabIndex={-1} aria-label="Log exploration workspace">
           {chatOpen && <CopilotChatPanel key={query.sessionId} status={status} sessionId={query.sessionId}
             onClose={() => setChatOpen(false)} returnFocus={() => chatOpener.current?.focus()} />}
-          <div className="workspace" data-inspector={inspector} data-fields={fields}>
-          <div className="workspace-layout">
+          <div className="workspace" data-inspector={inspector} data-fields={fields} aria-busy={switchingHistory}>
+          {switchingHistory && <div className="history-switch-status" role="status">Loading selected application history…</div>}
+          <div className="workspace-layout" inert={switchingHistory}>
           {fields && <DiscoverSidebar page={activePage} onFilter={openEditor} />}
           <LogTable page={activePage} loading={history.loading} error={history.error} selected={visibleSelection}
             matchCase={query.matchCase} follow={follow} wrap={wrap} pageSize={query.pageSize} typography={typography}

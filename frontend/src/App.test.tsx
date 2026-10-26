@@ -213,6 +213,7 @@ describe("log-first workspace", () => {
       vi.mocked(useLiveStatus).mockReturnValue({
         status: Status, connection: "live", error: null, gap: null, reconnect, applyStatus: vi.fn()
       });
+      vi.mocked(useLogPage).mockReturnValue({ page: fixturePage(), loading: false, error: null, refresh: vi.fn() });
     });
 
     async function openApplications() {
@@ -398,7 +399,48 @@ describe("log-first workspace", () => {
       await screen.findByText("Listening to Example.Api");
       expect(api.selectApplication).toHaveBeenCalledExactlyOnceWith(application);
       expect(screen.getByRole("button", { name: "Pause" })).toBeDefined();
-      expect(reconnect).toHaveBeenCalled();
+      expect(reconnect).not.toHaveBeenCalled();
+    });
+
+    it("waits for the live history switch instead of refreshing and resetting the previous app", async () => {
+      const first = { ...Status, listenAll: true, isCompleted: false };
+      const applyStatus = vi.fn();
+      const refresh = vi.fn();
+      const firstPage = fixturePage();
+      vi.mocked(useLogPage).mockReturnValue({ page: firstPage, loading: false, error: null, refresh });
+      vi.mocked(useLiveStatus).mockReturnValue({
+        status: first, connection: "live", error: null, gap: null, reconnect, applyStatus
+      });
+      const applications = [application, worker];
+      vi.mocked(api.fetchApplications).mockResolvedValueOnce({ applications, selected: application, error: null })
+        .mockResolvedValue({ applications, selected: worker, error: null });
+      vi.spyOn(api, "selectApplication").mockResolvedValue({ applications, selected: worker, error: null });
+      const { rerender } = render(<App />);
+      await screen.findByText("Listening to Example.Api");
+      fireEvent.change(screen.getByLabelText("Search logs"), { target: { value: "Previous app query" } });
+      await chooseApplication("Example.Worker (PID 43)");
+      await screen.findByText("Listening to Example.Worker");
+      expect((screen.getByLabelText("Search logs") as HTMLInputElement).value).toBe("Previous app query");
+      expect(refresh).not.toHaveBeenCalled();
+      expect(reconnect).not.toHaveBeenCalled();
+      vi.mocked(useLiveStatus).mockReturnValue({
+        status: { ...first, historyDirectory: "/private/temp/another-app", revision: first.revision + 1 },
+        connection: "live", error: null, gap: null, reconnect, applyStatus
+      });
+      rerender(<App />);
+      expect((screen.getByLabelText("Search logs") as HTMLInputElement).value).toBe("");
+      expect(document.querySelector(".workspace-layout")?.hasAttribute("inert")).toBe(true);
+      expect(screen.getByText("Loading selected application history…")).toBeDefined();
+      expect(document.querySelector("#rows")?.textContent).toContain(Entry.message);
+      const next = { ...Entry, message: "Worker history" };
+      vi.mocked(useLogPage).mockReturnValue({
+        page: { ...fixturePage(next), status: { ...first, historyDirectory: "/private/temp/another-app" } },
+        loading: false, error: null, refresh
+      });
+      rerender(<App />);
+      expect(document.querySelector(".workspace-layout")?.hasAttribute("inert")).toBe(false);
+      expect(screen.queryByText("Loading selected application history…")).toBeNull();
+      expect(document.querySelector("#rows")?.textContent).toContain(next.message);
     });
 
     it("resets app-local view checkpoints when another tab switches the capture history", async () => {
@@ -427,6 +469,23 @@ describe("log-first workspace", () => {
       });
       rerender(<App />);
       expect(screen.getByRole("button", { name: "Pause" })).toBeDefined();
+    });
+
+    it("keeps saved sessions interactive while a different live app is selected", async () => {
+      vi.mocked(api.fetchSessions).mockResolvedValue([{
+        id: "saved", name: "Saved run", startedAt: Status.startedAt, completedAt: Status.completedAt,
+        exitCode: 0, entryCount: 1, command: "dotnet", arguments: [], workingDirectory: "", isCurrent: false
+      }]);
+      vi.mocked(useLogPage).mockImplementation(query => ({
+        page: { ...fixturePage(), status: { ...Status, historyDirectory: query.sessionId ? "/private/saved" : Status.historyDirectory } },
+        loading: false, error: null, refresh: vi.fn()
+      }));
+      render(<App />);
+      fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+      fireEvent.click(await screen.findByRole("button", { name: "View session" }));
+      expect(document.querySelector(".workspace-layout")?.hasAttribute("inert")).toBe(false);
+      expect(screen.queryByText("Loading selected application history…")).toBeNull();
+      expect(screen.getByRole("table", { name: "Captured logs" })).toBeDefined();
     });
 
     it("does not reset the new app's investigation when the previous app's clear finishes", async () => {

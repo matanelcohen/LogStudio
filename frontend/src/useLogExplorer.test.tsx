@@ -243,7 +243,7 @@ describe("bounded single-page requests", () => {
     expect(hook.result.current.page?.status.clearedThroughId).toBe(20000);
   });
 
-  it("discards the previous app's page and in-flight response when switching histories", async () => {
+  it("keeps the previous app visible while loading another history but discards stale responses", async () => {
     vi.useFakeTimers();
     const resolvers: ((response: Response) => void)[] = [];
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(resolve => resolvers.push(resolve))));
@@ -258,13 +258,52 @@ describe("bounded single-page requests", () => {
     act(() => hook.result.current.refresh());
     await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
     hook.rerender({ directory: otherDirectory });
-    expect(hook.result.current.page).toBeNull();
+    expect(hook.result.current.page?.entries).toEqual([Entry]);
+    expect(hook.result.current.loading).toBe(true);
     await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
     await act(async () => resolvers[1]?.(new Response(JSON.stringify(fixturePage()))));
-    expect(hook.result.current.page).toBeNull();
-    const current = { ...fixturePage(), status: { ...Status, historyDirectory: otherDirectory } };
+    expect(hook.result.current.page?.entries).toEqual([Entry]);
+    expect(hook.result.current.loading).toBe(true);
+    const next = { ...Entry, message: "Another application's logs" };
+    const current = { ...fixturePage(next), status: { ...Status, historyDirectory: otherDirectory } };
     await act(async () => resolvers[2]?.(new Response(JSON.stringify(current))));
     expect(hook.result.current.page?.status.historyDirectory).toBe(otherDirectory);
+    expect(hook.result.current.page?.entries).toEqual([next]);
+    expect(hook.result.current.loading).toBe(false);
+  });
+
+  it("does not restart a page request for equivalent query and cursor objects", async () => {
+    vi.useFakeTimers();
+    const request = vi.fn().mockResolvedValue(new Response(JSON.stringify(fixturePage())));
+    vi.stubGlobal("fetch", request);
+    const hook = renderHook(({ query, cursor }) => useLogPage(query, cursor, null, 1, false), {
+      initialProps: { query: defaultQuery(), cursor: Cursor }
+    });
+    await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+    expect(hook.result.current.loading).toBe(false);
+    hook.rerender({ query: defaultQuery(), cursor: { ...Cursor } });
+    expect(hook.result.current.loading).toBe(false);
+    await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.error).toBeNull();
+  });
+
+  it("shows an app-switch failure instead of leaving the previous app's logs active", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(fixturePage())))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "History unavailable" }), { status: 500 })));
+    const query = defaultQuery();
+    const hook = renderHook(({ directory }) => useLogPage(query, Cursor, null, 1, false, 0, directory), {
+      initialProps: { directory: Status.historyDirectory }
+    });
+    await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+    hook.rerender({ directory: "/private/temp/another-app" });
+    expect(hook.result.current.page?.entries).toEqual([Entry]);
+    await act(() => vi.advanceTimersByTimeAsync(QueryDelayMs));
+    expect(hook.result.current.page).toBeNull();
+    expect(hook.result.current.error).toBe("History unavailable");
+    expect(hook.result.current.loading).toBe(false);
   });
 
   it("rejects responses from a different app even when the clear checkpoint matches", async () => {
