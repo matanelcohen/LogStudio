@@ -61,6 +61,7 @@ It can be resized or maximized (minimum 640 x 400, reduced for smaller displays)
 At widths of 900 CSS pixels or less, or heights of 500 CSS pixels or less, secondary header
 controls move into **Session actions** (Import, Ask Copilot, storage, appearance, and Settings).
 **Pause/Resume**, capture/connection state, and the selected-session switcher remain visible.
+In listen-all mode, **Running app** stays visible and **Capture details** holds its guidance.
 **Query actions** contains saved searches, search help, and the unchanged Export formats.
 **Filters** discloses the filter editors; active filter summaries and condition chips stay visible.
 Search and the results come before optional panels: Fields appears beside results on the right

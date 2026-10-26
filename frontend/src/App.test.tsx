@@ -819,15 +819,44 @@ describe("log-first workspace", () => {
       expect(screen.getByLabelText("Active filters").textContent).toContain("Stream: stdout");
     });
 
+    it("discloses capture guidance without hiding the running-app selector", async () => {
+      compactViewport();
+      vi.mocked(useLiveStatus).mockReturnValueOnce({
+        status: { ...Status, listenAll: true }, connection: "live", error: null, gap: null, reconnect, applyStatus: vi.fn()
+      });
+      vi.spyOn(api, "fetchApplications").mockResolvedValue({ applications: [], selected: null, error: null });
+      render(<App />);
+      expect(screen.getByRole("combobox", { name: "Running app" })).toBeDefined();
+      expect(screen.queryByText(/Apps are grouped by launch/)).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Capture details" }));
+      expect(screen.getByText(/Apps are grouped by launch/)).toBeDefined();
+      await act(async () => undefined);
+    });
+
+    it("focuses the existing chat when it is reopened from a compact disclosure", async () => {
+      compactViewport();
+      vi.spyOn(api, "connectCopilot").mockResolvedValue({ version: "test CLI", models: [] });
+      render(<App />);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        fireEvent.click(screen.getByRole("button", { name: "Session actions" }));
+        const opener = screen.getByRole("button", { name: "Ask Copilot" });
+        opener.focus();
+        fireEvent.click(opener);
+        await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Message Copilot")));
+      }
+    });
+
     it.each([
-      [false, false], [true, false], [false, true], [true, true]
-    ])("preserves selection and panel state across compact/wide transitions (fields=%s, chat=%s)", async (fields, chat) => {
+      [false, false, false], [true, false, false], [false, true, false], [true, true, false],
+      [false, false, true], [true, false, true], [false, true, true], [true, true, true]
+    ])("preserves selection and panel state across compact/wide transitions (fields=%s, chat=%s, inspector=%s)", async (fields, chat, inspecting) => {
       const resize = compactViewport();
       vi.spyOn(api, "connectCopilot").mockResolvedValue({ version: "test CLI", models: [] });
       render(<App />);
       const row = screen.getByRole("row", { name: /Hello/ });
       fireEvent.keyDown(row, { key: "Enter" });
-      const inspector = screen.getByRole("complementary", { name: "Entry inspector" });
+      if (!inspecting) fireEvent.click(screen.getByRole("button", { name: "Toggle inspector" }));
+      const inspector = screen.queryByRole("complementary", { name: "Entry inspector" });
       if (fields) fireEvent.click(screen.getByRole("button", { name: "Available fields" }));
       const fieldPanel = screen.queryByRole("complementary", { name: "Discover fields" });
       if (fieldPanel) fireEvent.change(screen.getByLabelText("Find a field"), { target: { value: "message" } });
@@ -841,7 +870,7 @@ describe("log-first workspace", () => {
         resize(compact);
         expect(screen.getByRole("row", { name: /Hello/ })).toBe(row);
         expect(row.getAttribute("aria-selected")).toBe("true");
-        expect(screen.getByRole("complementary", { name: "Entry inspector" })).toBe(inspector);
+        expect(screen.queryByRole("complementary", { name: "Entry inspector" })).toBe(inspector);
         expect(screen.queryByRole("complementary", { name: "Discover fields" })).toBe(fieldPanel);
         expect(screen.queryByRole("complementary", { name: "Ask Copilot about logs" })).toBe(chatPanel);
         if (fields) expect((screen.getByLabelText("Find a field") as HTMLInputElement).value).toBe("message");
@@ -850,7 +879,7 @@ describe("log-first workspace", () => {
       const layout = document.querySelector(".workspace-layout")!;
       expect(layout.firstElementChild?.classList.contains("log-panel")).toBe(true);
       if (chatPanel) expect(chatPanel.previousElementSibling?.classList.contains("workspace")).toBe(true);
-      await waitFor(() => expect(savedPreferences.explorer.inspector).toBe(true));
+      await waitFor(() => expect(savedPreferences.explorer.inspector).toBe(inspecting));
       expect(savedPreferences.explorer.fields).toBe(fields);
     });
   });

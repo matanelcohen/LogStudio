@@ -930,7 +930,7 @@ mark { background: var(--cp-highlight); color: var(--cp-text); border-radius: 2p
 }
 @media (max-width: 900px), (max-height: 500px) {
   .app-header { padding: 6px 10px; gap: 6px; min-height: 44px; }
-  .brand { flex: 1 1 220px; width: auto; }
+  .brand { flex: 1 1 100%; width: 100%; }
   .brand h1, .breadcrumb-separator, .workspace-heading { display: none; }
   .session-switcher { flex: 1; max-width: 100%; }
   .header-actions { width: auto; }
@@ -944,7 +944,7 @@ mark { background: var(--cp-highlight); color: var(--cp-text); border-radius: 2p
   .action-disclosure .filter-row { align-items: stretch; }
   .action-disclosure .filter-row > .select-trigger { flex: 1 1 140px; max-width: 100%; }
   .action-disclosure .filter-row .field-label, .action-disclosure .filter-separator { display: none; }
-  .workspace-region { flex-direction: column; flex-wrap: nowrap; overflow: visible; }
+  .workspace-region { flex-direction: column; flex-wrap: nowrap; }
   .workspace-region > .workspace { flex: 1 0 360px; height: auto; }
   .workspace-region > .copilot-panel { flex: 0 0 400px; height: 400px; }
   .app-footer { min-height: 28px; padding-block: 4px; }

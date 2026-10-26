@@ -192,6 +192,12 @@ export default function App() {
     if (opener?.isConnected) opener.focus();
     else sessionActionsOpener.current?.focus();
   }
+  function openCopilot() {
+    setChatOpen(true);
+    const panel = document.querySelector(".copilot-panel");
+    (panel?.querySelector<HTMLElement>("textarea:not(:disabled)") ??
+      panel?.querySelector<HTMLElement>("button:not(:disabled)"))?.focus();
+  }
 
   return (
     <Oui.TooltipProvider delayDuration={400}>
@@ -228,7 +234,7 @@ export default function App() {
               data-disclosure-close onClick={() => setSettingsOpen(true)}>{updates.state?.installedVersion ? "Restart required" : updates.error ? "Update check failed" : "Update available"}</Oui.Button>}
             <Oui.Button variant="ghost" size="sm" id="importLogs" ref={importOpener} className="ghost-button" data-disclosure-close onClick={() => setImportOpen(true)}><FileUp size={14} /> Import</Oui.Button>
             <Oui.Button variant="ghost" size="sm" ref={chatOpener} className="ghost-button" aria-pressed={chatOpen} disabled={!status} data-disclosure-close
-              onClick={() => setChatOpen(true)}><MessageSquare size={14} /> Ask Copilot</Oui.Button>
+              onClick={openCopilot}><MessageSquare size={14} /> Ask Copilot</Oui.Button>
             <Oui.Popover>
               <Oui.PopoverTrigger asChild><Oui.Button variant="ghost" size="icon" id="storageInfo" className="icon-button ghost-button" aria-label="Storage details"><HardDrive size={15} /></Oui.Button></Oui.PopoverTrigger>
               <Oui.PopoverContent className="popover storage-popover" sideOffset={8} align="end">
@@ -442,7 +448,7 @@ function RunningApplicationPicker({ onAttached, onListening }: { onAttached(): v
     <div className="application-picker-controls">
       <label htmlFor="runningApplication">Running app</label>
       <Oui.Select value={selected ? identity(selected) : ""} disabled={busy || !state} onValueChange={value => void choose(value)}>
-        <Oui.SelectTrigger id="runningApplication" className="select-trigger" aria-label="Running app" aria-describedby="applicationCaptureHelp">
+        <Oui.SelectTrigger id="runningApplication" className="select-trigger" aria-label="Running app" aria-describedby="applicationCaptureStatus">
           <Oui.SelectValue placeholder={state && applications.length === 0 ? "No running .NET apps found" : "Choose a running app"}>{selected ? applicationLabel(selected) : undefined}</Oui.SelectValue>
 
         </Oui.SelectTrigger>
@@ -460,7 +466,7 @@ function RunningApplicationPicker({ onAttached, onListening }: { onAttached(): v
 
       </Oui.Select>
       {selected && (selectionError || state?.error) && <Oui.Button variant="outline" size="sm" disabled={busy} onClick={() => void choose(identity(selected))}>Retry app</Oui.Button>}
-      <span role="status">{busy ? "Connecting to application…" : selected?.groupId && processes(selected).length === 0 ?
+      <span id="applicationCaptureStatus" role="status">{busy ? "Connecting to application…" : selected?.groupId && processes(selected).length === 0 ?
         `Connecting to ${selected.name}…` : selected ?
         `Listening to ${selected.name}${selected.groupId ? ` · ${processes(selected).length} ${processes(selected).length === 1 ? "process" : "processes"}` : ""}` :
         "Waiting for you to choose an app."}</span>
@@ -471,7 +477,9 @@ function RunningApplicationPicker({ onAttached, onListening }: { onAttached(): v
         <strong>PID {process.processId}</strong> · {process.name}<span>{process.path ?? "Path unavailable"}</span>
       </li>)}</ul>
     </details>}
-    <p id="applicationCaptureHelp" className="muted">Apps are grouped by launch or entrypoint path. Selecting an app captures its processes together and follows new members while the group is running. Merged logs include the PID. Captures new .NET ILogger events only, not existing console output. Each app keeps its own history; switching back restores its captured logs. Only the selected app is captured.</p>
+    <ResponsiveActions label="Capture details" className="application-capture-help">
+      <p id="applicationCaptureHelp" className="muted">Apps are grouped by launch or entrypoint path. Selecting an app captures its processes together and follows new members while the group is running. Merged logs include the PID. Captures new .NET ILogger events only, not existing console output. Each app keeps its own history; switching back restores its captured logs. Only the selected app is captured.</p>
+    </ResponsiveActions>
     {(selectionError || error || state?.error) && <Oui.Alert variant="destructive" className="notice danger" role="alert">{selectionError ?? error ?? state?.error}</Oui.Alert>}
   </section>;
 }
