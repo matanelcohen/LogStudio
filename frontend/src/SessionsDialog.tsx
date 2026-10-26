@@ -1,10 +1,11 @@
 import * as Oui from "@opensearch-project/oui";
 
-import { Calendar, Download, FileUp, FolderOpen, History, Pencil, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { Calendar, Download, FileUp, FolderOpen, GitCompareArrows, History, Pencil, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { deleteSession, fetchSessions, renameSession } from "./api";
 import { buildSessionExportUrl, errorMessage, MaximumSessionNameLength, NumberFormatter, type SessionInfo } from "./model";
 import { SessionImportDialog } from "./SessionImportDialog";
+import { SessionComparison } from "./SessionComparison";
 
 const SessionDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
@@ -22,13 +23,15 @@ export function SessionsDialog({ open, selected, onClose, onSelect, onRenamed, o
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [comparisonOpen, setComparisonOpen] = useState(false);
   const [revision, setRevision] = useState(0);
   const [action, setAction] = useState<{ kind: "rename" | "delete"; session: SessionInfo } | null>(null);
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const importButton = useRef<HTMLButtonElement>(null);
+  const comparisonButton = useRef<HTMLButtonElement>(null);
   const actionButton = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => { if (!open) setAction(null); }, [open]);
+  useEffect(() => { if (!open) { setAction(null); setComparisonOpen(false); } }, [open]);
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
@@ -71,6 +74,7 @@ export function SessionsDialog({ open, selected, onClose, onSelect, onRenamed, o
         <div className="sessions-content">
           <div className="sessions-toolbar"><div className="search-box"><Search size={15} /><Oui.Input aria-label="Find sessions" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Name, date, command or parameter…" /></div>
             <Oui.Button variant="default" size="sm" id="importSession" ref={importButton} className="primary" disabled={busy} onClick={() => setImportOpen(true)}><FileUp size={14} />Import</Oui.Button>
+            <Oui.Button variant="outline" size="sm" ref={comparisonButton} disabled={busy || loading} onClick={() => setComparisonOpen(true)}><GitCompareArrows size={14} />Compare saved runs</Oui.Button>
             <Oui.Button variant="ghost" size="icon" className="icon-button" aria-label="Refresh sessions" onClick={() => setRevision(value => value + 1)}><RefreshCw size={15} /></Oui.Button></div>
           <div className="sessions-overview"><span>{sessions.length} {sessions.length === 1 ? "session" : "sessions"}</span><span>{NumberFormatter.format(sessions.reduce((count, session) => count + session.entryCount, 0))} retained entries</span><span>Private local storage</span></div>
           {loading && <p className="muted">Loading saved sessions…</p>}
@@ -119,5 +123,6 @@ export function SessionsDialog({ open, selected, onClose, onSelect, onRenamed, o
     </Oui.Dialog>
     <SessionImportDialog open={importOpen} onClose={() => setImportOpen(false)} returnFocus={() => importButton.current?.focus()}
       onImported={session => { setImportOpen(false); setRevision(value => value + 1); onSelect(session); }} />
+    {open && comparisonOpen && <SessionComparison sessions={sessions} onClose={() => setComparisonOpen(false)} returnFocus={() => comparisonButton.current?.focus()} />}
   </>;
 }
