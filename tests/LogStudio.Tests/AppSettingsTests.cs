@@ -72,12 +72,15 @@ public sealed class AppSettingsTests : IDisposable
     {
         this.Save("""{"appearance":"monokai","explorer":{"pageSize":500}}""");
         Assert.False(this.Store.Read().Preferences!.OnboardingDismissed);
+        SavedGraph graph = new(new("Errors", "time", "errors", "line"), SessionFiltersTests.Filters());
+        this.Save(JsonSerializer.Serialize(new { savedGraphs = new[] { graph } }, ViewerConstants.JsonOptions));
         this.Save("""{"onboardingDismissed":true}""");
         this.Save("""{"typography":{"uiFontSize":18}}""");
         AppPreferences saved = this.Store.Read().Preferences!;
         Assert.True(saved.OnboardingDismissed);
         Assert.Equal("monokai", saved.Appearance);
         Assert.Equal(500, saved.Explorer.PageSize);
+        Assert.Equal(graph.Graph, Assert.Single(saved.SavedGraphs).Graph);
     }
 
     [Fact]

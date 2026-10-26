@@ -3,10 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { LogEmptyState } from "./GettingStarted";
 import * as api from "./api";
+import * as analyticsApi from "./analytics-api";
 import { defaultQuery, sessionFilters, type LogPage, type SessionInfo } from "./model";
 import { DefaultPreferences, mergePreferences } from "./preferences";
 import { sampleLogsFile, SampleSessionName } from "./sampleLogs";
-import { Entry, fixturePage, Status } from "./test-fixtures";
+import { Entry, fixtureAnalytics, fixturePage, Status } from "./test-fixtures";
 import { useLiveStatus, useLogPage } from "./useLogExplorer";
 
 vi.mock("./useLogExplorer", () => ({ useLiveStatus: vi.fn(), useLogPage: vi.fn() }));
@@ -101,6 +102,45 @@ describe("first useful log", () => {
     await screen.findByRole("dialog", { name: "Import a session" });
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     await waitFor(() => expect(document.activeElement).toBe(help));
+    expect(api.selectApplication).not.toHaveBeenCalled();
+  });
+
+  it("returns onboarding actions to the compact session menu after their opener disappears", async () => {
+    const matchMedia = window.matchMedia;
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      ...matchMedia(query), matches: query === "(max-width: 900px), (max-height: 500px)"
+    }));
+    render(<App />);
+    const menu = screen.getByRole("button", { name: "Session actions" });
+    for (const [action, title] of [["Help", "Getting started"], ["Import", "Import a session"]]) {
+      fireEvent.click(menu);
+      const opener = screen.getByRole("button", { name: action });
+      opener.focus();
+      fireEvent.click(opener);
+      await screen.findByRole("dialog", { name: title });
+      expect(opener.isConnected).toBe(false);
+      fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+      await waitFor(() => expect(document.activeElement).toBe(menu));
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss getting started" }));
+    expect(document.activeElement).toBe(menu);
+  });
+
+  it.each(["Trends", "Graphs"])("opens the demo in Discover when requested from %s", async view => {
+    vi.spyOn(analyticsApi, "fetchAnalytics").mockResolvedValue(fixtureAnalytics());
+    vi.spyOn(api, "importSessionFile").mockResolvedValue(sampleSession);
+    vi.mocked(useLogPage).mockImplementation(query => ({
+      page: query.sessionId ? fixturePage() : emptyPage, loading: false, error: null, refresh
+    }));
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: view }));
+    expect(screen.getByRole("main", { name: `${view} workspace` })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Help" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Getting started" })).getByRole("button", { name: "Try sample logs" }));
+    await screen.findByRole("row", { name: /Hello/ });
+    expect(screen.getByRole("button", { name: "Discover logs" }).getAttribute("aria-current")).toBe("page");
+    expect(vi.mocked(useLogPage).mock.lastCall?.[0].sessionId).toBe(sampleSession.id);
+    expect(document.activeElement).toBe(screen.getByLabelText("Search logs"));
     expect(api.selectApplication).not.toHaveBeenCalled();
   });
 

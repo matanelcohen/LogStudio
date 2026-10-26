@@ -2,12 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 import { appSettings } from "./api";
 import { DefaultPreferences, readPreferences } from "./preferences";
 import { defaultQuery, sessionFilters } from "./model";
+import { DefaultGraph } from "./analytics-model";
 
 describe("preferences API", () => {
   it("defaults legacy onboarding settings and validates persisted dismissal", () => {
     const { onboardingDismissed: _, ...legacy } = DefaultPreferences;
     expect(readPreferences(legacy).onboardingDismissed).toBe(false);
     expect(readPreferences({ ...legacy, onboardingDismissed: true }).onboardingDismissed).toBe(true);
+    const savedGraphs = [{ graph: DefaultGraph, filters: sessionFilters(defaultQuery()) }];
+    const restored = readPreferences({ ...legacy, onboardingDismissed: true, savedGraphs });
+    expect(restored.onboardingDismissed).toBe(true);
+    expect(restored.savedGraphs).toEqual(savedGraphs);
     expect(() => readPreferences({ ...legacy, onboardingDismissed: "true" })).toThrow("invalid app settings");
   });
   it("reads reusable saved searches and migrates preferences without presets", () => {
