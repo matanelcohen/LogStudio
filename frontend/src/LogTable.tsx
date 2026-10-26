@@ -37,10 +37,11 @@ export function Highlight({ message, terms, matchCase }: { message: string; term
   return <>{fragments}</>;
 }
 
-export function LogTable({ page, loading, error, selected, matchCase, follow, wrap, pageSize, typography, preferences, onPreferences, fields, inspector, onFields, onSeverity, onPageSize, onClearSession, clearing, clearButtonRef, onSelect, onOlder, onNewer, onLive, onFollow, onWrap, onClear, onRetry, onInspector }: {
+export function LogTable({ page, loading, error, emptyState, selected, matchCase, follow, wrap, pageSize, typography, preferences, onPreferences, fields, inspector, onFields, onSeverity, onPageSize, onClearSession, clearing, clearButtonRef, onSelect, onOlder, onNewer, onLive, onFollow, onWrap, onClear, onRetry, onInspector }: {
   page: LogPage | null;
   loading: boolean;
   error: string | null;
+  emptyState?: ReactNode;
   selected: LogEntry | null;
   matchCase: boolean;
   follow: boolean;
@@ -242,9 +243,11 @@ export function LogTable({ page, loading, error, selected, matchCase, follow, wr
         </DndContext>
         {entries.length === 0 && <div id="emptyState" className="empty-state">
           <Search size={28} />
+          {!error && !loading && emptyState ? emptyState : <>
           <h3>{error ? "Couldn’t load history" : loading ? "Searching disk history…" : page?.status.retainedCount ? "No matching entries" : "Waiting for output"}</h3>
           <p>{error ?? (loading ? "Only the current page is loaded into memory." : "Change your query or conditions. Reset restores entries hidden by Clear view.")}</p>
           {error && <Oui.Button variant="outline" size="sm" onClick={onRetry}>Retry request</Oui.Button>}
+          </>}
         </div>}
       </div>
       <div className="panel-footer">

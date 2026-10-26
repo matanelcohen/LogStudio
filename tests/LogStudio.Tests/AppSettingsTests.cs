@@ -68,6 +68,19 @@ public sealed class AppSettingsTests : IDisposable
     }
 
     [Fact]
+    public void OnboardingDismissalDefaultsOffAndPersistsWithoutChangingOtherPreferences()
+    {
+        this.Save("""{"appearance":"monokai","explorer":{"pageSize":500}}""");
+        Assert.False(this.Store.Read().Preferences!.OnboardingDismissed);
+        this.Save("""{"onboardingDismissed":true}""");
+        this.Save("""{"typography":{"uiFontSize":18}}""");
+        AppPreferences saved = this.Store.Read().Preferences!;
+        Assert.True(saved.OnboardingDismissed);
+        Assert.Equal("monokai", saved.Appearance);
+        Assert.Equal(500, saved.Explorer.PageSize);
+    }
+
+    [Fact]
     public void NamedSearchesPersistAcrossRestartsAndPreserveOtherPreferences()
     {
         SessionFilters filters = SessionFiltersTests.Filters() with { TimeWindow = 0, Until = "2026-10-11T18:00:00Z" };
@@ -115,6 +128,8 @@ public sealed class AppSettingsTests : IDisposable
     [InlineData("{}")]
     [InlineData("null")]
     [InlineData("""{"appearance":"invalid"}""")]
+    [InlineData("""{"onboardingDismissed":"true"}""")]
+    [InlineData("""{"onboardingDismissed":null}""")]
     [InlineData("""{"appearance":"light","appearance":"dark"}""")]
     [InlineData("""{"typography":null}""")]
     [InlineData("""{"typography":{"logFontSize":25}}""")]

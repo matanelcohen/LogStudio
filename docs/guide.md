@@ -75,7 +75,7 @@ Fonts use installed local fallbacks and do not require downloads.
 
 ### Settings persistence
 
-Theme, UI and log fonts, sizes and line spacing, page size, line wrapping, optional panels,
+Getting-started dismissal, theme, UI and log fonts, sizes and line spacing, page size, line wrapping, optional panels,
 column visibility, widths and order, and named saved searches autosave to the app's per-user `LogStudio/settings.json`
 file. Browser and desktop viewers on the same device and OS user share these preferences,
 independently of the localhost port or browser storage. New viewers load the latest saved
@@ -106,6 +106,50 @@ blur and use opaque, stronger-bordered surfaces. Reduced-motion disables control
 Browsers without backdrop-filter support use opaque surfaces.
 
 ## Quick start
+
+### Your first useful log
+
+With no app selected and no retained logs, the desktop shows getting-started guidance inside
+the log results area, not a separate dashboard:
+
+- **Choose running app** focuses **Running app**; explicitly select your target to attach.
+  Attachment captures **new `ILogger` events**, requires the .NET logging EventSource provider
+  (`Microsoft-Extensions-Logging`) and enabled diagnostics, and **cannot recover historical
+  stdout/stderr**. Nothing attaches automatically.
+- **Import a session** opens an existing Log Studio bundle or JSONL history as a separate saved
+  session. It does not run the original command.
+- **Try sample logs** imports six bundled synthetic records into **Demo — synthetic logs**.
+  Every message is labeled `[DEMO]`; there is no real customer data or remote download.
+  It works offline with the local viewer server, uses normal disk-backed, paged session access,
+  and neither overwrites capture history nor changes the selected capture app.
+  Search for `timeout`, filter by **Warning** or **Error**, then select a row to inspect it.
+  The demo remains in **Sessions** until you explicitly delete it.
+
+For a new command rather than an already-running app, run
+`logstudio --open -- <command>` in your terminal. CLI wrapping captures that command's
+stdout/stderr from launch. The UI never starts a command for you. **Running app** is available
+in the desktop or `--listen-all` mode; the browser's wrapped-command mode has its own
+**Waiting for command output** guidance.
+
+**Dismiss getting started** collapses the explanation without clearing logs or filters.
+The choice autosaves to the per-user app settings, including across ports and restarts.
+**Help** in the header reopens the explanation and demo/import actions at any time.
+Buttons, the app picker, and dialogs support keyboard navigation; closing a dialog returns
+focus to its opener, or to log search if the opener disappeared after opening a session.
+
+Empty states suggest different next steps:
+
+| State | Next step |
+| --- | --- |
+| **No apps found** | Start a compatible .NET app yourself, then **Refresh apps**, or import/try the demo. Discovery failures are reported separately. |
+| **Attached, waiting for events** | Trigger new logged activity, check the EventSource provider and log level, **Refresh history**, or **Choose another app**. |
+| **No matching entries** | Adjust the query or **Reset filters**. Reset also restores entries hidden by Clear view, preserving the selected session and page size; it never deletes history. |
+| **No saved sessions yet** | Capture and close Log Studio to save a run, or **Import a session**. The current run remains available separately. |
+| **No matching saved sessions** | **Clear search** to restore the session list. |
+
+For a local first-use check, ask five consenting .NET developers to reach a sample or real log
+and apply a filter without documentation. Aim for at least four to finish within two minutes.
+Use synthetic fixtures or consented sessions; no production analytics or usage tracking is needed.
 
 ### Install the desktop app
 
@@ -773,6 +817,8 @@ The sample is non-packable and is not referenced by either shipping project.
 It is **not included in NuGet packages or compiled release archives**, even when
 the solution is built in Release configuration. There is no demo command in the
 distributed `logstudio` executable.
+This source-only executable is separate from the small, offline **Try sample logs** fixture
+bundled in the shipping viewer.
 
 ### Install globally and run from anywhere
 

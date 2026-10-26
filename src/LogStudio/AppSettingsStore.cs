@@ -59,6 +59,7 @@ internal sealed record AppPreferences
         "monokai", "monokai-dimmed", "quiet-light", "red", "solarized-light", "solarized-dark", "tomorrow-night-blue"
     ];
     public string Appearance { get; init; } = "system";
+    public bool OnboardingDismissed { get; init; }
     public TypographyPreferences Typography { get; init; } = new();
     public ExplorerPreferences Explorer { get; init; } = new();
     public SavedSearch[] SavedSearches { get; init; } = [];
@@ -141,9 +142,9 @@ internal sealed class AppSettingsStore
         HashSet<string> seen = new(StringComparer.Ordinal);
         foreach (JsonProperty property in patch.EnumerateObject())
         {
-            if (property.Name is not ("appearance" or "typography" or "explorer" or "savedSearches") ||
+            if (property.Name is not ("appearance" or "typography" or "explorer" or "savedSearches" or "onboardingDismissed") ||
                 property.Value.ValueKind == JsonValueKind.Null || !seen.Add(property.Name))
-                throw new ArgumentException("Settings must contain appearance, typography, explorer or savedSearches preferences without duplicates.");
+                throw new ArgumentException("Settings must contain appearance, typography, explorer, savedSearches or onboardingDismissed preferences without duplicates.");
         }
         if (seen.Count == 0) throw new ArgumentException("Choose at least one setting to save.");
         return this.Update(current =>
